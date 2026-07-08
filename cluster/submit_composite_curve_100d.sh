@@ -46,13 +46,20 @@ J3=$(submit "$EXP" kronecker_gp_composite 0)
 echo "  morbo=$J1 independent=$J2 kronecker=$J3"
 
 echo "Submitting plot job (runs after all three finish)..."
+# --wrap runs under /bin/sh, not bash -- use '.' (POSIX) instead of 'source'
+# (bash-only builtin, silently failed under sh, confirmed on the cluster).
+# Partition is aimi, not default_partition: the latter spans wildly
+# heterogeneous hardware across every research group on Unicorn, and a
+# prior run landed on a node whose CPU didn't support the instruction set
+# (X86_V2) this env's NumPy wheel was compiled for. aimi's 4 nodes are
+# uniform and already confirmed compatible by the real experiment jobs.
 sbatch --requeue \
   --job-name=plot-composite-curve-100d \
   --dependency=afterok:"$J1":"$J2":"$J3" \
-  --partition=default_partition --account=kilian \
+  --partition=aimi --account=kilian \
   --cpus-per-task=1 --mem=4g --time=00:15:00 \
   --output=cluster/logs/plot-composite-curve-100d_%j.out \
-  --wrap="cd $(pwd); source /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python plot_comparison.py $EXP 0"
+  --wrap="cd $(pwd); . /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python plot_comparison.py $EXP 0"
 
 echo "All jobs submitted. Check with: squeue -u \$USER"
 echo "Note: morbo is cheap to rerun (~14-25 min at this scale) rather than"

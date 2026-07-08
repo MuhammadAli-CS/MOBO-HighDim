@@ -31,19 +31,26 @@ J1=$(submit llm_morbo_vehicle_safety morbo 0)
 J2=$(submit llm_morbo_vehicle_safety llm_morbo 0)
 echo "  morbo=$J1 llm_morbo=$J2"
 
+# --wrap runs under /bin/sh, not bash -- '.' (POSIX) instead of the
+# bash-only 'source' builtin, which silently failed under sh (confirmed on
+# the cluster). Partition is aimi, not default_partition: the latter spans
+# wildly heterogeneous hardware across every research group on Unicorn, and
+# a prior run landed on a node whose CPU didn't support the instruction set
+# (X86_V2) this env's NumPy wheel was compiled for. aimi's 4 nodes are
+# uniform and already confirmed compatible by the real experiment jobs.
 sbatch --requeue \
   --job-name=plot-llm-morbo \
   --dependency=afterok:"$J1":"$J2" \
-  --partition=default_partition --account=kilian \
+  --partition=aimi --account=kilian \
   --cpus-per-task=1 --mem=4g --time=00:15:00 \
   --output=cluster/logs/plot-llm-morbo_%j.out \
-  --wrap="cd $(pwd); source /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python plot_comparison.py llm_morbo_vehicle_safety 0"
+  --wrap="cd $(pwd); . /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python plot_comparison.py llm_morbo_vehicle_safety 0"
 
 echo "NOTE: Part 3 (botier_llm) does not go through run_comparison.py — it's a"
 echo "standalone script (run_botier_comparison.py), not yet wired into this"
 echo "sbatch template. Run it via a one-off job if/when needed:"
-echo "  sbatch --partition=default_partition --account=kilian --cpus-per-task=2 --mem=8g --time=01:00:00 \\"
+echo "  sbatch --partition=aimi --account=kilian --cpus-per-task=2 --mem=8g --time=01:00:00 \\"
 echo "    --export=ANTHROPIC_API_KEY=\$ANTHROPIC_API_KEY \\"
-echo "    --wrap=\"cd \$PWD; source /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \\\$HOME/morbo-env; python run_botier_comparison.py 10 60 0\""
+echo "    --wrap=\"cd \$PWD; . /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \\\$HOME/morbo-env; python run_botier_comparison.py 10 60 0\""
 
 echo "All jobs submitted. Check with: squeue -u \$USER"
