@@ -83,11 +83,17 @@ onboarding email) comes from the `kilian` **account**, not a partition name —
 confirmed via `sacctmgr -p show assoc user=<netid>`, which lists `kilian` as
 your account.
 
-All scripts here therefore use `--partition=gpu --account=kilian` for actual
-BO runs (the GPU-bearing nodes, including the RTX A6000s, live under `gpu`),
-and `--partition=default_partition --account=kilian` for the lightweight
-plot jobs that don't need a GPU. Check current node load with `sinfo` before
-submitting if you want to avoid queueing behind fully-`alloc`'d nodes — GPU
+All scripts here therefore use `--partition=aimi --account=kilian` for actual
+BO runs, and `--partition=default_partition --account=kilian` for the
+lightweight plot jobs that don't need a GPU. `aimi` is the SURP program's
+own partition (`aimi-compute-[01-03]`: 224 CPUs / ~2TB RAM / 8x NVIDIA B200
+per node) — access is gated by the `en-cc-unicorn-aimi-users` group
+(`scontrol show partition aimi`'s `AllowGroups`), confirmed present via `id`,
+with `AllowAccounts=ALL` so the existing `kilian` account works there too.
+This is meaningfully more powerful than the general `gpu` partition (whose
+best nodes top out at RTX A6000), so it's used in preference to `gpu` for
+every job here. Check current node load with `sinfo` before submitting if
+you want to avoid queueing behind fully-`alloc`'d nodes — GPU
 type isn't pinned by default, so jobs land on whatever's free rather than
 waiting for a specific card.
 
