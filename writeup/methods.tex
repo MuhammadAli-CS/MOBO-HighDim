@@ -200,6 +200,42 @@ response into independent surrogates.
 \end{algorithmic}
 \end{algorithm}
 
+\subsection{Results at $d=100$}
+
+We reproduce the paper's Figure 2 setting (DTLZ2, $d=100$, $M=2$, 600 evals
+-- 200 shared Sobol init + 400 BO evals, batch size 50, 3 trust regions,
+seed 0) and compare standard MORBO, composite MORBO (the $(g,\cos,\sin)$
+construction above), and the naive scalarized-TuRBO baseline the paper uses
+as its own strawman (\texttt{hypervolume=False},
+\texttt{track\_history=False}, \texttt{restart\_hv\_scalarizations=False} --
+independent random Chebyshev-scalarized trust regions, no data sharing, no
+coordinated restarts).
+
+\begin{table}[h]
+\centering
+\caption{Composite MORBO results: DTLZ2, $d=100$, 600 evals, batch 50, 3 trust regions, seed 0.}
+\label{tab:composite-fig2-results}
+\begin{tabular}{lcc}
+\toprule
+Method & Final hypervolume & Pareto set size \\
+\midrule
+Standard MORBO & 20.02 & 6 \\
+Composite MORBO & \textbf{25.02} & 14 \\
+TuRBO + Chebyshev scalarization & 16.92 & 4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Composite modeling beats direct modeling by \textbf{+24.9\% final
+hypervolume} at this scale -- both comfortably ahead of the naive scalarized
+baseline, matching the paper's own qualitative Figure 2 claim (MORBO beats
+naive scalarized TuRBO; the paper reports no HV numbers for that panel to
+compare directly). This is a substantially larger margin than the
+$\sim$0.3\% seen at $d=20$ with the genuinely-correlated curve construction
+in Section~\ref{sec:kronecker-ablation} -- see that section's discussion for
+the dimensionality hypothesis this discrepancy motivates, and
+Section~\ref{sec:curve-100d} for a direct test of it.
+
 \section{LLM-Assisted MORBO}
 \label{sec:llm-morbo}
 
@@ -475,12 +511,22 @@ Kronecker-GP composite & 34.271 & 5 & 2255.4s \\
 \end{tabular}
 \end{table}
 
-All three land within 0.3\% hypervolume of each other. Composite modeling
-(either variant) edges out direct modeling by a small margin, consistent
-with the near-identical result in Section~\ref{sec:composite}. Critically,
-the Kronecker-GP variant does \emph{not} beat the independent-GP variant --
-if anything it finishes marginally behind (34.271 vs.\ 34.307) -- despite
-the raw curve response being genuinely correlated by construction. The
+All three land within 0.3\% hypervolume of each other -- composite modeling
+(either variant) edges out direct modeling only marginally here, in sharp
+contrast to Section~\ref{sec:composite}'s $d=100$ result, where composite
+modeling won by +24.9\% HV on the same DTLZ2 problem family. This is a
+genuine discrepancy, not a restatement of the same finding: it is not yet
+established here whether the gap is driven by dimensionality ($d=20$ vs.\
+$d=100$), the specific raw-response construction ($(g,\cos,\sin)$ vs.\ an
+8-point curve), the eval budget (200 vs.\ 600), or some combination --
+Section~\ref{sec:curve-100d} tests the dimensionality hypothesis directly by
+rerunning this same curve construction at $d=100$.
+
+Independent of that open question, the comparison \emph{within} this table
+is a clean, controlled answer to what it was designed to test: the
+Kronecker-GP variant does \emph{not} beat the independent-GP variant -- if
+anything it finishes marginally behind (34.271 vs.\ 34.307) -- despite the
+raw curve response being genuinely correlated by construction. The
 Kronecker fit is also \textbf{roughly 100$\times$ more expensive}
 (2255.4s vs.\ 22.7s total fit time across the run), the direct empirical
 explanation for why this configuration was the single most resource-intensive
@@ -494,30 +540,125 @@ this smaller-scale, differently-structured setting (their result is on a
 177-dimensional image-structured raw response with an HOGP, not a
 Kronecker multi-task GP on an 8-point curve).
 
+\section{Does Dimensionality Explain the Gap? The Curve Construction at $d=100$}
+\label{sec:curve-100d}
+
+Section~\ref{sec:composite}'s $(g,\cos,\sin)$ composite won by +24.9\% HV at
+$d=100$; Section~\ref{sec:kronecker-ablation}'s genuinely-correlated curve
+composite won by only $\sim$0.3\% at $d=20$. Both are DTLZ2 -- the same
+$f_1=(1+g)\cos(\tfrac{\pi}{2}x_1)$, $f_2=(1+g)\sin(\tfrac{\pi}{2}x_1)$
+family -- so the discrepancy is attributable to some combination of
+dimensionality, the specific raw-response construction, and eval budget,
+confounded together across the two experiments as run. Direct modeling has
+to fit a single GP per objective capturing $g$'s dependence on $d-1$ input
+dimensions entangled multiplicatively with a periodic term; that entangling
+task plausibly gets harder as $d$ grows, while a composite decomposition's
+individual pieces ($g$ alone, or each curve point) stay comparably easy
+regardless of $d$ -- if so, composite modeling's advantage over direct
+modeling should widen with $d$ independent of which specific raw-response
+construction is used.
+
+\subsection{Isolating dimensionality}
+
+We rerun Section~\ref{sec:kronecker-ablation}'s exact curve construction
+($K=8$ points of $h(\theta;x)$) at Section~\ref{sec:composite}'s scale:
+$d=100$, 600 evals (200 shared Sobol init + 400 BO evals), batch size 50, 3
+trust regions, seed 0 -- identical to the $(g,\cos,\sin)$ fig2 setting in
+every hyperparameter except which raw response the composite variants
+model. All three configurations from Section~\ref{sec:kronecker-ablation}
+(standard MORBO, independent-GP composite, Kronecker-GP composite) are
+re-run at this scale. If independent-GP composite shows a fig2-sized margin
+over standard MORBO here, that supports dimensionality as the primary
+driver over the specific composite construction; if it remains close to
+the $d=20$ result despite matching $d=100$, the raw-response construction
+or eval budget is implicated instead. The Kronecker variant is included to
+additionally check whether its cost/benefit profile (Section~\ref{sec:kronecker-ablation}:
+$\sim$100$\times$ the fit cost of independent GPs, no accuracy advantage at
+$d=20$) changes at this larger scale, where each trust region accumulates
+more local data before every refit.
+
+\begin{table}[h]
+\centering
+\caption{Curve-construction results at $d=100$: DTLZ2-curve, $K=8$ curve points, 600 evals, batch 50, 3 trust regions, seed 0.}
+\label{tab:curve-100d-results}
+\begin{tabular}{lccc}
+\toprule
+Method & Final hypervolume & Pareto set size & Total fit time \\
+\midrule
+Standard MORBO & TBD & TBD & TBD \\
+Independent-GP composite & TBD & TBD & TBD \\
+Kronecker-GP composite & TBD & TBD & TBD \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Run in progress at time of writing.} Unlike
+Section~\ref{sec:kronecker-ablation}'s laptop run, this one executes on
+Cornell's Unicorn SLURM cluster (\texttt{aimi} partition, NVIDIA B200 GPUs)
+rather than CPU-only, since the Kronecker-GP variant's fit cost was already
+the single most resource-intensive configuration in this work at the
+smaller $d=20$ scale and was expected to be substantially more expensive
+still at $5\times$ the input dimension and $3\times$ the eval budget.
+
 \section{Composite MORBO on a Real Simulator: Penicillin Fermentation}
 \label{sec:penicillin}
 
-Both composite structures above are synthetic decompositions of a known
-analytic formula. We additionally construct a composite structure from a
-genuine black-box simulator: the Penicillin fed-batch fermentation model
-\citep{liang2021penicillin}, a $d=7$, $M=3$ (yield, CO2, time) problem
-whose objectives are the endpoint of a $\sim$2500-step Euler integration of
-5 coupled state variables (penicillin concentration, culture volume,
-biomass concentration, glucose concentration, accumulated CO2). The
-public implementation returns only the integration's final state; we fork
-the integrator to additionally checkpoint all 5 state variables at $K$
-fixed absolute step indices, giving a $5K+1$-dimensional raw response (the
-$+1$ is the stopping time, needed for the \emph{time} objective but not
-itself one of the 5 checkpointed variables). Once a trajectory's stopping
-criterion is met (culture volume exceeds a maximum, glucose is exhausted, or
-the process rate flattens), its state variables simply stop updating for the
-remainder of the integration -- so a checkpoint at any step index is exactly
-the state at $\min(\text{step}, \text{stopping time})$, and the final
-checkpoint (step 2500) is guaranteed to equal the true final state
-regardless of when a given design actually stopped. This makes the
-reduction exact: taking the last checkpoint's penicillin and CO2 values,
-plus the separately tracked stopping time, reproduces the public
-implementation's own output bit-for-bit (verified numerically). We use
+Both composite structures above (Sections~\ref{sec:composite}
+and~\ref{sec:kronecker-ablation}) are synthetic decompositions or
+reparametrizations of a known closed-form analytic formula -- DTLZ2's raw
+response is engineered specifically to be composite, not discovered inside
+a black box. We additionally construct a composite structure from a
+genuine black-box simulator, where the raw intermediate quantities are real
+physical simulation state rather than an algebraic rewriting: the
+Penicillin fed-batch fermentation model \citep{liang2021penicillin}, a
+$d=7$, $M=3$ (yield, CO2, time) problem whose 3 published objectives are
+the \emph{endpoint} of a $\sim$2500-step Euler integration of 5 coupled
+state variables -- penicillin concentration $P$, culture volume $V$,
+biomass concentration $X$, glucose concentration $S$, and accumulated CO2.
+The public implementation exposes only
+\begin{equation}
+  f(x) = \big(-P(x, t_{\mathrm{stop}}),\; \mathrm{CO2}(x, t_{\mathrm{stop}}),\; t_{\mathrm{stop}}(x)\big),
+\end{equation}
+discarding the full trajectory that produced it.
+
+\subsection{Checkpointing the trajectory}
+
+Let $s(x, t) = \big(P(x,t), V(x,t), X(x,t), S(x,t), \mathrm{CO2}(x,t)\big) \in \mathbb{R}^5$
+denote the simulator's state at integration step $t \in \{1, \dots, 2500\}$
+for design $x$, and let $t_{\mathrm{stop}}(x) \le 2500$ be the step at which
+$x$'s trajectory meets its stopping criterion (culture volume exceeds a
+maximum, glucose is exhausted, or the production rate flattens). We fork
+the integrator to additionally record $s(x, t)$ at $K$ fixed absolute step
+indices $t_1 < \dots < t_K = 2500$, giving the raw response
+\begin{equation}
+  Y_{\mathrm{raw}}(x) = \big(s(x, t_1), \dots, s(x, t_K),\; t_{\mathrm{stop}}(x)\big) \in \mathbb{R}^{5K+1},
+\end{equation}
+the $+1$ term being the stopping time itself, needed for the \emph{time}
+objective but not one of the 5 checkpointed state variables at any single
+step.
+
+\subsection{Why the reduction is exact}
+
+The public simulator's own update rule freezes a trajectory's state once it
+becomes inactive: for $t > t_{\mathrm{stop}}(x)$, $s(x,t) = s(x, t_{\mathrm{stop}}(x))$
+by construction, so a checkpoint taken at any step is
+\begin{equation}
+  s(x, t_k) = s\big(x,\, \min(t_k, t_{\mathrm{stop}}(x))\big) \quad \text{for every } k,
+\end{equation}
+a well-defined and correct value whether or not $x$ was still active at
+step $t_k$. Since $t_K = 2500$ is chosen to exceed every design's possible
+stopping time, $s(x, t_K)$ is \emph{guaranteed} to equal the true final
+state $s(x, t_{\mathrm{stop}}(x))$ regardless of when $x$ actually stopped.
+The reduction $L: \mathbb{R}^{5K+1} \to \mathbb{R}^3$ is therefore simply
+\begin{equation}
+  L(Y_{\mathrm{raw}}) = \big(-P_K,\; \mathrm{CO2}_K,\; t_{\mathrm{stop}}\big),
+\end{equation}
+reading the penicillin and CO2 coordinates off the \emph{last} checkpoint
+$s(x, t_K)$ and the separately tracked stopping time -- which reproduces
+the public implementation's own output bit-for-bit
+($\max$ absolute difference $=0$, verified numerically across the full
+input domain), exactly as Sections~\ref{sec:composite}
+and~\ref{sec:kronecker-ablation}'s reductions reproduce plain DTLZ2. We use
 $K=5$ checkpoints (26-dimensional raw response) for tractability.
 
 \begin{table}[h]
