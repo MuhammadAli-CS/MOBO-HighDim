@@ -13,6 +13,7 @@ requirements = [
     "scipy",
     "jupyter",
     "matplotlib",
+    "anthropic",
 ]
 
 dev_requires = [

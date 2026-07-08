@@ -17,6 +17,7 @@ from botorch.acquisition.multi_objective.monte_carlo import (
 from botorch.models.deterministic import GenericDeterministicModel
 from botorch.models.model_list_gp_regression import ModelListGP
 from botorch.sampling import IIDNormalSampler, SobolQMCNormalSampler
+from botorch.sampling.deterministic import DeterministicSampler
 from botorch.utils.gp_sampling import get_gp_samples
 from botorch.utils.multi_objective.pareto import is_non_dominated
 from botorch.utils.multi_objective.box_decompositions.box_decomposition import (
@@ -28,6 +29,7 @@ from botorch.utils.multi_objective.box_decompositions.non_dominated import (
 )
 from botorch.utils.sampling import sample_simplex
 from botorch.utils.transforms import normalize, unnormalize
+from morbo.llm_candidates import propose_candidates
 from morbo.state import TRBOState
 from morbo.utils import (
     decay_function,
@@ -124,6 +126,58 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
     tr_indices_selected = torch.zeros(
         batch_size, device=tkwargs["device"], dtype=torch.long
     )
+
+    # LLM-proposed candidates: computed once per TR per call to this function
+    # (i.e. once per BO iteration, not once per batch slot), then reused as
+    # part of every batch slot's candidate pool for that TR below -- scored
+    # by the exact same HVI/scalarization logic as any other candidate.
+    #
+    # The *number* of candidates requested decays with how much local data
+    # this TR has accumulated since its last restart (reusing the same
+    # `decay_function` already used for `prob_perturb` elsewhere in this
+    # file, rather than inventing a new schedule) -- a freshly-restarted TR
+    # has little of its own data and stands to benefit most from LLM
+    # guidance; a long-lived, well-fit TR relies increasingly on its own GP.
+    # This modulates *how many* candidates enter the pool, never whether a
+    # given candidate is accepted -- every proposal still only wins a batch
+    # slot if it actually improves hypervolume under the current posterior,
+    # exactly like any other candidate.
+    llm_candidates_by_tr = {}
+    if (
+        trbo_state.tr_hparams.use_llm_candidates
+        and trbo_state.tr_hparams.llm_candidates_per_tr > 0
+    ):
+        pareto_context = (
+            trbo_state.objective(trbo_state.pareto_Y)
+            if getattr(trbo_state, "pareto_Y", None) is not None
+            and trbo_state.pareto_Y.shape[0] > 0
+            else None
+        )
+        for tr_idx, tr in enumerate(trbo_state.trust_regions):
+            n_llm_base = trbo_state.tr_hparams.llm_candidates_per_tr
+            tr_data_size = tr.X.shape[0]
+            decay = decay_function(
+                n=max(tr_data_size, trbo_state.tr_hparams.min_tr_size),
+                n0=trbo_state.tr_hparams.min_tr_size,
+                n_max=max(
+                    trbo_state.tr_hparams.n_initial_points, tr_data_size + 1
+                ),
+                alpha=0.7,
+            )
+            n_llm = max(1, round(n_llm_base * decay))
+            try:
+                # Stored normalized -- unnormalized alongside `X_cand` at the
+                # concatenation site below, so the two stay in lockstep.
+                llm_candidates_by_tr[tr_idx] = propose_candidates(
+                    tr_center=tr.X_center_normalized,
+                    tr_bounds=tr.get_bounds(),
+                    recent_pareto_points=pareto_context,
+                    n_candidates=n_llm,
+                    problem_description=trbo_state.tr_hparams.llm_problem_description,
+                )
+            except Exception as e:
+                print(f"LLM candidate proposal failed for TR {tr_idx}: {e}")
+
     time_sampling, time_hvi = 0, 0
     for i in range(batch_size):
         if trbo_state.tr_hparams.hypervolume:  # Greedy selection
@@ -193,11 +247,47 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
                     num_rff_features=1024,
                 )
 
-            # Get the pending points inside the TR and stack them to the candidates
+            # Stack in this TR's LLM-proposed candidates, if any -- screened by
+            # the same HVI/scalarization scoring as every other candidate
+            # below, not accepted unconditionally. The same fixed candidate
+            # set is re-offered at every batch slot for this TR (computed once
+            # per iteration above), so drop any that were already selected
+            # earlier this iteration -- otherwise the same point could be
+            # selected again, producing duplicate rows in `X_history`.
+            # IMPORTANT: this must be concatenated *before* the pending-points
+            # block below, not after -- the feasibility masking further down
+            # assumes the pending points are the *last* `len(inds_next_in_tr)`
+            # rows of the candidate pool (`f_obj[-len(inds_next_in_tr):]` etc.)
+            # to correctly exclude them from reselection; appending anything
+            # after them would silently break that exclusion.
+            llm_cands_normalized = llm_candidates_by_tr.get(int(tr_idx))
+            if llm_cands_normalized is not None and llm_cands_normalized.shape[0] > 0:
+                if len(inds_next_in_tr) > 0:
+                    dists = torch.cdist(llm_cands_normalized, X_next[inds_next_in_tr])
+                    llm_cands_normalized = llm_cands_normalized[
+                        (dists > 1e-9).all(dim=-1)
+                    ]
+            if llm_cands_normalized is not None and llm_cands_normalized.shape[0] > 0:
+                llm_cands_unnormalized = unnormalize(
+                    llm_cands_normalized, bounds=tr.bounds
+                )
+                X_cand = torch.cat((X_cand, llm_cands_normalized))
+                X_cand_unnormalized = torch.cat(
+                    (X_cand_unnormalized, llm_cands_unnormalized)
+                )
+
+            # Get the pending points inside the TR and stack them to the
+            # candidates -- must stay last, see note above. `X_cand`
+            # (normalized) and `X_cand_unnormalized` must stay in lockstep --
+            # the final selection below indexes `X_cand`, not the unnormalized
+            # tensor, since `X_next` (pending points) is a normalized-space
+            # buffer.
             if len(inds_next_in_tr) > 0:
+                X_next_pending = X_next[inds_next_in_tr]  # already normalized
                 X_next_unnormalized = unnormalize(
-                    X_next[inds_next_in_tr], bounds=tr.bounds
+                    X_next_pending, bounds=tr.bounds
                 )  # Unnormalize pending points for prediction
+                X_cand = torch.cat((X_cand, X_next_pending))
                 X_cand_unnormalized = torch.cat(
                     (X_cand_unnormalized, X_next_unnormalized)
                 )
@@ -306,8 +396,8 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
                             model=sampled_model,
                             ref_point=ref_point,
                             partitioning=partitioning,
-                            sampler=SobolQMCNormalSampler(
-                                num_samples=1
+                            sampler=DeterministicSampler(
+                                sample_shape=torch.Size([1])
                             ),  # dummy sampler
                         )
                         with torch.no_grad():

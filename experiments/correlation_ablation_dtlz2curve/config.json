@@ -1,0 +1,15 @@
+{
+    "dim": 20,
+    "evalfn": "DTLZ2",
+    "n_curve_points": 8,
+    "max_evals": 200,
+    "n_initial_points": 25,
+    "batch_size": 15,
+    "n_trust_regions": 3,
+    "min_tr_size": 10,
+    "max_reference_point": [
+      -6,
+      -6
+    ],
+    "verbose": true
+  }

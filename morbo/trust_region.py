@@ -15,7 +15,7 @@ from abc import abstractmethod, abstractproperty, ABC
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
-from botorch.acquisition.objective import AcquisitionObjective
+from botorch.acquisition.objective import MCAcquisitionObjective
 from botorch.models.transforms.input import (
     ChainedInputTransform,
     Normalize,
@@ -31,6 +31,7 @@ from botorch.utils.sampling import draw_sobol_normal_samples
 from botorch.utils.transforms import normalize
 from morbo.utils import (
     get_constraint_slack_and_feasibility,
+    get_fitted_kronecker_model,
     get_fitted_model,
     get_indices_in_hypercube,
 )
@@ -131,6 +132,7 @@ class TurboHParams:
     sample_subset_d: bool = True
     track_history: bool = True
     fixed_scalarization: bool = False
+    scalarization_type: str = "linear"  # "linear" or "chebyshev"
     max_cholesky_size: int = 50_000  # Not using Cholesky causes stability issues
     raw_samples: int = 4096
     n_initial_points: int = 1000
@@ -152,6 +154,10 @@ class TurboHParams:
     infer_reference_point: bool = False
     fit_gpytorch_options: Optional[Dict[str, Any]] = None  # {"maxiter": 50}
     restart_hv_scalarizations: bool = False
+    use_llm_candidates: bool = False
+    llm_candidates_per_tr: int = 0
+    llm_problem_description: str = ""
+    use_kronecker_gp: bool = False
 
     @classmethod
     def from_dict(cls, tr_hparams: Dict) -> None:
@@ -204,7 +210,7 @@ class TrustRegion(ABC, Module):
         Y_init: Tensor,
         bounds: Tensor,
         tr_hparams: TurboHParams,
-        objective: AcquisitionObjective,
+        objective: MCAcquisitionObjective,
         constraints: Optional[List[Callable[[Tensor], Tensor]]] = None,
         extra_buffers: Optional[Dict[str, Union[None, Tensor]]] = None,
         **kwargs,
@@ -291,15 +297,25 @@ class TrustRegion(ABC, Module):
                 self.model.train()
                 torch.cuda.empty_cache()
 
-            self.model = get_fitted_model(
-                X=self.X,
-                Y=winsorized_Y,
-                use_ard=self.tr_hparams.use_ard,
-                max_cholesky_size=self.tr_hparams.max_cholesky_size,
-                input_transform=intf,
-                outcome_transform=octf,
-                fit_gpytorch_options=self.tr_hparams.fit_gpytorch_options,
-            )
+            if self.tr_hparams.use_kronecker_gp and self.Y.shape[-1] > 1:
+                self.model = get_fitted_kronecker_model(
+                    X=self.X,
+                    Y=winsorized_Y,
+                    max_cholesky_size=self.tr_hparams.max_cholesky_size,
+                    input_transform=intf,
+                    outcome_transform=octf,
+                    fit_gpytorch_options=self.tr_hparams.fit_gpytorch_options,
+                )
+            else:
+                self.model = get_fitted_model(
+                    X=self.X,
+                    Y=winsorized_Y,
+                    use_ard=self.tr_hparams.use_ard,
+                    max_cholesky_size=self.tr_hparams.max_cholesky_size,
+                    input_transform=intf,
+                    outcome_transform=octf,
+                    fit_gpytorch_options=self.tr_hparams.fit_gpytorch_options,
+                )
             return True
         return False
 
@@ -568,12 +584,20 @@ class ScalarizedTrustRegion(TrustRegion):
         """This creates a callable that applies _objective to select
         the relevant objectives and then scalarizes the objectives."""
         if self.scalarization_weights is not None:
+            if self.tr_hparams.scalarization_type == "chebyshev":
+                # Augmented Chebyshev scalarization (ParEGO-style) for
+                # maximization: min_i(w_i * y_i) + rho * sum_i(w_i * y_i).
+                def objective(Y):
+                    weighted = self._objective(Y) * self.scalarization_weights
+                    return weighted.min(dim=-1).values + 0.05 * weighted.sum(dim=-1)
 
-            def objective(Y):
-                obj = get_objective_weights_transform(
-                    weights=self.scalarization_weights
-                )
-                return obj(self._objective(Y))
+            else:
+
+                def objective(Y):
+                    obj = get_objective_weights_transform(
+                        weights=self.scalarization_weights
+                    )
+                    return obj(self._objective(Y))
 
         else:
             objective = self._objective
@@ -629,7 +653,7 @@ class ScalarizedTrustRegion(TrustRegion):
         else:
             feas = None
 
-        max_prev_obj = self._get_max_previous_objective(n_new, k)
+        max_prev_obj = self._get_max_previous_objective(n_new)
         # NOTE: objective does not necessarily create a new tensor, so we
         # need to clone here.
         new_obj = self.objective(Y_new).clone()
@@ -716,7 +740,7 @@ class HypervolumeTrustRegion(TrustRegion):
         Y_init: Tensor,
         bounds: Tensor,
         tr_hparams: TurboHParams,
-        objective: AcquisitionObjective,
+        objective: MCAcquisitionObjective,
         constraints: Optional[List[Callable[[Tensor], Tensor]]] = None,
         pareto_X_better_than_ref: Optional[Tensor] = None,
         pareto_Y_better_than_ref: Optional[Tensor] = None,

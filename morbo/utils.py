@@ -10,13 +10,14 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch
 from botorch.exceptions.errors import BotorchTensorDimensionError
-from botorch.fit import fit_gpytorch_model
+from botorch.fit import fit_gpytorch_mll
 from botorch.models.gp_regression import SingleTaskGP
+from botorch.models.multitask import KroneckerMultiTaskGP
 from botorch.models.model import Model
 from botorch.models.model_list_gp_regression import ModelListGP
 from botorch.models.transforms.input import InputTransform
 from botorch.models.transforms.outcome import OutcomeTransform
-from botorch.optim.fit import fit_gpytorch_torch
+from botorch.optim.fit import fit_gpytorch_mll_torch
 from botorch.utils.sampling import draw_sobol_samples
 from gpytorch import settings as gpytorch_settings
 from gpytorch.constraints import GreaterThan, Interval
@@ -245,11 +246,85 @@ def get_fitted_model(
         if state_dict is not None:
             model.load_state_dict(state_dict)
         # 50 iterations appears to be a good compromise between fit and overhead.
-        fit_gpytorch_model(mll, options=fit_gpytorch_options)
+        if fit_gpytorch_options:
+            fit_gpytorch_mll(mll, optimizer_kwargs={"options": fit_gpytorch_options})
+        else:
+            fit_gpytorch_mll(mll)
 
     if X.is_cuda:
         print(f"after fitting: {torch.cuda.memory_allocated(X.device) / (1000 ** 3)}")
     return model
+
+
+def get_fitted_kronecker_model(
+    X: Tensor,
+    Y: Tensor,
+    max_cholesky_size: int,
+    input_transform: Optional[InputTransform] = None,
+    outcome_transform: Optional[OutcomeTransform] = None,
+    fit_gpytorch_options: Optional[Dict[str, Any]] = None,
+) -> Model:
+    r"""Fit a single Kronecker-structured multi-task GP jointly over all
+    output columns, rather than one independent GP per column
+    (`get_fitted_model`). Used to test whether modeling *correlation*
+    across a composite raw response's dimensions (vs. `get_fitted_model`'s
+    decoupled-per-dimension modeling) matters for downstream optimization
+    performance -- see `morbo/problems/composite_dtlz2_curve.py`.
+
+    `task_covar_prior=None` and a torch/Adam-based fit
+    (`fit_gpytorch_mll_torch`) are used instead of the scipy-based default
+    fit (`fit_gpytorch_mll`) -- the latter fails on this model's default
+    task-covariance prior (`sample_all_priors` raises "Must provide inverse
+    transform to be able to sample from prior").
+    """
+    print("Fitting a Kronecker multi-task model")
+    use_fast_mvms = True if X.shape[0] > max_cholesky_size else False
+    with gpytorch_settings.fast_computations(
+        log_prob=use_fast_mvms,
+        covar_root_decomposition=use_fast_mvms,
+        solves=use_fast_mvms,
+    ):
+        model = KroneckerMultiTaskGP(
+            train_X=X,
+            train_Y=Y,
+            input_transform=input_transform,
+            outcome_transform=outcome_transform,
+            task_covar_prior=None,
+        )
+        mll = ExactMarginalLogLikelihood(model.likelihood, model)
+        step_limit = (
+            (fit_gpytorch_options or {}).get("maxiter")
+        )
+        fit_gpytorch_mll_torch(mll, step_limit=step_limit)
+
+    if X.is_cuda:
+        print(f"after fitting: {torch.cuda.memory_allocated(X.device) / (1000 ** 3)}")
+    return model
+
+
+def compose(
+    reduction: Optional[Callable[[Tensor], Tensor]],
+    objective: Callable[[Tensor], Tensor],
+) -> Callable[[Tensor], Tensor]:
+    r"""Compose a known reduction in front of an objective.
+
+    For composite modeling: `reduction` maps a raw model response to the
+    final objectives (e.g. applying a known formula), and `objective` is
+    whatever column-selection/scalarization would otherwise be applied
+    directly to those objectives. Returns `objective` unchanged if
+    `reduction` is None, so this is a no-op for non-composite problems.
+
+    Args:
+        reduction: A callable mapping a `... x K`-dim raw response to a
+            `... x M`-dim tensor of objectives, or None.
+        objective: The objective callable to apply after `reduction`.
+
+    Returns:
+        A callable equivalent to `lambda Y: objective(reduction(Y))`.
+    """
+    if reduction is None:
+        return objective
+    return lambda Y: objective(reduction(Y))
 
 
 def coalesce(x1: Optional[Tensor], x2: Optional[Tensor]) -> Optional[Tensor]:

@@ -38,6 +38,7 @@ from botorch.utils.sampling import (
     sample_simplex,
 )
 from botorch.utils.transforms import unnormalize
+from morbo.utils import compose
 from morbo.trust_region import (
     HypervolumeTrustRegion,
     ScalarizedTrustRegion,
@@ -154,6 +155,7 @@ class TRBOState(Module):
         constraints: Optional[Tuple[Tensor, Tensor]] = None,
         num_metrics: Optional[int] = None,
         tr_gen_statuses: Optional[List[TRGenStatus]] = None,
+        composite_reduction: Optional[Callable[[Tensor], Tensor]] = None,
     ) -> None:
         super().__init__()
         tkwargs = {"dtype": bounds.dtype, "device": bounds.device}
@@ -203,7 +205,7 @@ class TRBOState(Module):
                     )
             else:
                 objective = IdentityMCMultiOutputObjective()
-        self.objective = objective
+        self.objective = compose(composite_reduction, objective)
         if num_objectives > 1:
             if (
                 tr_hparams.hypervolume

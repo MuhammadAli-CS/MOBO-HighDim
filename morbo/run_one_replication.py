@@ -22,6 +22,7 @@ from botorch.test_functions.multi_objective import (
     DTLZ1,
     DTLZ2,
     MW7,
+    Penicillin,
     VehicleSafety,
     WeldedBeam,
 )
@@ -37,11 +38,31 @@ from morbo.trust_region import TurboHParams
 from torch import Tensor
 
 from morbo.problems.rover import get_rover_fn
+from morbo.problems.composite_dtlz2 import (
+    composite_dtlz2_reduction,
+    get_composite_dtlz2_fn,
+)
+from morbo.problems.composite_dtlz2_curve import (
+    composite_dtlz2_curve_reduction,
+    get_composite_dtlz2_curve_fn,
+)
+from morbo.problems.composite_penicillin import (
+    composite_penicillin_reduction,
+    get_composite_penicillin_fn,
+)
 from morbo.benchmark_function import (
     BenchmarkFunction,
 )
 
-supported_labels = ["morbo"]
+supported_labels = [
+    "morbo",
+    "turbo_scalarized",
+    "composite_morbo",
+    "llm_morbo",
+    "independent_gp_composite",
+    "kronecker_gp_composite",
+    "composite_penicillin",
+]
 
 BASE_SEED = 12346
 
@@ -74,6 +95,7 @@ def run_one_replication(
     track_history: bool = TurboHParams.track_history,
     sample_subset_d: bool = TurboHParams.sample_subset_d,
     fixed_scalarization: bool = TurboHParams.fixed_scalarization,
+    scalarization_type: str = TurboHParams.scalarization_type,
     winsor_pct: float = TurboHParams.winsor_pct,
     trunc_normal_perturb: bool = TurboHParams.trunc_normal_perturb,
     switch_strategy_freq: Optional[int] = TurboHParams.switch_strategy_freq,
@@ -87,6 +109,12 @@ def run_one_replication(
     approximate_hv_alpha: Optional[float] = TurboHParams.approximate_hv_alpha,
     recompute_all_hvs: bool = True,
     restart_hv_scalarizations: bool = True,
+    use_llm_candidates: bool = TurboHParams.use_llm_candidates,
+    llm_candidates_per_tr: int = TurboHParams.llm_candidates_per_tr,
+    llm_problem_description: str = TurboHParams.llm_problem_description,
+    use_kronecker_gp: bool = TurboHParams.use_kronecker_gp,
+    n_curve_points: int = 8,
+    n_penicillin_checkpoints: int = 10,
     dtype: torch.device = torch.double,
     device: Optional[torch.device] = None,
     save_callback: Optional[Callable[[Tensor], None]] = None,
@@ -117,6 +145,7 @@ def run_one_replication(
     bounds = torch.empty((2, dim), dtype=dtype, device=device)
     constraints = None
     objective = None
+    composite_reduction = None
 
     if evalfn == "ackley":
         f = Ackley(dim=dim, negate=False)
@@ -192,6 +221,36 @@ def run_one_replication(
         objective = IdentityMCMultiOutputObjective(
             outcomes=[0, 1], num_outcomes=num_outputs
         )
+    elif evalfn == "CompositeDTLZ2":
+        f, bounds = get_composite_dtlz2_fn(
+            dim=dim, num_objectives=num_objectives, dtype=dtype, device=device
+        )
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 3
+        composite_reduction = composite_dtlz2_reduction
+    elif evalfn == "CompositeDTLZ2Curve":
+        f, bounds = get_composite_dtlz2_curve_fn(
+            dim=dim,
+            num_objectives=num_objectives,
+            n_curve_points=n_curve_points,
+            dtype=dtype,
+            device=device,
+        )
+        bounds = bounds.to(**tkwargs)
+        num_outputs = n_curve_points
+        composite_reduction = composite_dtlz2_curve_reduction
+    elif evalfn == "Penicillin":
+        problem = Penicillin(negate=False)
+        f = problem
+        bounds = problem.bounds.to(**tkwargs)
+        num_outputs = problem.num_objectives
+    elif evalfn == "CompositePenicillin":
+        f, bounds = get_composite_penicillin_fn(
+            n_checkpoints=n_penicillin_checkpoints, dtype=dtype, device=device
+        )
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 5 * n_penicillin_checkpoints + 1
+        composite_reduction = composite_penicillin_reduction
     elif evalfn != "ackley":
         # Handle the non-constrained botorch test functions here.
         constructor_map = {
@@ -220,7 +279,10 @@ def run_one_replication(
         ref_point=torch.tensor(max_reference_point, **tkwargs),
         dim=dim,
         tkwargs=tkwargs,
-        negate=True,
+        # CompositeDTLZ2's raw response isn't in the maximize/negated
+        # convention the other evalfns use -- `composite_dtlz2_reduction`
+        # performs that negation itself as part of the reduction.
+        negate=(evalfn not in ("CompositeDTLZ2", "CompositeDTLZ2Curve")),
         observation_noise_std=observation_noise_std,
         observation_noise_bias=observation_noise_bias,
     )
@@ -245,6 +307,7 @@ def run_one_replication(
         sample_subset_d=sample_subset_d,
         track_history=track_history,
         fixed_scalarization=fixed_scalarization,
+        scalarization_type=scalarization_type,
         n_initial_points=n_initial_points,
         n_restart_points=n_restart_points,
         raw_samples=raw_samples,
@@ -260,6 +323,10 @@ def run_one_replication(
         use_approximate_hv_computations=use_approximate_hv_computations,
         approximate_hv_alpha=approximate_hv_alpha,
         restart_hv_scalarizations=restart_hv_scalarizations,
+        use_llm_candidates=use_llm_candidates,
+        llm_candidates_per_tr=llm_candidates_per_tr,
+        llm_problem_description=llm_problem_description,
+        use_kronecker_gp=use_kronecker_gp,
     )
 
     trbo_state = TRBOState(
@@ -271,6 +338,7 @@ def run_one_replication(
         tr_hparams=tr_hparams,
         constraints=constraints,
         objective=objective,
+        composite_reduction=composite_reduction,
     )
 
     # For saving outputs
@@ -410,8 +478,12 @@ def run_one_replication(
         # Save state at this evaluation and move to cpu
         n_evals.append(trbo_state.n_evals.item())
         if trbo_state.hv is not None:
-            # The objective is None if there are no constraints
-            obj = objective if objective else lambda x: x
+            # `trbo_state.objective` is what the optimization itself used
+            # throughout (already composed with `composite_reduction` when
+            # applicable) -- reuse it here rather than reconstructing a
+            # separate objective from the local `objective` variable, which
+            # would silently skip the composite reduction.
+            obj = trbo_state.objective
             partitioning = DominatedPartitioning(
                 ref_point=true_ref_point, Y=obj(trbo_state.pareto_Y)
             )
@@ -437,6 +509,10 @@ def run_one_replication(
             "n_evals": n_evals,
             "X_history": trbo_state.X_history.cpu(),
             "metric_history": trbo_state.Y_history.cpu(),
+            # Always in objective space (post-reduction for composite runs),
+            # unlike `metric_history` which is the raw model-output space --
+            # downstream consumers (e.g. plotting) should prefer this field.
+            "objective_history": trbo_state.objective(trbo_state.Y_history).cpu(),
             "true_pareto_X": pareto_X,
             "true_pareto_Y": pareto_Y,
             "true_hv": true_hv,
@@ -466,6 +542,7 @@ def run_one_replication(
         "n_evals": n_evals,
         "X_history": trbo_state.X_history.cpu(),
         "metric_history": trbo_state.Y_history.cpu(),
+        "objective_history": trbo_state.objective(trbo_state.Y_history).cpu(),
         "true_pareto_X": pareto_X,
         "true_pareto_Y": pareto_Y,
         "true_hv": true_hv,
