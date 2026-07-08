@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Generic SLURM job: runs one (experiment, label, seed) triple from
+# run_comparison.py. Submit with --export to fill in EXP/LABEL/SEED, e.g.:
+#
+#   sbatch --requeue \
+#     --export=EXP=penicillin_composite,LABEL=composite_penicillin,SEED=0 \
+#     cluster/run_experiment.sub
+#
+# Do not sbatch this file bare — EXP/LABEL/SEED must be set, see submit_all.sh
+# for the full set of jobs this project currently needs.
+#SBATCH --job-name=morbo-%x
+#SBATCH --output=cluster/logs/%x_%j.out
+#SBATCH --error=cluster/logs/%x_%j.err
+#SBATCH --partition=kilian
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16g
+#SBATCH --gres=gpu:1
+#SBATCH --time=08:00:00
+
+set -euo pipefail
+
+if [ -z "${EXP:-}" ] || [ -z "${LABEL:-}" ] || [ -z "${SEED:-}" ]; then
+  echo "EXP, LABEL, and SEED must be set via --export. See submit_all.sh." >&2
+  exit 1
+fi
+
+cd "$SLURM_SUBMIT_DIR"
+mkdir -p cluster/logs
+
+source ~/.bashrc
+conda activate "$HOME/morbo-env"
+
+echo "[$(date)] host=$(hostname) exp=$EXP label=$LABEL seed=$SEED gpu=${CUDA_VISIBLE_DEVICES:-none}"
+python run_comparison.py "$EXP" "$LABEL" "$SEED"
+echo "[$(date)] done exp=$EXP label=$LABEL seed=$SEED"
