@@ -200,6 +200,42 @@ response into independent surrogates.
 \end{algorithmic}
 \end{algorithm}
 
+\subsection{Results at $d=100$}
+
+We reproduce the paper's Figure 2 setting (DTLZ2, $d=100$, $M=2$, 600 evals
+-- 200 shared Sobol init + 400 BO evals, batch size 50, 3 trust regions,
+seed 0) and compare standard MORBO, composite MORBO (the $(g,\cos,\sin)$
+construction above), and the naive scalarized-TuRBO baseline the paper uses
+as its own strawman (\texttt{hypervolume=False},
+\texttt{track\_history=False}, \texttt{restart\_hv\_scalarizations=False} --
+independent random Chebyshev-scalarized trust regions, no data sharing, no
+coordinated restarts).
+
+\begin{table}[h]
+\centering
+\caption{Composite MORBO results: DTLZ2, $d=100$, 600 evals, batch 50, 3 trust regions, seed 0.}
+\label{tab:composite-fig2-results}
+\begin{tabular}{lcc}
+\toprule
+Method & Final hypervolume & Pareto set size \\
+\midrule
+Standard MORBO & 20.02 & 6 \\
+Composite MORBO & \textbf{25.02} & 14 \\
+TuRBO + Chebyshev scalarization & 16.92 & 4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Composite modeling beats direct modeling by \textbf{+24.9\% final
+hypervolume} at this scale -- both comfortably ahead of the naive scalarized
+baseline, matching the paper's own qualitative Figure 2 claim (MORBO beats
+naive scalarized TuRBO; the paper reports no HV numbers for that panel to
+compare directly). This is a substantially larger margin than the
+$\sim$0.3\% seen at $d=20$ with the genuinely-correlated curve construction
+in Section~\ref{sec:kronecker-ablation} -- see that section's discussion for
+the dimensionality hypothesis this discrepancy motivates, and
+Section~\ref{sec:curve-100d} for a direct test of it.
+
 \section{LLM-Assisted MORBO}
 \label{sec:llm-morbo}
 
@@ -475,12 +511,22 @@ Kronecker-GP composite & 34.271 & 5 & 2255.4s \\
 \end{tabular}
 \end{table}
 
-All three land within 0.3\% hypervolume of each other. Composite modeling
-(either variant) edges out direct modeling by a small margin, consistent
-with the near-identical result in Section~\ref{sec:composite}. Critically,
-the Kronecker-GP variant does \emph{not} beat the independent-GP variant --
-if anything it finishes marginally behind (34.271 vs.\ 34.307) -- despite
-the raw curve response being genuinely correlated by construction. The
+All three land within 0.3\% hypervolume of each other -- composite modeling
+(either variant) edges out direct modeling only marginally here, in sharp
+contrast to Section~\ref{sec:composite}'s $d=100$ result, where composite
+modeling won by +24.9\% HV on the same DTLZ2 problem family. This is a
+genuine discrepancy, not a restatement of the same finding: it is not yet
+established here whether the gap is driven by dimensionality ($d=20$ vs.\
+$d=100$), the specific raw-response construction ($(g,\cos,\sin)$ vs.\ an
+8-point curve), the eval budget (200 vs.\ 600), or some combination --
+Section~\ref{sec:curve-100d} tests the dimensionality hypothesis directly by
+rerunning this same curve construction at $d=100$.
+
+Independent of that open question, the comparison \emph{within} this table
+is a clean, controlled answer to what it was designed to test: the
+Kronecker-GP variant does \emph{not} beat the independent-GP variant -- if
+anything it finishes marginally behind (34.271 vs.\ 34.307) -- despite the
+raw curve response being genuinely correlated by construction. The
 Kronecker fit is also \textbf{roughly 100$\times$ more expensive}
 (2255.4s vs.\ 22.7s total fit time across the run), the direct empirical
 explanation for why this configuration was the single most resource-intensive
@@ -493,6 +539,66 @@ the composite-modeling benefit here, which does not support
 this smaller-scale, differently-structured setting (their result is on a
 177-dimensional image-structured raw response with an HOGP, not a
 Kronecker multi-task GP on an 8-point curve).
+
+\section{Does Dimensionality Explain the Gap? The Curve Construction at $d=100$}
+\label{sec:curve-100d}
+
+Section~\ref{sec:composite}'s $(g,\cos,\sin)$ composite won by +24.9\% HV at
+$d=100$; Section~\ref{sec:kronecker-ablation}'s genuinely-correlated curve
+composite won by only $\sim$0.3\% at $d=20$. Both are DTLZ2 -- the same
+$f_1=(1+g)\cos(\tfrac{\pi}{2}x_1)$, $f_2=(1+g)\sin(\tfrac{\pi}{2}x_1)$
+family -- so the discrepancy is attributable to some combination of
+dimensionality, the specific raw-response construction, and eval budget,
+confounded together across the two experiments as run. Direct modeling has
+to fit a single GP per objective capturing $g$'s dependence on $d-1$ input
+dimensions entangled multiplicatively with a periodic term; that entangling
+task plausibly gets harder as $d$ grows, while a composite decomposition's
+individual pieces ($g$ alone, or each curve point) stay comparably easy
+regardless of $d$ -- if so, composite modeling's advantage over direct
+modeling should widen with $d$ independent of which specific raw-response
+construction is used.
+
+\subsection{Isolating dimensionality}
+
+We rerun Section~\ref{sec:kronecker-ablation}'s exact curve construction
+($K=8$ points of $h(\theta;x)$) at Section~\ref{sec:composite}'s scale:
+$d=100$, 600 evals (200 shared Sobol init + 400 BO evals), batch size 50, 3
+trust regions, seed 0 -- identical to the $(g,\cos,\sin)$ fig2 setting in
+every hyperparameter except which raw response the composite variants
+model. All three configurations from Section~\ref{sec:kronecker-ablation}
+(standard MORBO, independent-GP composite, Kronecker-GP composite) are
+re-run at this scale. If independent-GP composite shows a fig2-sized margin
+over standard MORBO here, that supports dimensionality as the primary
+driver over the specific composite construction; if it remains close to
+the $d=20$ result despite matching $d=100$, the raw-response construction
+or eval budget is implicated instead. The Kronecker variant is included to
+additionally check whether its cost/benefit profile (Section~\ref{sec:kronecker-ablation}:
+$\sim$100$\times$ the fit cost of independent GPs, no accuracy advantage at
+$d=20$) changes at this larger scale, where each trust region accumulates
+more local data before every refit.
+
+\begin{table}[h]
+\centering
+\caption{Curve-construction results at $d=100$: DTLZ2-curve, $K=8$ curve points, 600 evals, batch 50, 3 trust regions, seed 0.}
+\label{tab:curve-100d-results}
+\begin{tabular}{lccc}
+\toprule
+Method & Final hypervolume & Pareto set size & Total fit time \\
+\midrule
+Standard MORBO & TBD & TBD & TBD \\
+Independent-GP composite & TBD & TBD & TBD \\
+Kronecker-GP composite & TBD & TBD & TBD \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Run in progress at time of writing.} Unlike
+Section~\ref{sec:kronecker-ablation}'s laptop run, this one executes on
+Cornell's Unicorn SLURM cluster (\texttt{aimi} partition, NVIDIA B200 GPUs)
+rather than CPU-only, since the Kronecker-GP variant's fit cost was already
+the single most resource-intensive configuration in this work at the
+smaller $d=20$ scale and was expected to be substantially more expensive
+still at $5\times$ the input dimension and $3\times$ the eval budget.
 
 \section{Composite MORBO on a Real Simulator: Penicillin Fermentation}
 \label{sec:penicillin}
