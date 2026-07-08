@@ -52,7 +52,7 @@ sbatch --requeue \
   --partition=default_partition --account=kilian \
   --cpus-per-task=1 --mem=4g --time=00:15:00 \
   --output=cluster/logs/plot-composite-curve-100d_%j.out \
-  --wrap="cd $SLURM_SUBMIT_DIR; source /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python plot_comparison.py $EXP 0"
+  --wrap="cd $(pwd); source /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python plot_comparison.py $EXP 0"
 
 echo "All jobs submitted. Check with: squeue -u \$USER"
 echo "Note: morbo is cheap to rerun (~14-25 min at this scale) rather than"
