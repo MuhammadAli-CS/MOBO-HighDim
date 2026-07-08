@@ -13,8 +13,8 @@
 #SBATCH --error=cluster/logs/%x_%j.err
 #SBATCH --partition=aimi
 #SBATCH --account=kilian
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=64g
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=128g
 #SBATCH --gres=gpu:1
 #SBATCH --time=08:00:00
 
