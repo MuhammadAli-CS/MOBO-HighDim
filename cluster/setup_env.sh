@@ -34,11 +34,17 @@ fi
 
 conda activate "$ENV_PATH"
 
-# Versions pinned to match what's validated locally (see README.md "Fork
-# notes" section) so cluster runs are numerically comparable to laptop runs.
+# No version pins, no custom --index-url: the cu121 build channel is frozen
+# at torch<=2.5.1 and, more importantly, CUDA 12.1 predates Blackwell
+# (compute capability 10.0) support entirely -- the aimi partition's B200
+# GPUs need a current CUDA build, which the default PyPI wheels provide.
+# This mirrors setup.py's own unpinned requirements -- pip resolving latest
+# mutually-compatible versions from scratch is exactly how the locally
+# validated combo (torch 2.12, botorch 0.9.5, gpytorch 1.11) came about;
+# pinning botorch/gpytorch here without pinning torch risks resolving an
+# incompatible combination instead.
 pip install --upgrade pip
-pip install "torch==2.12.*" --index-url https://download.pytorch.org/whl/cu121
-pip install "gpytorch==1.11" "botorch==0.9.5" scipy matplotlib jupyter anthropic
+pip install torch gpytorch botorch scipy matplotlib jupyter anthropic
 
 # Install this repo (morbo/, botier_llm/, run_comparison.py, etc.) in editable mode.
 cd "$(dirname "$0")/.."

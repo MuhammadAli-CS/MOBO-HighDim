@@ -29,10 +29,14 @@ bash cluster/setup_env.sh
 exit   # end the interactive allocation once it finishes
 ```
 
-This creates a conda env at `~/morbo-env` pinned to the same
-torch/gpytorch/botorch versions validated locally (torch 2.12, botorch
-0.9.5, gpytorch 1.11, Python 3.11 — see the main `README.md` "Fork notes"
-section) and installs this repo into it with `pip install -e .`.
+This creates a conda env at `~/morbo-env` (Python 3.11) with unpinned
+torch/gpytorch/botorch installs — deliberately not pinned to the exact
+versions validated locally (torch 2.12, botorch 0.9.5, gpytorch 1.11, see
+the main `README.md` "Fork notes" section), since those were resolved
+against a CPU-only local install and the cluster's B200 GPUs need a CUDA
+build recent enough to support them (Blackwell/compute capability 10.0).
+Letting pip resolve fresh mirrors how the local combo was arrived at in the
+first place. Installs this repo into the env with `pip install -e .`.
 
 ## 4. Fig2-scale correlation-ablation follow-up (composite_curve_dtlz2_100d)
 
