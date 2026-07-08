@@ -34,17 +34,21 @@ fi
 
 conda activate "$ENV_PATH"
 
-# No version pins, no custom --index-url: the cu121 build channel is frozen
+# torch: unpinned, no custom --index-url. The cu121 build channel is frozen
 # at torch<=2.5.1 and, more importantly, CUDA 12.1 predates Blackwell
 # (compute capability 10.0) support entirely -- the aimi partition's B200
 # GPUs need a current CUDA build, which the default PyPI wheels provide.
-# This mirrors setup.py's own unpinned requirements -- pip resolving latest
-# mutually-compatible versions from scratch is exactly how the locally
-# validated combo (torch 2.12, botorch 0.9.5, gpytorch 1.11) came about;
-# pinning botorch/gpytorch here without pinning torch risks resolving an
-# incompatible combination instead.
+#
+# botorch/gpytorch: DELIBERATELY pinned to the exact versions this codebase
+# was ported against (see README.md "Fork notes" -- the port removed/renamed
+# botorch APIs that changed between the archived upstream's target, ~0.6,
+# and 0.9.5). "Just use latest" risks botorch having moved its API again
+# since 0.9.5, silently breaking the same way the original archived-repo
+# port had to fix -- pinning trades a possibly-newer botorch for guaranteed
+# API compatibility with the code as actually written.
 pip install --upgrade pip
-pip install torch gpytorch botorch scipy matplotlib jupyter anthropic
+pip install torch
+pip install "gpytorch==1.11" "botorch==0.9.5" scipy matplotlib jupyter anthropic
 
 # Install this repo (morbo/, botier_llm/, run_comparison.py, etc.) in editable mode.
 cd "$(dirname "$0")/.."
