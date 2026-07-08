@@ -11,7 +11,8 @@
 #SBATCH --job-name=morbo-%x
 #SBATCH --output=cluster/logs/%x_%j.out
 #SBATCH --error=cluster/logs/%x_%j.err
-#SBATCH --partition=kilian
+#SBATCH --partition=gpu
+#SBATCH --account=kilian
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64g
 #SBATCH --gres=gpu:1

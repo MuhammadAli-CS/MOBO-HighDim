@@ -34,15 +34,15 @@ echo "  morbo=$J1 llm_morbo=$J2"
 sbatch --requeue \
   --job-name=plot-llm-morbo \
   --dependency=afterok:"$J1":"$J2" \
-  --partition=kilian \
-  --cpus-per-task=1 --mem=4g --gres=gpu:0 --time=00:15:00 \
+  --partition=default_partition --account=kilian \
+  --cpus-per-task=1 --mem=4g --time=00:15:00 \
   --output=cluster/logs/plot-llm-morbo_%j.out \
   --wrap="cd $SLURM_SUBMIT_DIR; source ~/.bashrc; conda activate \$HOME/morbo-env; python plot_comparison.py llm_morbo_vehicle_safety 0"
 
 echo "NOTE: Part 3 (botier_llm) does not go through run_comparison.py — it's a"
 echo "standalone script (run_botier_comparison.py), not yet wired into this"
 echo "sbatch template. Run it via a one-off job if/when needed:"
-echo "  sbatch --partition=kilian --cpus-per-task=2 --mem=8g --gres=gpu:0 --time=01:00:00 \\"
+echo "  sbatch --partition=default_partition --account=kilian --cpus-per-task=2 --mem=8g --time=01:00:00 \\"
 echo "    --export=ANTHROPIC_API_KEY=\$ANTHROPIC_API_KEY \\"
 echo "    --wrap=\"cd \$PWD; source ~/.bashrc; conda activate \\\$HOME/morbo-env; python run_botier_comparison.py 10 60 0\""
 

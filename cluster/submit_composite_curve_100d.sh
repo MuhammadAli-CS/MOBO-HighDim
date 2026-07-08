@@ -49,8 +49,8 @@ echo "Submitting plot job (runs after all three finish)..."
 sbatch --requeue \
   --job-name=plot-composite-curve-100d \
   --dependency=afterok:"$J1":"$J2":"$J3" \
-  --partition=kilian \
-  --cpus-per-task=1 --mem=4g --gres=gpu:0 --time=00:15:00 \
+  --partition=default_partition --account=kilian \
+  --cpus-per-task=1 --mem=4g --time=00:15:00 \
   --output=cluster/logs/plot-composite-curve-100d_%j.out \
   --wrap="cd $SLURM_SUBMIT_DIR; source ~/.bashrc; conda activate \$HOME/morbo-env; python plot_comparison.py $EXP 0"
 

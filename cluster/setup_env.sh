@@ -5,7 +5,7 @@
 # conda env / installing torch counts as one.
 #
 # Usage (from unicorn-login-01):
-#   salloc --mem=8g --cpus-per-task=4 --time=01:00:00 --partition=kilian-interactive
+#   salloc --mem=8g --cpus-per-task=4 --time=01:00:00 --partition=default_partition-interactive --account=kilian
 #   bash cluster/setup_env.sh
 set -euo pipefail
 
