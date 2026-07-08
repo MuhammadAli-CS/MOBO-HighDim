@@ -34,15 +34,20 @@ torch/gpytorch/botorch versions validated locally (torch 2.12, botorch
 0.9.5, gpytorch 1.11, Python 3.11 — see the main `README.md` "Fork notes"
 section) and installs this repo into it with `pip install -e .`.
 
-## 4. Submit the experiments
+## 4. Fig2-scale correlation-ablation follow-up (composite_curve_dtlz2_100d)
 
-This is the set that got killed running sequentially on a laptop
-(correlation ablation's Kronecker-GP step and composite Penicillin were the
-two RAM/disk-heavy ones). On the cluster these run **in parallel** as
-independent jobs instead of one-at-a-time:
+`correlation_ablation_dtlz2curve` (d=20) found only a ~0.3% composite-vs-direct
+HV margin, much smaller than `fig2_dtlz2_100d`'s g/cos/sin composite's +25%
+margin at d=100. `composite_curve_dtlz2_100d` reruns the same genuinely-
+correlated 8-point curve construction at fig2's scale (d=100, 600 evals,
+batch 50) to test whether that gap was a dimensionality effect. All three
+labels (`morbo`, `independent_gp_composite`, `kronecker_gp_composite`) run
+here — the Kronecker one specifically was moved off the laptop for this
+config, since it was already ~100x the independent-GP fit cost at the
+smaller d=20 scale and is expected to be substantially worse at d=100:
 
 ```
-bash cluster/submit_all.sh
+bash cluster/submit_composite_curve_100d.sh
 ```
 
 Check status with:
@@ -50,10 +55,11 @@ Check status with:
 squeue -u $USER
 ```
 
-Each job writes its own log to `cluster/logs/<label>_<jobid>.out`. Once a
-group's jobs finish, a dependent plot job runs automatically
-(`--dependency=afterok`) and regenerates `experiments/<exp>/comparison_seed0.png`
-via `plot_comparison.py`'s auto-discovery — no manual replotting needed.
+Each job writes its own log to `cluster/logs/<label>-100d_<jobid>.out`. Once
+all three finish, a dependent plot job runs automatically
+(`--dependency=afterok`) and generates
+`experiments/composite_curve_dtlz2_100d/comparison_seed0.png` via
+`plot_comparison.py`'s auto-discovery — no manual replotting needed.
 
 ## 5. LLM-dependent parts (Parts 2 and 3)
 
@@ -74,15 +80,14 @@ preemptive — reclaimed by the owner within ~1hr if contended), falling back
 to the general `default_partition`/`gpu` community queues. Interactive jobs
 submitted to `kilian` are automatically moved to `kilian-interactive`. All
 scripts here default to `--partition=kilian`; change it in
-`run_experiment.sub` / `submit_all.sh` / `submit_llm.sh` if quota becomes an
-issue.
+`run_experiment.sub` / `submit_composite_curve_100d.sh` / `submit_llm.sh` if
+quota becomes an issue.
 
 ## Pulling results back down
 
 ```
 # from your laptop
-scp -r <netid>@unicorn-login-01.coecis.cornell.edu:~/MOBO-HighDim/experiments/correlation_ablation_dtlz2curve ./experiments/
-scp -r <netid>@unicorn-login-01.coecis.cornell.edu:~/MOBO-HighDim/experiments/penicillin_composite ./experiments/
+scp -r <netid>@unicorn-login-01.coecis.cornell.edu:~/MOBO-HighDim/experiments/composite_curve_dtlz2_100d ./experiments/
 ```
 
 Or just `git commit && git push` from the cluster checkout directly (mind
@@ -92,11 +97,11 @@ a push carries the result files).
 ## Adjusting resources
 
 `cluster/run_experiment.sub` requests `--mem=16g --gres=gpu:1
---cpus-per-task=4 --time=08:00:00` for every job. The Kronecker-GP and
-composite-Penicillin jobs are the two that blew up laptop RAM/disk
-previously — if either gets OOM-killed or preempted-and-requeued
-repeatedly on the cluster too, bump `--mem` first (try 32g), and consider
-dropping `--gres=gpu:1` for the Kronecker job specifically if the cluster's
-GPU nodes are memory-constrained rather than compute-constrained — check
+--cpus-per-task=4 --time=08:00:00` for every job. The Kronecker-GP job here
+is the one to watch — at d=20/200 evals it was already ~100x the
+independent-GP fit cost (see `experiments/correlation_ablation_dtlz2curve/RESULTS.md`),
+and this run is at 5x the input dimension and 3x the eval budget, so it's
+the most likely one to need more memory or time. If it gets OOM-killed or
+preempted-and-requeued repeatedly, bump `--mem` first (try 32g), and check
 `sacct -j <jobid> --format=MaxRSS,Elapsed,State` after a run to see which
 limit was actually hit.

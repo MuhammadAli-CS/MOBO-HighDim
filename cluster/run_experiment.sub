@@ -6,7 +6,7 @@
 #     --export=EXP=penicillin_composite,LABEL=composite_penicillin,SEED=0 \
 #     cluster/run_experiment.sub
 #
-# Do not sbatch this file bare — EXP/LABEL/SEED must be set, see submit_all.sh
+# Do not sbatch this file bare — EXP/LABEL/SEED must be set, see submit_composite_curve_100d.sh or submit_llm.sh
 # for the full set of jobs this project currently needs.
 #SBATCH --job-name=morbo-%x
 #SBATCH --output=cluster/logs/%x_%j.out
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 if [ -z "${EXP:-}" ] || [ -z "${LABEL:-}" ] || [ -z "${SEED:-}" ]; then
-  echo "EXP, LABEL, and SEED must be set via --export. See submit_all.sh." >&2
+  echo "EXP, LABEL, and SEED must be set via --export. See submit_composite_curve_100d.sh or submit_llm.sh." >&2
   exit 1
 fi
 

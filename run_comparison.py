@@ -112,8 +112,17 @@ LABEL_OVERRIDES = {
 }
 
 if __name__ == "__main__":
+    experiment_name = sys.argv[1]
+    # Thermal throttle: penicillin_composite's morbo/composite_penicillin runs
+    # were running the CPU hot (~95C) via torch/MKL saturating most threads.
+    # Cap threads for just this experiment rather than everywhere, since the
+    # fig2/correlation-ablation runs already ran fine at full thread count.
+    if experiment_name == "penicillin_composite":
+        torch.set_num_threads(8)
+        torch.set_num_interop_threads(4)
+
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    exp_dir = os.path.join(current_dir, "experiments", sys.argv[1])
+    exp_dir = os.path.join(current_dir, "experiments", experiment_name)
     config_path = os.path.join(exp_dir, "config.json")
     label = sys.argv[2]
     seed = int(sys.argv[3])
