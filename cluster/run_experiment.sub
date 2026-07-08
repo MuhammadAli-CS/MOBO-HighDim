@@ -11,9 +11,10 @@
 #SBATCH --job-name=morbo-%x
 #SBATCH --output=cluster/logs/%x_%j.out
 #SBATCH --error=cluster/logs/%x_%j.err
-#SBATCH --partition=kilian
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=64g
+#SBATCH --partition=aimi
+#SBATCH --account=kilian
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=128g
 #SBATCH --gres=gpu:1
 #SBATCH --time=08:00:00
 
@@ -27,7 +28,11 @@ fi
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p cluster/logs
 
-source ~/.bashrc
+# See cluster/setup_env.sh for why this sources conda's profile script
+# directly rather than ~/.bashrc -- sbatch jobs run non-interactively, and
+# ~/.bashrc's interactive-shell guard would otherwise skip the conda init
+# block entirely, leaving `conda` undefined.
+source /share/apps/software/anaconda3/etc/profile.d/conda.sh
 conda activate "$HOME/morbo-env"
 
 echo "[$(date)] host=$(hostname) exp=$EXP label=$LABEL seed=$SEED gpu=${CUDA_VISIBLE_DEVICES:-none}"

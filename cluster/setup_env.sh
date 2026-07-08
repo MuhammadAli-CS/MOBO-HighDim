@@ -5,7 +5,7 @@
 # conda env / installing torch counts as one.
 #
 # Usage (from unicorn-login-01):
-#   salloc --mem=8g --cpus-per-task=4 --time=01:00:00 --partition=kilian-interactive
+#   salloc --mem=8g --cpus-per-task=4 --time=01:00:00 --partition=default_partition-interactive --account=kilian
 #   bash cluster/setup_env.sh
 set -euo pipefail
 
@@ -16,9 +16,15 @@ if [ ! -d "/share/apps/software/anaconda3" ]; then
   echo "Check 'module avail' or the Unicorn docs — path may have changed." >&2
 fi
 
-# Only needs to run once per account; harmless to re-run.
+# Only needs to run once per account; harmless to re-run. `conda init bash`
+# only takes effect in a NEW interactive shell (it edits ~/.bashrc, which
+# most distros guard behind an "if not interactive, return" check near the
+# top) -- this script runs as a non-interactive subshell, so `source
+# ~/.bashrc` here doesn't actually pull conda's `conda`/`activate` shell
+# functions into scope. Source conda's own profile script directly instead,
+# which works regardless of interactive/non-interactive shell state.
 /share/apps/software/anaconda3/bin/conda init bash || true
-source ~/.bashrc
+source /share/apps/software/anaconda3/etc/profile.d/conda.sh
 
 if conda env list | grep -q "$ENV_PATH"; then
   echo "Env already exists at $ENV_PATH — skipping creation."

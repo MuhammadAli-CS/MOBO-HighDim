@@ -24,7 +24,7 @@ cd MOBO-HighDim
 Do this from an interactive allocation, not the login node:
 
 ```
-salloc --mem=8g --cpus-per-task=4 --time=01:00:00 --partition=kilian-interactive
+salloc --mem=8g --cpus-per-task=4 --time=01:00:00 --partition=default_partition-interactive --account=kilian
 bash cluster/setup_env.sh
 exit   # end the interactive allocation once it finishes
 ```
@@ -73,15 +73,29 @@ before relying on this — some clusters firewall compute nodes off from the
 public internet. If they don't, these two parts need to run from an
 interactive login-node-adjacent session instead of a batch job.
 
-## Partitions
+## Partitions and accounts
 
-Per Cornell's onboarding email: priority partition is `kilian` (private,
-preemptive — reclaimed by the owner within ~1hr if contended), falling back
-to the general `default_partition`/`gpu` community queues. Interactive jobs
-submitted to `kilian` are automatically moved to `kilian-interactive`. All
-scripts here default to `--partition=kilian`; change it in
-`run_experiment.sub` / `submit_composite_curve_100d.sh` / `submit_llm.sh` if
-quota becomes an issue.
+`kilian` is a SLURM **account**, not a partition — `scontrol show partition
+kilian` returns "not found". The real partitions on Unicorn are
+`default_partition`, `gpu`, `spark`, and `aimi` (each with a `-interactive`
+variant with a 2-day time limit, for `salloc`). Your priority (per Cornell's
+onboarding email) comes from the `kilian` **account**, not a partition name —
+confirmed via `sacctmgr -p show assoc user=<netid>`, which lists `kilian` as
+your account.
+
+All scripts here therefore use `--partition=aimi --account=kilian` for actual
+BO runs, and `--partition=default_partition --account=kilian` for the
+lightweight plot jobs that don't need a GPU. `aimi` is the SURP program's
+own partition (`aimi-compute-[01-03]`: 224 CPUs / ~2TB RAM / 8x NVIDIA B200
+per node) — access is gated by the `en-cc-unicorn-aimi-users` group
+(`scontrol show partition aimi`'s `AllowGroups`), confirmed present via `id`,
+with `AllowAccounts=ALL` so the existing `kilian` account works there too.
+This is meaningfully more powerful than the general `gpu` partition (whose
+best nodes top out at RTX A6000), so it's used in preference to `gpu` for
+every job here. Check current node load with `sinfo` before submitting if
+you want to avoid queueing behind fully-`alloc`'d nodes — GPU
+type isn't pinned by default, so jobs land on whatever's free rather than
+waiting for a specific card.
 
 ## Pulling results back down
 
@@ -96,8 +110,8 @@ a push carries the result files).
 
 ## Adjusting resources
 
-`cluster/run_experiment.sub` requests `--mem=16g --gres=gpu:1
---cpus-per-task=4 --time=08:00:00` for every job. The Kronecker-GP job here
+`cluster/run_experiment.sub` requests `--mem=64g --gres=gpu:1
+--cpus-per-task=16 --time=08:00:00` for every job. The Kronecker-GP job here
 is the one to watch — at d=20/200 evals it was already ~100x the
 independent-GP fit cost (see `experiments/correlation_ablation_dtlz2curve/RESULTS.md`),
 and this run is at 5x the input dimension and 3x the eval budget, so it's
