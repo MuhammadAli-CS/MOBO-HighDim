@@ -464,16 +464,35 @@ correlation modeling specifically.
 \centering
 \caption{Correlation-ablation results: DTLZ2-curve, $d=20$, $K=8$ curve points, 200 evals, batch 15, 3 trust regions, seed 0.}
 \label{tab:kronecker-results}
-\begin{tabular}{lcc}
+\begin{tabular}{lccc}
 \toprule
-Method & Final hypervolume & Pareto set size \\
+Method & Final hypervolume & Pareto set size & Total fit time \\
 \midrule
-Standard MORBO & TBD & TBD \\
-Independent-GP composite & TBD & TBD \\
-Kronecker-GP composite & TBD & TBD \\
+Standard MORBO & 34.216 & 4 & 7.4s \\
+Independent-GP composite & \textbf{34.307} & 6 & 22.7s \\
+Kronecker-GP composite & 34.271 & 5 & 2255.4s \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+All three land within 0.3\% hypervolume of each other. Composite modeling
+(either variant) edges out direct modeling by a small margin, consistent
+with the near-identical result in Section~\ref{sec:composite}. Critically,
+the Kronecker-GP variant does \emph{not} beat the independent-GP variant --
+if anything it finishes marginally behind (34.271 vs.\ 34.307) -- despite
+the raw curve response being genuinely correlated by construction. The
+Kronecker fit is also \textbf{roughly 100$\times$ more expensive}
+(2255.4s vs.\ 22.7s total fit time across the run), the direct empirical
+explanation for why this configuration was the single most resource-intensive
+of the extensions implemented here. At this data scale (three trust regions
+each fitting a local GP on a handful of points at a time) and this raw
+response, the extra correlation-modeling machinery costs substantially more
+without a matching accuracy return -- decoupling alone (option 2) captures
+the composite-modeling benefit here, which does not support
+\citeauthor{maddox2021hogp}'s correlation-modeling emphasis transferring to
+this smaller-scale, differently-structured setting (their result is on a
+177-dimensional image-structured raw response with an HOGP, not a
+Kronecker multi-task GP on an 8-point curve).
 
 \section{Composite MORBO on a Real Simulator: Penicillin Fermentation}
 \label{sec:penicillin}
@@ -505,15 +524,33 @@ $K=5$ checkpoints (26-dimensional raw response) for tractability.
 \centering
 \caption{Composite Penicillin results: $K=5$ checkpoints, 200 evals, batch 10, 3 trust regions, seed 0.}
 \label{tab:penicillin-results}
-\begin{tabular}{lcc}
+\begin{tabular}{lccc}
 \toprule
-Method & Final hypervolume & Pareto set size \\
+Method & Final hypervolume & Pareto set size & Total fit time \\
 \midrule
-Standard MORBO & TBD & TBD \\
-Composite MORBO & TBD & TBD \\
+Standard MORBO & 347{,}702.9 & 30 & 14.5s \\
+Composite MORBO & \textbf{424{,}234.9} & 36 & 134.3s \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+Composite modeling wins by \textbf{+22.0\% final hypervolume} -- the largest
+margin of any composite-vs-direct comparison in this work (vs.\ $\sim$0.3\%
+on the synthetic DTLZ2-family problems in Sections~\ref{sec:composite}
+and~\ref{sec:kronecker-ablation}). This is the first result here where
+composite modeling produces a qualitatively different outcome rather than a
+marginal edge, consistent with Penicillin's raw trajectory carrying real
+correlated structure across 5 state variables and time that the final
+3-objective reduction discards, unlike DTLZ2's synthetic $(g, \cos, \sin)$
+decomposition. Checking \texttt{tr\_restarts} rules out a restart-driven
+explanation (zero restarts fired in either run): the improvement traces to
+one 10-point batch (between the 170th and 180th evaluation) whose candidates
+land in a substantially better region of raw trajectory space, producing a
+21.3\% single-step jump in true hypervolume that a smooth, restart-free
+optimization trajectory then holds. Composite modeling here costs
+$\sim$9$\times$ the fit time of direct modeling (134.3s vs.\ 14.5s across
+the run) -- a real tradeoff, but unlike the Kronecker-ablation result, one
+that buys a substantively better outcome rather than none.
 
 \section{Discussion}
 
@@ -539,7 +576,23 @@ alone, or the correlation-modeling machinery specifically), and whether a
 composite structure taken from a genuine black-box simulator, rather than a
 synthetic decomposition of a closed-form test function, behaves the same
 way. Tables~\ref{tab:kronecker-results} and~\ref{tab:penicillin-results}
-report both.
+report both, and the two answers point in different directions. At $d=20$
+on a synthetic correlated curve, decoupling alone (independent per-dimension
+GPs) matches or slightly exceeds a joint Kronecker model at roughly
+1/100th the fit cost -- the correlation-modeling machinery specifically is
+not what's doing the work here, at least not at this data scale and raw
+dimensionality. On the genuine black-box simulator, by contrast, composite
+modeling's advantage over direct modeling is an order of magnitude larger
+(+22.0\% vs.\ $\sim$0.3\%) than on any synthetic decomposition tested --
+consistent with the raw trajectory carrying exploitable structure that a
+closed-form test function's synthetic decomposition simply doesn't have.
+Read together: the benefit of composite modeling in this work comes
+primarily from \emph{what} raw response is available to model (a real
+simulator's intermediate state vs.\ a synthetic algebraic decomposition),
+not from \emph{how} that raw response is modeled (jointly vs.\
+independently) -- the opposite emphasis from \citeauthor{maddox2021hogp}'s
+177-dimensional HOGP result, though at a very different scale and problem
+structure, so the two findings are not in direct tension.
 
 \bibliographystyle{plainnat}
 \begin{thebibliography}{9}
