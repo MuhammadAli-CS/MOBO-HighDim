@@ -68,6 +68,29 @@ all three finish, a dependent plot job runs automatically
 `experiments/composite_curve_dtlz2_100d/comparison_seed0.png` via
 `plot_comparison.py`'s auto-discovery — no manual replotting needed.
 
+## 4b. Trust-region shape adaptation (tr_shape_dtlz2_100d)
+
+MORBO's trust regions were purely isotropic hypercubes — no per-dimension
+lengthscale rescaling at all (a step below even the original TuRBO paper's
+own technique). `tr_shape_dtlz2_100d` compares three alternative geometries
+against the isotropic baseline at fig2 scale (d=100, 600 evals, batch 50):
+`ard_box` (axis-aligned, rescaled by the TR's fitted GP ARD lengthscales),
+`pca_ellipsoid` (rotated into the PCA frame of the TR's local data), and
+`ard_pca_ellipsoid` (PCA rotation + lengthscale-reweighted axis widths).
+See `morbo/trust_region.py`'s `TurboHParams.tr_shape` docstring for the
+full design rationale (why a rotated *box* rather than a true ellipsoid,
+why the isotropic baseline is provably unaffected, etc.):
+
+```
+bash cluster/submit_tr_shape_100d.sh
+```
+
+Same job-log/auto-plot pattern as `composite_curve_dtlz2_100d` above. The
+isotropic baseline (`morbo`) is reused from a file already committed to the
+repo (`experiments/tr_shape_dtlz2_100d/morbo/0000_morbo.pt`, identical to
+`fig2_dtlz2_100d`'s own `morbo` result) rather than resubmitted — `git pull`
+already has it, no job needed.
+
 ## 5. LLM-dependent parts (Parts 2 and 3)
 
 ```
