@@ -14,11 +14,18 @@
 #     n_initial=200, min_tr_size=200 -- identical to tr_shape_dtlz2_100d's
 #     own scale, so d is the only thing that varies): d in {20, 50, 150, 200}.
 #     (d=100 is already done in tr_shape_dtlz2_100d; not resubmitted here.)
-#   - tr_shape_rover: a real, non-DTLZ2 benchmark (d=60, Rover navigation,
-#     already wired into this repo, existing config reused as-is) to check
-#     the finding isn't a DTLZ2-specific artifact.
+#   - tr_shape_rover: a real, non-DTLZ2 benchmark (d=60, M=2, Rover
+#     navigation, already wired into this repo, existing config reused
+#     as-is) to check the finding isn't a DTLZ2-specific artifact.
+#   - tr_shape_penicillin: a real, non-DTLZ2, LOW-dimensional benchmark
+#     (d=7, M=3, fermentation simulator, existing penicillin_composite
+#     config reused as-is). Fills the low-d gap the sweep+Rover don't cover,
+#     and is a negative-control check: at d=7 we predict ard_box should NOT
+#     collapse and pca_ellipsoid should show little advantage, matching the
+#     d=20 pattern -- confirming the effect tracks dimensionality specifically,
+#     not problem type or objective count (M=3 here vs M=2 everywhere else).
 #
-# All 5 experiments need all 4 labels run fresh (morbo, ard_box,
+# All 6 experiments need all 4 labels run fresh (morbo, ard_box,
 # pca_ellipsoid, ard_pca_ellipsoid) -- none of these configs match any
 # existing baseline closely enough to reuse.
 #
@@ -55,7 +62,7 @@ submit_plot() {
 
 LABELS=(morbo ard_box pca_ellipsoid ard_pca_ellipsoid)
 
-for EXP in tr_shape_dtlz2_20d tr_shape_dtlz2_50d tr_shape_dtlz2_150d tr_shape_dtlz2_200d tr_shape_rover; do
+for EXP in tr_shape_dtlz2_20d tr_shape_dtlz2_50d tr_shape_dtlz2_150d tr_shape_dtlz2_200d tr_shape_rover tr_shape_penicillin; do
   echo "Submitting $EXP jobs..."
   JOB_IDS=()
   for LABEL in "${LABELS[@]}"; do
@@ -67,6 +74,7 @@ for EXP in tr_shape_dtlz2_20d tr_shape_dtlz2_50d tr_shape_dtlz2_150d tr_shape_dt
 done
 
 echo "All jobs submitted. Check with: squeue -u \$USER"
-echo "5 experiments x 4 labels = 20 experiment jobs, plus 5 dependent plot jobs."
+echo "6 experiments x 4 labels = 24 experiment jobs, plus 6 dependent plot jobs."
 echo "tr_shape_rover uses 2000 evals (its own existing config) -- expect it to"
-echo "take longer than the 600-eval DTLZ2 sweep jobs."
+echo "take longer than the 600-eval DTLZ2 sweep jobs. tr_shape_penicillin is"
+echo "small (d=7, 200 evals) and should be one of the fastest to finish."
