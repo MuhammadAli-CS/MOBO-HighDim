@@ -91,7 +91,9 @@ class RoverDomain:
         self.force_goal = False
 
         if self.rnd_stream is None:
-            self.rnd_stream = np.random.RandomState(np.random.randint(0, 2**32 - 1))
+            self.rnd_stream = np.random.RandomState(
+                np.random.randint(0, 2**32 - 1, dtype=np.int64)
+            )
 
     # return the negative cost which need to be optimized
     def __call__(self, params, n_samples=1000):
@@ -373,16 +375,39 @@ def get_rover_fn(dim, device=None, dtype=None, force_goal=False, force_start=Tru
     f_max = 5.0
     objective = ConstantOffsetFn(domain, f_max)
 
+    # `PointBSpline.set_params` fits an exact-interpolation cubic spline
+    # (`splprep(..., k=3, s=0)`) through a cumsum of the raw waypoint deltas.
+    # If enough consecutive deltas are ~0 (candidates whose perturbation
+    # range collapsed very narrow along some raw dims -- e.g. tr_shape
+    # variants with a small axis_length there, more likely given Rover's
+    # already-narrow native bounds of [0, 0.05] per dim), consecutive
+    # trajectory points coincide and scipy raises "Invalid inputs.". This
+    # isn't specific to any one tr_shape variant or a bug in the sampler
+    # itself -- it's a pre-existing fragility in this exact-interpolation
+    # spline fit that a uniform isotropic sampler at this scale rarely
+    # triggers but a narrower per-dimension sampling range can. Treat such
+    # a candidate as maximally bad/infeasible (a large finite penalty, not
+    # inf/nan, so it can't propagate NaNs into GP fitting a few steps
+    # later) rather than crashing the whole run over one degenerate point.
+    PENALTY = 1e6
+
+    def _safe_eval(fn, x_np):
+        try:
+            return fn(x_np)
+        except Exception:
+            return None
+
     def f(X):
-        neg_rewards = torch.tensor(
-            [-1 * objective(x.cpu().numpy()) for x in X], **tkwargs
-        ).unsqueeze(-1)
-        trajectory_lengths = torch.tensor(
-            [domain.trajectory_length(x.cpu().numpy()) for x in X], **tkwargs
-        ).unsqueeze(-1)
-        distance_from_goal = torch.tensor(
-            [domain.distance_from_goal(x.cpu().numpy()) for x in X], **tkwargs
-        ).unsqueeze(-1)
+        neg_rewards, distances = [], []
+        for x in X:
+            x_np = x.cpu().numpy()
+            r = _safe_eval(objective, x_np)
+            neg_rewards.append(-1 * r if r is not None else PENALTY)
+            dg = _safe_eval(domain.distance_from_goal, x_np)
+            distances.append(dg if dg is not None else PENALTY)
+
+        neg_rewards = torch.tensor(neg_rewards, **tkwargs).unsqueeze(-1)
+        distance_from_goal = torch.tensor(distances, **tkwargs).unsqueeze(-1)
 
         objs = torch.cat((neg_rewards, distance_from_goal), dim=-1)
         return objs
