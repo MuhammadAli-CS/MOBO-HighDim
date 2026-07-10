@@ -62,6 +62,9 @@ supported_labels = [
     "independent_gp_composite",
     "kronecker_gp_composite",
     "composite_penicillin",
+    "ard_box",
+    "pca_ellipsoid",
+    "ard_pca_ellipsoid",
 ]
 
 BASE_SEED = 12346
@@ -113,6 +116,7 @@ def run_one_replication(
     llm_candidates_per_tr: int = TurboHParams.llm_candidates_per_tr,
     llm_problem_description: str = TurboHParams.llm_problem_description,
     use_kronecker_gp: bool = TurboHParams.use_kronecker_gp,
+    tr_shape: str = TurboHParams.tr_shape,
     n_curve_points: int = 8,
     n_penicillin_checkpoints: int = 10,
     dtype: torch.device = torch.double,
@@ -327,6 +331,7 @@ def run_one_replication(
         llm_candidates_per_tr=llm_candidates_per_tr,
         llm_problem_description=llm_problem_description,
         use_kronecker_gp=use_kronecker_gp,
+        tr_shape=tr_shape,
     )
 
     trbo_state = TRBOState(

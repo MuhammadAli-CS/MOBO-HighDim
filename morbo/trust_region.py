@@ -30,9 +30,14 @@ from botorch.utils.objective import get_objective_weights_transform
 from botorch.utils.sampling import draw_sobol_normal_samples
 from botorch.utils.transforms import normalize
 from morbo.utils import (
+    compute_ard_box_shape,
+    compute_ard_pca_ellipsoid_shape,
+    compute_pca_ellipsoid_shape,
+    extract_ard_lengthscale,
     get_constraint_slack_and_feasibility,
     get_fitted_kronecker_model,
     get_fitted_model,
+    get_indices_in_ellipsoid,
     get_indices_in_hypercube,
 )
 from scipy.stats.mstats import winsorize
@@ -113,6 +118,13 @@ class TurboHParams:
             the reference point before generating new candidates.
         fit_gpytorch_options: Options for fitting GPs
         restart_hv_scalarizations: Whether to sample restart points using random scalarizations
+        tr_shape: Trust-region geometry. "isotropic" (default, unchanged behavior):
+            an axis-aligned cube of edge length `length`. "ard_box": axis-aligned box
+            rescaled per-dimension by the TR's own fitted GP ARD lengthscales.
+            "pca_ellipsoid": box rotated into the PCA frame of the TR's local data.
+            "ard_pca_ellipsoid": PCA rotation with axis widths additionally reweighted
+            by lengthscales projected onto each principal axis. Only "isotropic" is
+            supported together with `use_kronecker_gp`.
     """
 
     length_init: float = 0.8
@@ -158,6 +170,15 @@ class TurboHParams:
     llm_candidates_per_tr: int = 0
     llm_problem_description: str = ""
     use_kronecker_gp: bool = False
+    tr_shape: str = "isotropic"
+
+    _TR_SHAPES = {"isotropic", "ard_box", "pca_ellipsoid", "ard_pca_ellipsoid"}
+
+    def __post_init__(self) -> None:
+        if self.tr_shape not in self._TR_SHAPES:
+            raise ValueError(
+                f"tr_shape must be one of {self._TR_SHAPES}, got {self.tr_shape!r}."
+            )
 
     @classmethod
     def from_dict(cls, tr_hparams: Dict) -> None:
@@ -234,6 +255,18 @@ class TrustRegion(ABC, Module):
             tr_hparams.length_init, device=bounds.device, dtype=bounds.dtype
         )
         self.register_buffer("length", length)
+        # Trust-region shape state (see `tr_hparams.tr_shape`). Defaults to an
+        # identity rotation and a uniform `axis_lengths` (same convention as
+        # `length`: full edge length, not half-width) -- i.e. exactly
+        # equivalent to the isotropic cube for `tr_shape == "isotropic"`,
+        # which never reads or updates these. `.clone()`, not `.expand()`,
+        # so each buffer owns independent storage.
+        self.register_buffer(
+            "R", torch.eye(self.dim, device=bounds.device, dtype=bounds.dtype)
+        )
+        self.register_buffer(
+            "axis_lengths", length.expand(self.dim).clone()
+        )
         self.register_buffer(
             "n_successes", torch.tensor(0, device=bounds.device, dtype=torch.int64)
         )
@@ -445,16 +478,27 @@ class TrustRegion(ABC, Module):
         # Update the model with the new training data
         if global_model:
             self.model = global_model
-        elif self.update_model() and self.tr_hparams.use_noisy_trbo:
-            # If the model was updated, update the `Y_estimate`, `Y_center`,
-            # and `best_Y` with updated model predictions.
-            self.Y_estimate = self._get_predictions(self.X)
-            center_idx = (self.X == self.X_center).all(dim=-1).nonzero()[0].item()
-            self._set_center_and_best_points(center_idx)
+            model_updated = False
+        else:
+            model_updated = self.update_model()
+            if model_updated and self.tr_hparams.use_noisy_trbo:
+                # If the model was updated, update the `Y_estimate`, `Y_center`,
+                # and `best_Y` with updated model predictions.
+                self.Y_estimate = self._get_predictions(self.X)
+                center_idx = (self.X == self.X_center).all(dim=-1).nonzero()[0].item()
+                self._set_center_and_best_points(center_idx)
+        if model_updated and self.tr_hparams.tr_shape != "isotropic":
+            # NOTE: this must live outside the `use_noisy_trbo`-gated branch
+            # above -- none of the shape-adaptation variants set that, so a
+            # naive placement inside it would silently never fire.
+            self._update_tr_shape()
 
         if self.tr_hparams.verbose and X_new is not None:
             print(f"Num points in TR: {self.X.shape[0]}")
             print(f"length: {self.length}")
+            if self.tr_hparams.tr_shape != "isotropic":
+                print(f"axis_lengths: {self.axis_lengths}")
+                print(f"R is identity: {torch.equal(self.R, torch.eye(self.dim, device=self.R.device, dtype=self.R.dtype))}")
         return False
 
     def _set_Y_center(self, center_idx: int) -> None:
@@ -539,6 +583,89 @@ class TrustRegion(ABC, Module):
             [normalized_X_center - half_length, normalized_X_center + half_length],
             dim=0,
         ).clamp(0.0, 1.0)
+
+    def get_indices_in_tr(self, X: Tensor, length_multiplier: float = 1.0) -> Tensor:
+        r"""Get indices of `X` inside this trust region, respecting `tr_shape`.
+
+        Dispatches to the existing, unmodified `get_indices_in_hypercube` for
+        `tr_shape == "isotropic"` (so isotropic-mode behavior is unchanged by
+        construction, not by careful review of shared-default-parameter
+        behavior), else to the rotated-frame `get_indices_in_ellipsoid` using
+        this TR's own `R`/`axis_lengths`.
+
+        Args:
+            X: `n x d`-dim tensor of normalized `[0, 1]^d` points.
+            length_multiplier: scales the region's extent before testing
+                containment (mirrors existing callers that pass e.g.
+                `length=tr.length * 2`).
+
+        Returns:
+            A `n'`-dim tensor containing the indices of points inside the region.
+        """
+        if self.tr_hparams.tr_shape == "isotropic":
+            return get_indices_in_hypercube(
+                X_center=self.X_center_normalized,
+                X=X,
+                length=self.length * length_multiplier,
+            )
+        return get_indices_in_ellipsoid(
+            X_center=self.X_center_normalized,
+            X=X,
+            R=self.R,
+            axis_lengths=self.axis_lengths * length_multiplier,
+        )
+
+    def _update_tr_shape(self) -> None:
+        r"""Recompute `self.R`/`self.axis_lengths` per `tr_hparams.tr_shape`.
+
+        No-op for `tr_shape == "isotropic"` (never called for that mode, see
+        `update()`). Falls back to the isotropic shape (identity `R`,
+        uniform `axis_lengths`) if ARD lengthscales aren't available (e.g.
+        `use_ard=False`, or `self.model` is a `KroneckerMultiTaskGP` --
+        shape-adaptation's ARD-based variants are not supported together
+        with `use_kronecker_gp`) for the `ard_box`/`ard_pca_ellipsoid` modes.
+        """
+        # GP kernel lengthscales are `nn.Parameter`s (`requires_grad=True`).
+        # Without `no_grad()`, R/axis_lengths (and everything derived from
+        # them downstream -- candidate points, then their function
+        # evaluations) would silently inherit grad-tracking, eventually
+        # contaminating `self.Y` itself (confirmed: this crashed
+        # `update_model()`'s `self.Y.cpu().numpy()` a few iterations into a
+        # smoke-test run before this guard was added).
+        with torch.no_grad():
+            shape = self.tr_hparams.tr_shape
+            needs_ard = shape in ("ard_box", "ard_pca_ellipsoid")
+            lengthscale = (
+                extract_ard_lengthscale(self.model, self.dim) if needs_ard else None
+            )
+            if needs_ard and lengthscale is None:
+                R, axis_lengths = torch.eye(
+                    self.dim, device=self.length.device, dtype=self.length.dtype
+                ), self.length.expand(self.dim).clone()
+            elif shape == "ard_box":
+                R, axis_lengths = compute_ard_box_shape(
+                    lengthscale=lengthscale, length=self.length, dim=self.dim
+                )
+            elif shape == "pca_ellipsoid":
+                R, axis_lengths = compute_pca_ellipsoid_shape(
+                    X=normalize(self.X, bounds=self.bounds),
+                    X_center=self.X_center_normalized,
+                    length=self.length,
+                    dim=self.dim,
+                )
+            else:  # "ard_pca_ellipsoid"
+                R, axis_lengths = compute_ard_pca_ellipsoid_shape(
+                    X=normalize(self.X, bounds=self.bounds),
+                    X_center=self.X_center_normalized,
+                    lengthscale=lengthscale,
+                    length=self.length,
+                    dim=self.dim,
+                )
+            axis_lengths = axis_lengths.clamp(
+                self.tr_hparams.length_min, self.tr_hparams.length_max
+            )
+            self.R = R.detach()
+            self.axis_lengths = axis_lengths.detach()
 
 
 class ScalarizedTrustRegion(TrustRegion):
@@ -798,9 +925,7 @@ class HypervolumeTrustRegion(TrustRegion):
                 pareto_X_normalized.shape[0], device=pareto_X_normalized.device
             )
             if self.X_center_normalized is not None:
-                indices_in_tr = get_indices_in_hypercube(
-                    self.X_center_normalized, pareto_X_normalized, length=self.length
-                )
+                indices_in_tr = self.get_indices_in_tr(pareto_X_normalized)
                 if indices_in_tr.shape[0] > 0:
                     indices = indices_in_tr
             if invalid_centers is not None:

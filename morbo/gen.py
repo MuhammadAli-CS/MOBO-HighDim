@@ -33,9 +33,9 @@ from morbo.llm_candidates import propose_candidates
 from morbo.state import TRBOState
 from morbo.utils import (
     decay_function,
-    get_indices_in_hypercube,
     sample_tr_discrete_points,
     sample_tr_discrete_points_subset_d,
+    sample_tr_discrete_points_subset_d_rotated,
 )
 from torch import Tensor
 from torch.quasirandom import SobolEngine
@@ -200,9 +200,7 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
             if tr.tr_hparams.hypervolume:
                 best_X = normalize(tr.best_X, bounds=tr.bounds)
                 # only use pareto points inside TR for generating candidates
-                indices = get_indices_in_hypercube(
-                    tr.X_center_normalized, best_X, length=tr.length
-                )
+                indices = tr.get_indices_in_tr(best_X)
                 best_X = best_X[indices]
             else:
                 best_X = tr.X_center_normalized
@@ -216,20 +214,34 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
             )
 
             # Pending points that are in this hypercube
-            inds_next_in_tr = get_indices_in_hypercube(
-                X_center=tr.X_center_normalized, X=X_next, length=tr.length
-            )
+            inds_next_in_tr = tr.get_indices_in_tr(X_next)
 
             # Sample from all Pareto optimal points in the TR
-            X_cand = sample_tr_discrete_points_subset_d(
-                best_X=best_X,
-                normalized_tr_bounds=tr.get_bounds(),
-                n_discrete_points=trbo_state.tr_hparams.raw_samples,
-                length=tr.length,
-                qmc=trbo_state.tr_hparams.qmc,
-                trunc_normal_perturb=trbo_state.tr_hparams.trunc_normal_perturb,
-                prob_perturb=prob_perturb,
-            )
+            if tr.tr_hparams.tr_shape == "isotropic":
+                X_cand = sample_tr_discrete_points_subset_d(
+                    best_X=best_X,
+                    normalized_tr_bounds=tr.get_bounds(),
+                    n_discrete_points=trbo_state.tr_hparams.raw_samples,
+                    length=tr.length,
+                    qmc=trbo_state.tr_hparams.qmc,
+                    trunc_normal_perturb=trbo_state.tr_hparams.trunc_normal_perturb,
+                    prob_perturb=prob_perturb,
+                )
+            else:
+                if trbo_state.tr_hparams.trunc_normal_perturb:
+                    raise NotImplementedError(
+                        "trunc_normal_perturb is not supported together with a "
+                        f"non-isotropic tr_shape ({tr.tr_hparams.tr_shape!r})."
+                    )
+                X_cand = sample_tr_discrete_points_subset_d_rotated(
+                    best_X=best_X,
+                    X_center=tr.X_center_normalized,
+                    R=tr.R,
+                    axis_lengths=tr.axis_lengths,
+                    n_discrete_points=trbo_state.tr_hparams.raw_samples,
+                    qmc=trbo_state.tr_hparams.qmc,
+                    prob_perturb=prob_perturb,
+                )
 
             # Unnormalize initial conditions to the original hypercube for prediction
             X_cand_unnormalized = unnormalize(X_cand, bounds=tr.bounds)

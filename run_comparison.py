@@ -53,6 +53,22 @@ reduced to the same 3 objectives (yield, CO2, time) plain Penicillin exposes.
 Compare against the "morbo" label on the same experiment directory
 (`evalfn: "Penicillin"` in the base config) for a controlled A/B.
 
+The "ard_box" / "pca_ellipsoid" / "ard_pca_ellipsoid" labels run ordinary
+MORBO (direct DTLZ2 objectives, same as the "morbo" label) but replace the
+trust region's isotropic hypercube with an alternative shape, adapted to
+each TR's own local data every time its model refits (see `tr_shape` on
+`TurboHParams`, `morbo/trust_region.py`): "ard_box" rescales the box
+per-dimension by the TR's fitted GP ARD lengthscales (the original TuRBO
+paper's technique, which this fork's isotropic-only default doesn't
+implement); "pca_ellipsoid" instead rotates the box into the PCA frame of
+the TR's local data (no lengthscale involvement); "ard_pca_ellipsoid"
+combines both -- the PCA rotation, with per-axis widths additionally
+reweighted by lengthscales projected onto each principal axis. All three
+are controlled A/Bs against the "morbo" label (identical `evalfn`, only TR
+geometry differs) and can reuse an existing "morbo" result from the same
+experiment directory without rerunning it. Not supported together with
+`use_kronecker_gp`.
+
 Usage (same CLI shape as experiments/main.py):
     python run_comparison.py <experiment_name> <label> <seed>
 e.g.
@@ -66,6 +82,9 @@ e.g.
     python run_comparison.py correlation_ablation_dtlz2curve kronecker_gp_composite 0
     python run_comparison.py penicillin_composite morbo 0
     python run_comparison.py penicillin_composite composite_penicillin 0
+    python run_comparison.py tr_shape_dtlz2_100d ard_box 0
+    python run_comparison.py tr_shape_dtlz2_100d pca_ellipsoid 0
+    python run_comparison.py tr_shape_dtlz2_100d ard_pca_ellipsoid 0
 """
 import json
 import os
@@ -108,6 +127,15 @@ LABEL_OVERRIDES = {
     },
     "composite_penicillin": {
         "evalfn": "CompositePenicillin",
+    },
+    "ard_box": {
+        "tr_shape": "ard_box",
+    },
+    "pca_ellipsoid": {
+        "tr_shape": "pca_ellipsoid",
+    },
+    "ard_pca_ellipsoid": {
+        "tr_shape": "ard_pca_ellipsoid",
     },
 }
 

@@ -6,7 +6,7 @@
 
 
 from math import ceil, log
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from botorch.exceptions.errors import BotorchTensorDimensionError
@@ -155,6 +155,90 @@ def sample_tr_discrete_points_subset_d(
     return X_cand
 
 
+def sample_tr_discrete_points_subset_d_rotated(
+    best_X: Tensor,
+    X_center: Tensor,
+    R: Tensor,
+    axis_lengths: Tensor,
+    n_discrete_points: int,
+    qmc: bool = False,
+    prob_perturb: float = None,
+) -> Tensor:
+    r"""Rotated-frame analogue of `sample_tr_discrete_points_subset_d`.
+
+    Masking/perturbation happens in the TR's rotated coordinate frame
+    `w = (x - X_center) @ R` rather than the original coordinates, so that
+    "perturb ~20 of `d` directions" bounds simultaneous degrees of freedom
+    along the TR's own principal axes -- masking original dims and rotating
+    afterward would smear a single "masked-in" raw dimension across every
+    principal direction post-rotation, defeating the point of the subset
+    perturbation. For `R = I` (the `tr_shape == "isotropic"`/`"ard_box"`
+    default rotation) this is the identity change of basis.
+
+    `trunc_normal_perturb` is intentionally not supported here -- callers
+    should raise rather than silently falling back to unrotated truncated-
+    normal sampling (see `TS_select_batch_MORBO`).
+
+    Args:
+        best_X: `n x d`-dim tensor of candidate perturbation centers, in
+            original (unrotated) `[0, 1]^d` coordinates.
+        X_center: `1 x d`-dim tensor, the TR center in original coordinates.
+        R: `d x d`-dim rotation matrix (orthonormal columns = principal axes).
+        axis_lengths: `d`-dim tensor, full edge length of the TR along each
+            rotated axis (same convention as `length` -- a full width, not a
+            half-width).
+        n_discrete_points: number of points to sample for use in discrete TS.
+        qmc: boolean indicating whether to use qmc.
+        prob_perturb: as in `sample_tr_discrete_points_subset_d`.
+
+    Returns:
+        Tensor: a `n_discrete_points x d`-dim tensor in original `[0, 1]^d`
+            coordinates.
+    """
+    d = R.shape[-1]
+    if prob_perturb is None:
+        prob_perturb = min(20.0 / d, 1.0)
+
+    if best_X.shape[0] == 1:
+        X_cand = best_X.repeat(n_discrete_points, 1)
+    else:
+        rand_indices = torch.randint(
+            best_X.shape[0], (n_discrete_points,), device=best_X.device
+        )
+        X_cand = best_X[rand_indices]
+
+    W_cand = (X_cand - X_center) @ R
+    half_axis = axis_lengths / 2.0
+
+    if qmc:
+        bounds = torch.stack([-half_axis, half_axis], dim=0)
+        pert_w = draw_sobol_samples(bounds=bounds, n=n_discrete_points, q=1).squeeze(1)
+    else:
+        u = torch.rand(
+            n_discrete_points, d, dtype=axis_lengths.dtype, device=axis_lengths.device
+        )
+        pert_w = (2 * half_axis) * u - half_axis
+
+    # find cases where we are not perturbing any dimensions (same scheme as
+    # `sample_tr_discrete_points_subset_d`, operating on rotated coordinates)
+    mask = (
+        torch.rand(
+            n_discrete_points, d, dtype=axis_lengths.dtype, device=axis_lengths.device
+        )
+        <= prob_perturb
+    )
+    ind = (~mask).all(dim=-1).nonzero()
+    n_perturb = ceil(d * prob_perturb)
+    perturb_mask = torch.zeros(d, dtype=mask.dtype, device=mask.device)
+    perturb_mask[:n_perturb].fill_(1)
+    for idx in ind:
+        mask[idx] = perturb_mask[torch.randperm(d, device=axis_lengths.device)]
+    W_cand[mask] = pert_w[mask]
+
+    X_cand_new = X_center + W_cand @ R.t()
+    return X_cand_new.clamp(0.0, 1.0)
+
+
 def get_tr_center(X: Tensor, f_obj: Tensor) -> Tensor:
     r"""Find the best point in the trust region.
 
@@ -189,6 +273,177 @@ def get_indices_in_hypercube(
         A `n'`-dim tensor containing the points inside the hypercube.
     """
     return ((X - X_center).abs() - length / 2 <= eps).all(dim=1).nonzero().view(-1)
+
+
+def get_indices_in_ellipsoid(
+    X_center: Tensor, X: Tensor, R: Tensor, axis_lengths: Tensor, eps: float = 1e-10
+) -> Tensor:
+    r"""Get indices of observed points inside a rotated-box trust region.
+
+    Rotated-frame analogue of `get_indices_in_hypercube`: containment is an
+    L-infinity test in the TR's own rotated coordinate frame
+    `w = (x - X_center) @ R`, using per-axis `axis_lengths` (full edge
+    length, not half-width) instead of a single scalar `length`. For
+    `R = I` and uniform `axis_lengths`, this is identical to
+    `get_indices_in_hypercube`.
+
+    Args:
+        X_center: a `1 x d`-dim tensor containing the trust region center point.
+            `X_center` must be normalized to be within `[0, 1]^d`.
+        X: `n x d`-dim tensor containing all data points collected by this trust region.
+        R: `d x d`-dim rotation matrix (orthonormal columns = principal axes).
+        axis_lengths: `d`-dim tensor, full edge length along each rotated axis.
+        eps: absolute tolerance for evaluating equality (necessary on CUDA).
+
+    Returns:
+        A `n'`-dim tensor containing the indices of points inside the region.
+    """
+    W = (X - X_center) @ R
+    return ((W.abs() - axis_lengths / 2) <= eps).all(dim=1).nonzero().view(-1)
+
+
+def extract_ard_lengthscale(model: Model, dim: int) -> Optional[Tensor]:
+    r"""Extract a `dim`-dim per-input-dimension ARD lengthscale vector from a
+    fitted model, geometric-mean-averaged across output dimensions if
+    `model` bundles more than one (i.e. is a `ModelListGP`).
+
+    Returns `None` if `model` is a `KroneckerMultiTaskGP` (the ARD-based
+    `tr_shape` variants only support the `get_fitted_model`/`ModelListGP`
+    path, not the Kronecker joint model) or if any constituent model was fit
+    without ARD (`use_ard=False`, a single shared lengthscale rather than one
+    per input dimension) -- callers should fall back to the isotropic shape
+    in either case.
+    """
+    if isinstance(model, KroneckerMultiTaskGP):
+        return None
+    models = [model] if not isinstance(model, ModelListGP) else model.models
+    log_ls_per_output = []
+    for m in models:
+        ls = m.covar_module.base_kernel.lengthscale.reshape(-1)
+        if ls.numel() != dim:
+            return None
+        log_ls_per_output.append(ls.log())
+    return torch.stack(log_ls_per_output, dim=0).mean(dim=0).exp()
+
+
+def compute_ard_box_shape(
+    lengthscale: Tensor, length: Tensor, dim: int
+) -> Tuple[Tensor, Tensor]:
+    r"""Axis-aligned box shape, rescaled per-dimension by GP ARD lengthscales
+    (the original TuRBO paper's box-rescaling technique).
+
+    Args:
+        lengthscale: a `dim`-dim tensor of (already output-aggregated) ARD
+            lengthscales, e.g. from `extract_ard_lengthscale`.
+        length: a 0-dim tensor, the TR's current (isotropic) edge length.
+        dim: input dimension `d`.
+
+    Returns:
+        R: `d x d` identity (no rotation).
+        axis_lengths: `d`-dim tensor, geometric-mean-normalized so
+            `axis_lengths.prod() ** (1/d) == length` -- same total "volume"
+            as the isotropic cube of edge `length`, only shape differs.
+    """
+    R = torch.eye(dim, device=length.device, dtype=length.dtype)
+    log_ls = lengthscale.log()
+    weights = (log_ls - log_ls.mean()).exp()  # geometric-mean-normalized, prod == 1
+    axis_lengths = length * weights
+    return R, axis_lengths
+
+
+def compute_pca_ellipsoid_shape(
+    X: Tensor, X_center: Tensor, length: Tensor, dim: int, eig_floor: float = 1e-8
+) -> Tuple[Tensor, Tensor]:
+    r"""Rotated-box shape from PCA of the TR's local data about its center.
+
+    Falls back to the isotropic shape (identity `R`, uniform `axis_lengths`)
+    if there are fewer than `dim + 1` local points -- PCA is underdetermined
+    otherwise.
+
+    Args:
+        X: `n x d`-dim tensor, the TR's local accumulated data (normalized
+            `[0, 1]^d`).
+        X_center: `1 x d`-dim tensor, the TR center. Used as the fixed center
+            for the second-moment matrix below (rather than `X`'s own
+            empirical mean), keeping the ellipsoid anchored at the same
+            point every other TR operation (sampling, containment) is
+            already relative to.
+        length: a 0-dim tensor, the TR's current (isotropic) edge length.
+        dim: input dimension `d`.
+        eig_floor: minimum eigenvalue (of the second-moment matrix) before
+            taking a square root, guarding near-zero axis widths from a
+            rank-deficient/near-degenerate local point cloud.
+
+    Returns:
+        R: `d x d` orthonormal rotation (eigenvectors of the local
+            second-moment matrix about `X_center`).
+        axis_lengths: `d`-dim tensor, geometric-mean-normalized so
+            `axis_lengths.prod() ** (1/d) == length`.
+    """
+    if X.shape[0] < dim + 1:
+        return (
+            torch.eye(dim, device=length.device, dtype=length.dtype),
+            length.expand(dim).clone(),
+        )
+    delta = X - X_center
+    cov = (delta.t() @ delta) / X.shape[0]
+    eigvals, eigvecs = torch.linalg.eigh(cov)
+    eigvals = eigvals.clamp_min(eig_floor)
+    scale = eigvals.sqrt()
+    log_scale = scale.log()
+    weights = (log_scale - log_scale.mean()).exp()
+    axis_lengths = length * weights
+    return eigvecs, axis_lengths
+
+
+def compute_ard_pca_ellipsoid_shape(
+    X: Tensor,
+    X_center: Tensor,
+    lengthscale: Tensor,
+    length: Tensor,
+    dim: int,
+    eig_floor: float = 1e-8,
+) -> Tuple[Tensor, Tensor]:
+    r"""PCA rotation (as in `compute_pca_ellipsoid_shape`) with axis widths
+    additionally reweighted by GP ARD lengthscales projected onto each
+    principal axis.
+
+    NOTE: this is *not* PCA performed in lengthscale-normalized coordinates
+    (`X / lengthscale`) mapped back to the original space -- that
+    construction is a mathematical no-op (it recovers exactly the plain-PCA
+    covariance regardless of the lengthscales, since undoing the whitening
+    exactly cancels it out: `D @ (D^-1 Sigma D^-1) @ D == Sigma` for any
+    diagonal `D`). Instead, the PCA rotation `R` is computed exactly as in
+    `compute_pca_ellipsoid_shape` (from raw local-data covariance,
+    lengthscale-blind), and lengthscales only enter afterward as a per-axis
+    reweighting of `R`'s already-fixed principal directions.
+
+    Args:
+        X, X_center, length, dim, eig_floor: as in `compute_pca_ellipsoid_shape`.
+        lengthscale: a `dim`-dim tensor of (already output-aggregated) ARD
+            lengthscales, e.g. from `extract_ard_lengthscale`.
+
+    Returns:
+        R: `d x d` orthonormal rotation, identical to
+            `compute_pca_ellipsoid_shape`'s (lengthscales do not affect
+            orientation, only per-axis width).
+        axis_lengths: `d`-dim tensor, geometric-mean-normalized so
+            `axis_lengths.prod() ** (1/d) == length`.
+    """
+    R, axis_lengths_pca = compute_pca_ellipsoid_shape(
+        X=X, X_center=X_center, length=length, dim=dim, eig_floor=eig_floor
+    )
+    # ell_eff_k = || diag(lengthscale) @ R[:, k] ||_2 -- how "wide" the GP
+    # thinks the function is along this already-fixed principal direction.
+    ell_eff = (lengthscale.unsqueeze(-1) * R).norm(dim=0)
+    log_eff = ell_eff.log()
+    eff_weights = (log_eff - log_eff.mean()).exp()
+    axis_lengths = axis_lengths_pca * eff_weights
+    # Re-normalize: the reweighting above shifts the geometric mean away
+    # from `length`, so rescale back to `axis_lengths.prod() ** (1/d) == length`.
+    log_axis = axis_lengths.log()
+    axis_lengths = axis_lengths * (length / log_axis.mean().exp())
+    return R, axis_lengths
 
 
 def get_fitted_model(
