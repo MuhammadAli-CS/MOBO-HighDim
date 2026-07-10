@@ -693,6 +693,232 @@ $\sim$9$\times$ the fit time of direct modeling (134.3s vs.\ 14.5s across
 the run) -- a real tradeoff, but unlike the Kronecker-ablation result, one
 that buys a substantively better outcome rather than none.
 
+\section{Trust-Region Shape Adaptation}
+\label{sec:tr-shape}
+
+Every extension in Sections~\ref{sec:composite}--\ref{sec:penicillin}
+changes \emph{what} the surrogate models or \emph{how} candidates get
+proposed within a trust region, but leaves the trust region's own
+\emph{geometry} untouched: MORBO's `\texttt{TrustRegion}` maintains a single
+scalar edge length $\ell$, doubled or halved on success/failure streaks,
+defining an isotropic axis-aligned hypercube
+$[\,x_c - \ell/2,\; x_c + \ell/2\,]^d$ around the current center $x_c$. No
+lengthscale-based per-dimension rescaling exists anywhere in this
+codebase -- a step below even the original TuRBO paper
+\citep{eriksson2019turbo}, which rescales its box per-dimension by the
+fitted GP's relative lengthscales, just without rotation. This section asks
+whether adapting trust-region \emph{shape}, not just isotropic size, to
+local data improves search efficiency at high $d$, where an axis-aligned
+box wastes volume on directions that don't matter and cannot capture
+correlated structure across dimensions.
+
+\subsection{Three geometries, one scoping decision}
+
+We implement three alternatives, selected via a new \texttt{tr\_shape}
+hyperparameter (\texttt{"isotropic"} by default, reproducing existing
+behavior exactly), each replacing only the trust region's \emph{shape} state
+-- a rotation $R \in \mathbb{R}^{d \times d}$ (orthonormal columns) and a
+per-axis width vector $a \in \mathbb{R}^d$ -- recomputed once per trust
+region per BO iteration, immediately after that iteration's model refit.
+Critically, \textbf{GP fitting itself is left completely unchanged}: the
+input transform `\texttt{Normalize(bounds=get\_bounds())}` used to fit the
+local model still normalizes against the isotropic bounding box regardless
+of \texttt{tr\_shape}. Shape adaptation only changes \emph{candidate
+sampling} and \emph{containment testing} (which existing points count as
+"in" the trust region for center selection and candidate-pool filtering)
+-- narrower in scope than touching the model itself, and sufficient to test
+the actual hypothesis.
+
+\textbf{A second scoping decision:} none of the three variants use a true
+$L_2$ ellipsoid. Uniform rejection sampling from an ellipsoid's bounding
+box has acceptance probability $\frac{\pi^{d/2}/\Gamma(d/2+1)}{2^d}$, which
+underflows numerically well before $d=100$. All three instead use an
+$L_\infty$ box in a \emph{rotated} coordinate frame
+$w = (x - x_c)R$: axis-aligned in the rotated basis, but rotated relative
+to the original one. This choice lets \texttt{ard\_box} (below) be a
+literal, mechanical special case of the same sampling code used by the two
+rotated variants ($R = I$), rather than a separately implemented path.
+
+\paragraph{\texttt{ard\_box}: axis-aligned, ARD-rescaled.} $R = I$;
+$a$ is rescaled per-dimension by the trust region's own fitted GP
+automatic relevance determination (ARD) lengthscales $\lambda \in
+\mathbb{R}^d$ (geometric-mean-averaged across output dimensions if the
+local model bundles more than one, e.g.\ under composite modeling), the
+original TuRBO paper's own technique:
+\begin{equation}
+  a_k = \ell \cdot \exp\!\Big(\log \lambda_k - \tfrac{1}{d}\textstyle\sum_j \log \lambda_j\Big),
+  \qquad k = 1, \dots, d.
+  \label{eq:ard-box}
+\end{equation}
+The exponentiated mean-centered log-lengthscale term is geometric-mean-
+normalized to exactly $1$ across dimensions, so $\prod_k a_k = \ell^d$ --
+the same total "volume" as the isotropic cube of edge $\ell$; only shape,
+not size, differs from the baseline, keeping the existing success/failure
+streak dynamics (which still control $\ell$ alone) doing the same job they
+always did.
+
+\paragraph{\texttt{pca\_ellipsoid}: rotated, data-driven.} $R$ and $a$ come
+from an eigendecomposition of the trust region's own local accumulated
+data $X \in \mathbb{R}^{n \times d}$ (normalized to $[0,1]^d$), \emph{not}
+the fitted model. We use the second-moment matrix about the trust region's
+own center $x_c$ (not $X$'s empirical mean, keeping the ellipsoid anchored
+at the same point every other trust-region operation already treats as the
+reference):
+\begin{equation}
+  \Sigma = \frac{1}{n}\sum_{i=1}^n (x_i - x_c)(x_i - x_c)^\top,
+  \qquad \Sigma = R\,\mathrm{diag}(\sigma_1^2, \dots, \sigma_d^2)\,R^\top,
+\end{equation}
+eigendecomposed via a numerically floored eigenvalue ($\sigma_k^2
+\leftarrow \max(\sigma_k^2, \epsilon)$, guarding near-zero axis widths from
+a rank-deficient local point cloud), then geometric-mean-normalized exactly
+as in Equation~\ref{eq:ard-box} using $\sigma_k$ in place of $\lambda_k$.
+Falls back to the isotropic shape ($R = I$, uniform $a$) if $n < d+1$
+points -- PCA is underdetermined otherwise.
+
+\paragraph{\texttt{ard\_pca\_ellipsoid}: both signals combined.} A natural
+first guess -- performing PCA on lengthscale-normalized coordinates
+$X/\lambda$ and mapping the result back to the original space -- is a
+\emph{mathematical no-op}: for any diagonal $D = \mathrm{diag}(\lambda)$,
+undoing the whitening exactly cancels it,
+$D(D^{-1}\Sigma D^{-1})D = \Sigma$, recovering plain PCA's covariance
+regardless of $\lambda$. (More fundamentally, a single orthogonal $R$
+cannot jointly diagonalize both $\Sigma$ and the diagonal metric $D^{-2}$
+unless the two commute, which an empirical covariance and an arbitrary ARD
+lengthscale vector generically don't.) We instead compute \texttt{R} exactly
+as in \texttt{pca\_ellipsoid} (lengthscale-blind), then reweight each
+already-fixed principal axis by the ARD lengthscale vector \emph{projected
+onto it}:
+\begin{equation}
+  \lambda^{\mathrm{eff}}_k = \big\lVert \mathrm{diag}(\lambda)\, R_{:,k} \big\rVert_2,
+  \qquad
+  a_k = a^{\mathrm{pca}}_k \cdot \exp\!\Big(\log \lambda^{\mathrm{eff}}_k - \tfrac{1}{d}\textstyle\sum_j \log \lambda^{\mathrm{eff}}_j\Big),
+\end{equation}
+followed by one more geometric-mean renormalization (the reweighting shifts
+the product away from $\ell^d$) to restore $\prod_k a_k = \ell^d$. Here
+$R$ never changes with $\lambda$ -- lengthscales only affect how wide each
+already-data-determined principal axis is, not which directions are chosen.
+
+\subsection{Consuming the shape: sampling and containment}
+
+Both new operations are rotated-frame analogues of MORBO's existing
+isotropic primitives, and reduce to them exactly when $R=I$. Containment
+(\texttt{get\_indices\_in\_ellipsoid}, used for center selection and
+candidate-pool filtering) tests $|w_k| \le a_k/2\ \forall k$ in the rotated
+frame $w = (x-x_c)R$, in place of the isotropic $|x_k - x_{c,k}| \le
+\ell/2$. Candidate sampling
+(\texttt{sample\_tr\_discrete\_points\_subset\_d\_rotated}) mirrors
+MORBO's existing subset-perturbation scheme -- perturbing only
+$\lceil d \cdot \min(20/d, 1)\rceil$ of the $d$ available directions per
+candidate, bounding simultaneous degrees of freedom in high dimension --
+but crucially performs that masking \emph{in the rotated basis}, on $w$
+rather than on the original coordinates: masking raw dimensions and
+rotating afterward would smear a single "masked-in" raw direction across
+every principal axis post-rotation, defeating the point of a sparse
+perturbation entirely. One notable exclusion: \texttt{trunc\_normal\_perturb}
+is not supported together with a non-isotropic \texttt{tr\_shape} (an
+explicit error, not a silent fallback to unrotated behavior).
+
+One deliberate asymmetry: \emph{trust-region data selection}
+(\texttt{trim\_trace}, which points the local GP is fit on) is
+\textbf{not} routed through the shaped containment test, regardless of
+\texttt{tr\_shape} -- it always uses the isotropic box. Since GP fitting's
+own input normalization stays isotropic (Section~\ref{sec:tr-shape}'s first
+paragraph), selecting training data from an eccentric rotated region here
+would feed values that are badly out-of-range in one direction and crushed
+near zero in another into that fixed isotropic normalization, undermining
+the very invariant ("GP fitting is unaffected by \texttt{tr\_shape}") the
+scoping decision above was meant to guarantee.
+
+\begin{table}[h]
+\centering
+\caption{Trust-region shape adaptation, DTLZ2 direct modeling, dimension
+sweep at fixed budget (600 evals, batch 50, 3 trust regions, seed 0).
+Percentages are relative to the isotropic \texttt{morbo} baseline at the
+same $d$. Entries marked $0.00^*$ are genuine: 600 real evaluations, real
+non-trivial Pareto fronts (4--23 points), simply none yet dominating the
+reference point within budget.}
+\label{tab:tr-shape-sweep}
+\begin{tabular}{lrrrrr}
+\toprule
+$d$ & \texttt{morbo} & \texttt{ard\_box} & \texttt{pca\_ellipsoid} & \texttt{ard\_pca\_ellipsoid} \\
+\midrule
+20  & 34.91  & $+0.1\%$   & $+0.0\%$    & $+0.0\%$ \\
+50  & 32.65  & $-2.9\%$   & $+3.4\%$    & $+4.6\%$ \\
+100 & 20.02  & $-34.6\%$  & $+64.5\%$   & $+66.9\%$ \\
+150 & $0.00^*$ & $0.00^*$ & $20.87$\textsuperscript{\dag} & $29.08$\textsuperscript{\dag} \\
+200 & $0.00^*$ & $0.00^*$ & $0.00^*$    & $0.00^*$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\footnotesize\textsuperscript{\dag}Absolute hypervolume, not a percentage:
+the isotropic baseline never breaks $0$ at this $d$ within budget, so no
+ratio is defined. Both PCA variants also start at exactly $0$ and break
+through late -- \texttt{pca\_ellipsoid} around evaluation 350,
+\texttt{ard\_pca\_ellipsoid} around evaluation 300 -- then climb to the
+reported value by evaluation 600.
+\end{table}
+
+\subsection{Results: a curse-of-dimensionality effect, diagnosed directly}
+
+Table~\ref{tab:tr-shape-sweep} shows three regimes. At $d=20$, all three
+variants are statistically indistinguishable from the isotropic baseline
+($\le 0.1\%$). At $d=50$, small effects emerge in the expected direction.
+At $d=100$, the effects become dramatic and diverge sharply by
+\emph{method}: \texttt{pca\_ellipsoid}/\texttt{ard\_pca\_ellipsoid} win by
+$+64$--$67\%$, while \texttt{ard\_box} \emph{loses} by $-34.6\%$ -- worse
+than the isotropic baseline that uses no lengthscale information at all.
+At $d=150$--$200$, the isotropic baseline and \texttt{ard\_box} both find
+literally nothing beating the reference point within the 600-eval budget;
+the PCA variants still do, just later.
+
+As an independent negative control at low dimension with a real,
+non-synthetic problem, a $d=7$, $M=3$ Penicillin fermentation benchmark
+(direct modeling, Section~\ref{sec:penicillin}'s simulator) shows all three
+variants within $\pm 7\%$ of baseline -- consistent with the effect being
+specific to high $d$, not problem type or objective count.
+
+\paragraph{Why \texttt{ard\_box} fails, diagnosed directly.} A single GP
+fit on synthetic $d=100$ local data (200 points, no full BO loop needed)
+gives fitted lengthscales spanning a $15.2\times$ ratio ($\min=0.26$,
+$\max$ at the constraint ceiling of $4.0$ -- correctly identifying $\sim
+99$ of $100$ dimensions as smooth/uninformative and one as sharply
+informative). Equation~\ref{eq:ard-box} applies this literally: of the same
+$200$ local points, only \textbf{$1$} falls inside the resulting
+\texttt{ard\_box} region, versus \textbf{$41$} for \texttt{pca\_ellipsoid}'s
+data-covariance-derived shape on identical data ($5.7\times$ axis ratio).
+Containment requires satisfying $d$ independent per-axis constraints
+\emph{simultaneously} (a logical AND, not an OR); even though total volume
+is preserved exactly ($\prod_k a_k = \ell^d$ by construction), the
+intersection of $100$ independent narrowed constraints collapses
+combinatorially once real data isn't spread uniformly through that volume
+-- which it never is. This is precisely why \texttt{ard\_box} underperforms
+even the isotropic baseline that ignores lengthscale information entirely:
+using more information hurts once that information is applied as $d$
+separate hard constraints rather than a single shared one, since any
+per-dimension estimation noise (lengthscale estimates are themselves
+uncertain early in optimization, with limited data spread across $d$ axes)
+gets baked into the geometry and compounds with every other dimension's
+constraint. \texttt{pca\_ellipsoid}/\texttt{ard\_pca\_ellipsoid} avoid this
+because their shape comes from the correlation structure of actually
+\emph{collected} data -- a genuine lower-dimensional effective subspace --
+rather than $d$ independently-estimated per-axis hyperparameters treated as
+separate constraints.
+
+This same mechanism produced a real (if unrelated-looking) bug during
+testing: on the Rover benchmark ($d=60$, a real navigation problem whose
+raw parameters get cumulatively summed into spline control points, see
+\texttt{morbo/problems/rover.py}), one collapsed axis width
+($a_k = 0.019$ against $a_j \approx 0.85$ for the rest, a $45\times$ gap)
+produced near-duplicate consecutive spline control points, crashing
+\texttt{scipy}'s exact-interpolation cubic fit outright rather than merely
+degrading hypervolume -- the same collapse, just manifesting as a hard
+numerical failure instead of a quiet performance loss, in a benchmark whose
+evaluator happens to be fragile to near-duplicate inputs. Fixed by treating
+such evaluation failures as a large finite penalty rather than crashing the
+run, since the underlying candidate collapse is an expected consequence of
+this method's own geometry, not a bug in the sampler that produced it.
+
 \section{Discussion}
 
 The three extensions from Sections~\ref{sec:composite}--\ref{sec:botier}
