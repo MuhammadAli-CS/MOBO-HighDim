@@ -919,6 +919,68 @@ such evaluation failures as a large finite penalty rather than crashing the
 run, since the underlying candidate collapse is an expected consequence of
 this method's own geometry, not a bug in the sampler that produced it.
 
+\subsection{Extended budget at $d=200$: breakthrough, not failure}
+
+The all-zero $d=200$ row of Table~\ref{tab:tr-shape-sweep} is a budget
+effect, not a method failure. Rerunning $d=200$ at $2000$ evaluations
+(everything else identical) shows every method eventually finding
+reference-point-dominating solutions -- in exactly the same ranking as
+$d=100$ and $d=150$:
+
+\begin{table}[h]
+\centering
+\caption{Extended-budget follow-up: DTLZ2, $d=200$, 2000 evals, batch 50,
+seed 0. "Breakthrough" is the evaluation at which true hypervolume first
+exceeds zero.}
+\label{tab:tr-shape-200d-2000ev}
+\begin{tabular}{lrrr}
+\toprule
+Method & Final HV & vs.\ baseline & Breakthrough \\
+\midrule
+\texttt{morbo} (isotropic) & 19.32 & --- & $\sim$1150 \\
+\texttt{ard\_box} & 14.81 & $-23.4\%$ & $\sim$1450 \\
+\texttt{pca\_ellipsoid} & 28.79 & $+49.0\%$ & $\sim$800 \\
+\texttt{ard\_pca\_ellipsoid} & \textbf{33.15} & $\mathbf{+71.6\%}$ & $\sim$750 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The PCA variants break through $\sim$400 evaluations before the isotropic
+baseline and $\sim$700 before \texttt{ard\_box}, and convert that head
+start into a large final gap. Notably, \texttt{ard\_pca\_ellipsoid}'s
+final 33.15 at $d=200$ nearly matches what the isotropic baseline achieves
+at $d=20$ (34.91) -- an order of magnitude more nominal dimensions at
+almost no hypervolume cost.
+
+\subsection{A real-problem check that sharpens the claim: Rover}
+
+On Rover ($d=60$, $M=2$, 2000 evals, the repo's existing benchmark
+config), \emph{no} shape variant beats the isotropic baseline:
+\texttt{morbo} reaches 2.356; \texttt{ard\_box} $-5.2\%$,
+\texttt{pca\_ellipsoid} $-10.0\%$, \texttt{ard\_pca\_ellipsoid} $-3.1\%$.
+The DTLZ2 sweep's strongest method (\texttt{pca\_ellipsoid}) does
+\emph{worst} here, recovering only 17 Pareto points against the baseline's
+44.
+
+This is not a contradiction; it localizes what the DTLZ2 result was
+actually measuring. DTLZ2's effective structure is extremely
+low-dimensional: one informative position variable, with the remaining
+$d-1$ entering only through the smooth scalar $g(x)$. That is precisely
+the structure a PCA rotation can discover and align with, and the
+advantage grows with nominal $d$ because an isotropic box wastes
+proportionally more volume on uninformative directions. Rover's 60
+spline-waypoint coordinates all matter roughly equally -- there is no
+low-dimensional effective subspace to find -- so the rotation contributes
+only covariance-estimation noise (a $60 \times 60$ matrix estimated from
+limited local data) and a narrower effective search that costs front
+coverage. The refined claim, then, is \textbf{conditional}: trust-region
+shape adaptation helps when, and because, the problem has low-dimensional
+effective structure for the geometry to align with -- with the benefit
+growing in nominal dimension -- and is mildly harmful on problems where
+all dimensions genuinely matter, at any scale tested. The $d=7$
+Penicillin negative control (all variants within $\pm 7\%$ of baseline)
+is consistent with both halves of this claim.
+
 \section{Discussion}
 
 The three extensions from Sections~\ref{sec:composite}--\ref{sec:botier}
