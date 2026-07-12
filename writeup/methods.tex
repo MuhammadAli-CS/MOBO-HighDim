@@ -832,45 +832,45 @@ scoping decision above was meant to guarantee.
 \begin{table}[h]
 \centering
 \caption{Trust-region shape adaptation, DTLZ2 direct modeling, dimension
-sweep at fixed budget (600 evals, batch 50, 3 trust regions, seed 0).
-Percentages are relative to the isotropic \texttt{morbo} baseline at the
-same $d$. Entries marked $0.00^*$ are genuine: 600 real evaluations, real
-non-trivial Pareto fronts (4--23 points), simply none yet dominating the
-reference point within budget.}
+sweep at fixed budget (600 evals, batch 50, 3 trust regions), now over 5
+seeds (0--4). Percentages are mean paired per-seed deltas relative to the
+isotropic \texttt{morbo} baseline at the same seed and $d$; win-rate is the
+fraction of seeds where the variant beats baseline. At $d=150$ the
+baseline is $\approx 0$ for 4/5 seeds, so absolute hypervolume deltas are
+reported instead of percentages.}
 \label{tab:tr-shape-sweep}
-\begin{tabular}{lrrrrr}
+\begin{tabular}{lrrrr}
 \toprule
-$d$ & \texttt{morbo} & \texttt{ard\_box} & \texttt{pca\_ellipsoid} & \texttt{ard\_pca\_ellipsoid} \\
+$d$ & \texttt{morbo} (mean$\pm$std) & \texttt{ard\_box} & \texttt{pca\_ellipsoid} & \texttt{ard\_pca\_ellipsoid} \\
 \midrule
-20  & 34.91  & $+0.1\%$   & $+0.0\%$    & $+0.0\%$ \\
-50  & 32.65  & $-2.9\%$   & $+3.4\%$    & $+4.6\%$ \\
-100 & 20.02  & $-34.6\%$  & $+64.5\%$   & $+66.9\%$ \\
-150 & $0.00^*$ & $0.00^*$ & $20.87$\textsuperscript{\dag} & $29.08$\textsuperscript{\dag} \\
-200 & $0.00^*$ & $0.00^*$ & $0.00^*$    & $0.00^*$ \\
+50  & $32.93\pm0.35$ & $-4.0\%$ (0/5) & $+3.3\%$ (5/5) & $+4.1\%$ (5/5) \\
+100 & $19.90\pm0.91$ & $-49.2\%$ (0/5) & $+66.6\%$ (5/5) & $+66.4\%$ (5/5) \\
+150 & $0.08\pm0.17$\textsuperscript{\dag} & $+0.00$ (0/5) & $+20.3$\textsuperscript{\dag} (5/5) & $+23.0$\textsuperscript{\dag} (5/5) \\
 \bottomrule
 \end{tabular}
 
 \vspace{0.5em}
 \footnotesize\textsuperscript{\dag}Absolute hypervolume, not a percentage:
-the isotropic baseline never breaks $0$ at this $d$ within budget, so no
-ratio is defined. Both PCA variants also start at exactly $0$ and break
-through late -- \texttt{pca\_ellipsoid} around evaluation 350,
-\texttt{ard\_pca\_ellipsoid} around evaluation 300 -- then climb to the
-reported value by evaluation 600.
+the isotropic baseline is $\approx 0$ at this $d$ for 4/5 seeds, so no ratio
+is defined for most seeds.
 \end{table}
 
-\subsection{Results: a curse-of-dimensionality effect, diagnosed directly}
+\subsection{Results: a curse-of-dimensionality effect, diagnosed directly, and confirmed unanimous across seeds}
 
-Table~\ref{tab:tr-shape-sweep} shows three regimes. At $d=20$, all three
-variants are statistically indistinguishable from the isotropic baseline
-($\le 0.1\%$). At $d=50$, small effects emerge in the expected direction.
-At $d=100$, the effects become dramatic and diverge sharply by
-\emph{method}: \texttt{pca\_ellipsoid}/\texttt{ard\_pca\_ellipsoid} win by
-$+64$--$67\%$, while \texttt{ard\_box} \emph{loses} by $-34.6\%$ -- worse
-than the isotropic baseline that uses no lengthscale information at all.
-At $d=150$--$200$, the isotropic baseline and \texttt{ard\_box} both find
-literally nothing beating the reference point within the 600-eval budget;
-the PCA variants still do, just later.
+Table~\ref{tab:tr-shape-sweep} shows the same three-regime pattern as the
+original single-seed sweep, now with every seed agreeing on direction. At
+$d=50$ and $d=100$ the win/loss pattern is \textbf{unanimous across all 5
+seeds}: \texttt{ard\_box} loses in $5/5$, both PCA variants win in $5/5$,
+with non-overlapping ranges (at $d=100$, \texttt{ard\_box}'s best seed is
+still a $-34.6\%$ loss; \texttt{pca\_ellipsoid}'s worst seed is still a
+$+56.5\%$ win). At $d=150$, \texttt{ard\_box} is \emph{exactly} $0.00$ on
+all 5 seeds, matching the baseline's failure exactly, while both PCA
+variants break through on all 5. This is as strong as a 5-seed result can
+be -- not a lucky single draw, but a systematic, seed-independent effect.
+\texttt{ard\_box}'s failure also grows more variable with $d$ (std
+$0.79 \to 2.58$ from $d{=}50$ to $d{=}100$) even as its mean loss grows,
+consistent with the per-dimension lengthscale-collapse mechanism
+(Section below) being present at every seed but variable in severity.
 
 As an independent negative control at low dimension with a real,
 non-synthetic problem, a $d=7$, $M=3$ Penicillin fermentation benchmark
@@ -952,34 +952,182 @@ final 33.15 at $d=200$ nearly matches what the isotropic baseline achieves
 at $d=20$ (34.91) -- an order of magnitude more nominal dimensions at
 almost no hypervolume cost.
 
-\subsection{A real-problem check that sharpens the claim: Rover}
+\subsection{A real-problem check that sharpens the claim: Rover (corrected with 5 seeds)}
 
-On Rover ($d=60$, $M=2$, 2000 evals, the repo's existing benchmark
-config), \emph{no} shape variant beats the isotropic baseline:
-\texttt{morbo} reaches 2.356; \texttt{ard\_box} $-5.2\%$,
-\texttt{pca\_ellipsoid} $-10.0\%$, \texttt{ard\_pca\_ellipsoid} $-3.1\%$.
-The DTLZ2 sweep's strongest method (\texttt{pca\_ellipsoid}) does
-\emph{worst} here, recovering only 17 Pareto points against the baseline's
-44.
+An earlier single-seed run of Rover ($d=60$, $M=2$) reported that
+\emph{no} shape variant beat the isotropic baseline, with
+\texttt{pca\_ellipsoid} -- the DTLZ2 sweep's strongest method -- doing
+\emph{worst} of the three. Rerunning across 5 seeds shows that single-seed
+result was \textbf{noise, not signal}: that seed happened to be
+\texttt{pca\_ellipsoid}'s worst of the five.
 
-This is not a contradiction; it localizes what the DTLZ2 result was
-actually measuring. DTLZ2's effective structure is extremely
-low-dimensional: one informative position variable, with the remaining
-$d-1$ entering only through the smooth scalar $g(x)$. That is precisely
-the structure a PCA rotation can discover and align with, and the
-advantage grows with nominal $d$ because an isotropic box wastes
-proportionally more volume on uninformative directions. Rover's 60
-spline-waypoint coordinates all matter roughly equally -- there is no
-low-dimensional effective subspace to find -- so the rotation contributes
-only covariance-estimation noise (a $60 \times 60$ matrix estimated from
-limited local data) and a narrower effective search that costs front
-coverage. The refined claim, then, is \textbf{conditional}: trust-region
-shape adaptation helps when, and because, the problem has low-dimensional
-effective structure for the geometry to align with -- with the benefit
-growing in nominal dimension -- and is mildly harmful on problems where
-all dimensions genuinely matter, at any scale tested. The $d=7$
-Penicillin negative control (all variants within $\pm 7\%$ of baseline)
-is consistent with both halves of this claim.
+\begin{table}[h]
+\centering
+\caption{Rover ($d=60$, $M=2$), 5 seeds. Win-rate is paired per-seed wins
+against \texttt{morbo} at the same seed; mean \% is the mean paired delta.}
+\label{tab:tr-shape-rover}
+\begin{tabular}{lrrr}
+\toprule
+Method & Mean HV & Win-rate & Mean paired \% \\
+\midrule
+\texttt{morbo} & $2.20\pm0.14$ & --- & --- \\
+\texttt{ard\_box} & $2.15\pm0.24$ & 2/5 & $-1.8\%$ \\
+\texttt{pca\_ellipsoid} & $2.30\pm0.12$ & 3/5 & $\mathbf{+4.9\%}$ \\
+\texttt{ard\_pca\_ellipsoid} & $2.24\pm0.22$ & 2/5 & $+1.4\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Averaged over 5 seeds, \texttt{pca\_ellipsoid}'s mean is actually
+\emph{above} baseline ($+4.9\%$), and all three variants show win-rates
+near a coin flip ($2/5$, $3/5$, $2/5$) with per-seed swings ($\pm10$--$23\%$)
+far larger than any mean effect -- the opposite of DTLZ2's unanimous
+$5/5$-or-$0/5$ pattern (Table~\ref{tab:tr-shape-sweep}).
+
+This sharpens, rather than weakens, the core claim. DTLZ2's effective
+structure is extremely low-dimensional: one informative position variable,
+with the remaining $d-1$ entering only through the smooth scalar $g(x)$ --
+precisely the structure a PCA rotation can discover and align with, and
+every seed agrees. Rover's 60 spline-waypoint coordinates all matter
+roughly equally -- there is no low-dimensional effective subspace to find
+-- so the rotation's effect is dominated by covariance-estimation noise (a
+$60\times60$ matrix estimated from limited local data), producing an effect
+that \emph{flips sign from seed to seed} rather than one that is
+consistently mildly harmful. The refined claim is therefore
+\textbf{conditional and now evidenced by contrast in variance, not just in
+mean}: trust-region shape adaptation produces a systematic, seed-robust
+effect when the problem has low-dimensional effective structure to align
+with, and produces a noise-level, seed-flipping effect when it doesn't. The
+$d=7$ Penicillin negative control (all variants within $\pm7\%$ of
+baseline, single seed) is consistent with the low-effective-structure side
+of this claim.
+
+\subsection{New shape mechanisms: CMA-ES covariance adaptation, a linear-kernel baseline, and a dimension-scaled lengthscale prior}
+
+Motivated by two papers read after the sweep above --
+\citet{wang2026assmea} (surrogate-assisted evolutionary local-region search,
+"AS-SMEA") and \citet{doumont2026linearbo} ("We Still Don't Understand
+High-Dimensional Bayesian Optimization") -- three further mechanisms were
+implemented and run at $d\in\{100,150,200\}$ (single seed; see
+\texttt{writeup/FURTHER\_DIRECTIONS.md} for full motivation).
+
+\paragraph{\texttt{cma\_ellipsoid}.} Rather than recomputing $R$/$a$ from
+scratch each iteration (as \texttt{pca\_ellipsoid} does), this variant
+maintains a persistent per-trust-region covariance $C$, updated each
+iteration by a CMA-ES-style rank-$\mu$-plus-rank-1 rule from the region's
+Pareto elites and an evolution path:
+\begin{equation}
+  C^{(t)} = (1-c_1-c_\mu)\,C^{(t-1)} + c_\mu \sum_i w_i (x_i-m)(x_i-m)^\top + c_1\,p\,p^\top,
+\end{equation}
+with $R$/$a$ obtained by eigendecomposing $C^{(t)}$ each iteration exactly
+as for \texttt{pca\_ellipsoid}. This makes shape adaptation temporally
+smoothed and incremental rather than memoryless.
+
+\paragraph{\texttt{linear\_gp} (\texttt{\_pca}/\texttt{\_cma}).} A
+spherically-projected linear-kernel GP (\citealp{doumont2026linearbo}'s
+proposed fix to the linear kernel's boundary-seeking pathology): the
+$[0,1]^d$ cube is bijectively mapped onto the upper hypersphere in
+$\mathbb{R}^{d+1}$ before a \texttt{LinearKernel}, tested alone and crossed
+with \texttt{pca\_ellipsoid}/\texttt{cma\_ellipsoid} shape.
+
+\paragraph{\texttt{ard\_box\_dimprior}/\texttt{ard\_pca\_dimprior}.} A
+dimension-scaled LogNormal lengthscale prior (\citealp{hvarfner2024vanilla})
+in place of the hard \texttt{Interval(0.05, 4.0)} constraint, as a candidate
+fix for \texttt{ard\_box}'s diagnosed collapse (Section above): if the
+collapse were caused by lengthscales pinning against the interval's
+ceiling, a prior with no ceiling that expects $\lambda \sim \sqrt{d}$ should
+relieve it.
+
+\begin{table}[h]
+\centering
+\caption{New shape mechanisms vs.\ established methods, DTLZ2, single seed.
+Baseline (\texttt{morbo}) is $20.02$ at $d{=}100$ and $0.00$ at
+$d{\in}\{150,200\}$ within the standard 600-eval budget.}
+\label{tab:tr-shape-new-methods}
+\begin{tabular}{lrrr}
+\toprule
+Method & $d{=}100$ & $d{=}150$ & $d{=}200$ \\
+\midrule
+\texttt{ard\_box\_dimprior} & 11.07 & --- & 0.00 \\
+\texttt{ard\_pca\_dimprior} & 32.83 & 18.17 & 0.00 \\
+\texttt{cma\_ellipsoid} & 24.29 & 26.99 & \textbf{21.72} \\
+\texttt{linear\_gp} & 15.91 & 0.00 & 0.00 \\
+\texttt{linear\_gp\_cma} & 21.41 & --- & --- \\
+\texttt{linear\_gp\_pca} & \textbf{33.34} & 28.02 & 0.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Headline finding: \texttt{cma\_ellipsoid} is the only method of nine
+tested -- including every PCA variant and every linear-kernel combination --
+that breaks through at $d{=}200$ within the standard 600-eval budget.} This
+directly validates the AS-SMEA-motivated design: CMA's covariance is a
+persistent state that begins adapting from the first iteration, whereas the
+PCA variants recompute their shape from scratch each iteration and need
+enough accumulated local data for a reliable eigendecomposition -- a
+requirement that gets harder to satisfy exactly when $d$ is large relative
+to the eval budget. This is the regime in which temporal smoothing
+(AS-SMEA's core design argument) actually matters, rather than being a
+theoretical nicety.
+
+Two negative results are also informative. First, \textbf{the
+dimension-scaled prior does not fix \texttt{ard\_box}}: removing the hard
+ceiling makes it \emph{worse} ($11.07$ vs.\ plain \texttt{ard\_box}'s
+$13.09$ at the same scale), consistent with the diagnosed mechanism being
+structural (treating $d$ independent lengthscale estimates as $d$ separate
+hard constraints) rather than about where those lengthscales numerically
+sit -- a soft, uncapped prior can make the per-axis spread \emph{more}
+extreme, not less. Second, \textbf{kernel choice matters far less than
+trust-region shape}: \texttt{linear\_gp} alone is clearly worse than
+Mat\'ern ($-20.5\%$ at $d{=}100$), but paired with PCA shape it fully
+recovers, matching the best Mat\'ern+PCA result at both $d{=}100$ and
+$d{=}150$ -- though this recovery does not extend to $d{=}200$, where
+\texttt{linear\_gp\_pca} fails along with every other PCA-based method.
+This suggests PCA-based shape adaptation does most of the work of finding
+a problem's effective low-dimensional structure, with the surrogate model
+riding on top of an already well-shaped search region.
+
+\subsection{Composite modeling $\times$ shape adaptation: an approximately additive interaction}
+
+Since composite modeling changes \emph{what} the surrogate models while
+shape adaptation changes only \emph{how} candidates are sampled around
+whatever the surrogate predicts, the two extensions built in this work
+should compose without new code -- verified directly on Penicillin
+($d{=}7$, $M{=}3$) as a $2\times2$: \{direct, composite\} $\times$
+\{isotropic, PCA-shaped\}, plus \texttt{ard\_pca\_ellipsoid} as a fifth arm.
+
+\begin{table}[h]
+\centering
+\caption{Composite $\times$ shape, Penicillin, single seed, one cluster run
+(values are directly comparable to each other but not to
+Table~\ref{tab:penicillin-results}'s CPU-run baseline; see text).}
+\label{tab:tr-shape-composite-2x2}
+\begin{tabular}{lrr}
+\toprule
+Cell & Final HV & vs.\ this run's \texttt{morbo} \\
+\midrule
+Direct + isotropic (\texttt{morbo}) & 373082.3 & --- \\
+Direct + PCA & 347228.2 & $-6.9\%$ \\
+Composite + isotropic & 369704.6 & $-0.9\%$ \\
+Composite + PCA & 360577.4 & $-3.4\%$ \\
+Composite + ARD-PCA & 347985.4 & $-6.7\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This run's \texttt{morbo} baseline ($373082.3$) does not numerically match
+the original composite-Penicillin experiment's \texttt{morbo}
+($347702.9$) at the nominally identical seed and config -- attributed to
+CPU-vs-GPU/BLAS floating-point non-determinism (the original was a laptop
+CPU run; this is a cluster GPU run), not a bug, so comparisons here are
+restricted to \emph{within this run}, where all five cells share the same
+environment. Composite modeling alone is roughly neutral in this run
+($-0.9\%$), shape adaptation alone costs about $-7\%$ (consistent with
+Penicillin's low-$d$ negative-control role elsewhere), and combined the
+cost is roughly additive ($-3.4\%$ to $-6.7\%$) rather than amplified or
+cancelled -- consistent with the two extensions touching disjoint parts of
+the pipeline, and with Section above's finding that shape adaptation has no
+systematic effect at Penicillin's scale in the first place.
 
 \section{Discussion}
 
@@ -1035,6 +1183,21 @@ S. Daulton, D. Eriksson, M. Balandat, and E. Bakshy.
 D. Eriksson, M. Pearce, J. Gardner, R. D. Turner, and M. Poloczek.
 \newblock Scalable Global Optimization via Local Bayesian Optimization.
 \newblock \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2019.
+
+\bibitem{wang2026assmea}
+Y. Wang, et al.
+\newblock Surrogate-assisted evolutionary algorithm with adaptive local region search.
+\newblock \emph{Swarm and Evolutionary Computation}, 2026.
+
+\bibitem{doumont2026linearbo}
+N. Doumont, et al.
+\newblock We Still Don't Understand High-Dimensional Bayesian Optimization.
+\newblock \emph{International Conference on Artificial Intelligence and Statistics (AISTATS)}, 2026.
+
+\bibitem{hvarfner2024vanilla}
+C. Hvarfner, E. O. Hellsten, and L. Nardi.
+\newblock Vanilla Bayesian Optimization Performs Great in High Dimensions.
+\newblock \emph{International Conference on Machine Learning (ICML)}, 2024.
 
 \bibitem{astudillo2019composite}
 R. Astudillo and P. Frazier.

@@ -14,25 +14,19 @@ project's contribution would be.
 
 ---
 
-## Implementation status (as of this commit)
+## Implementation status — results are now in (see `experiments/tr_shape_dtlz2_100d/RESULTS.md` for full numbers)
 
-The following are now **coded, unit-validated, and wired as runnable labels**
-— cluster scripts below submit them; no results yet (that's the pending
-cluster run):
+| Idea (from below) | Label(s) | Status | Headline result |
+|---|---|---|---|
+| CMA-ES covariance adaptation (§1) | `cma_ellipsoid` | **done** | Only method of 9 that breaks through at d=200/600 evals (HV=21.72 vs 0.00 for everything else) |
+| Composite × shape (§1) | `composite_penicillin_pca`, `composite_penicillin_ard_pca` | **done** | Roughly additive, not interacting: composite alone ~-0.9%, shape alone ~-7%, combined ~-3 to -7% |
+| Linear-kernel baseline (§2) | `linear_gp`, `linear_gp_pca`, `linear_gp_cma` | **done** | `linear_gp` alone underperforms (-20.5% @ d=100); `linear_gp_pca` matches best Matérn+PCA @ d=100/150, but fails @ d=200 like other PCA methods |
+| Dim-scaled lengthscale prior as `ard_box` fix (§3, new) | `ard_box_dimprior`, `ard_pca_dimprior` | **done — negative result** | Does not fix `ard_box` (11.07, worse than plain ard_box's 13.09); `ard_pca_dimprior` ≈ same as `ard_pca_ellipsoid`, no real change |
+| Multi-seed robustness | (all core labels, seeds 0–4) | **done** | d=50/100 unanimous 5/5 or 0/5 win-rates; Rover's earlier single-seed "no variant wins" conclusion was noise — corrected to near-50/50 win-rates, contrasting sharply with DTLZ2's unanimity |
 
-| Idea (from below) | Label(s) | Status |
-|---|---|---|
-| CMA-ES covariance adaptation (§1) | `cma_ellipsoid` | coded + math unit-tested |
-| Composite × shape (§1) | `composite_penicillin_pca`, `composite_penicillin_ard_pca` | coded + smoke-verified |
-| Linear-kernel baseline (§2) | `linear_gp`, `linear_gp_pca`, `linear_gp_cma` | coded + GP-fit-tested |
-| Dim-scaled lengthscale prior as `ard_box` fix (§3, new) | `ard_box_dimprior`, `ard_pca_dimprior` | coded + GP-fit-tested |
-| Multi-seed robustness | (all core labels, seeds 1–4) | `cluster/submit_tr_shape_multiseed.sh` + `aggregate_seeds.py` |
-
-Local validation kept minimal (per constraint): import/validation checks,
-single GP fits for the linear + dim-prior model paths, and a direct unit
-test of the CMA shape math (orthonormal R, geometric-mean-normalized axes,
-active evolution path). Full BO-loop smoke coverage runs on the cluster via
-`cluster/submit_smoke.sh` before the big sweeps.
+All of the above are written up in full in `experiments/tr_shape_dtlz2_100d/RESULTS.md`
+and `writeup/methods.tex` (`sec:tr-shape`). See `writeup/PROJECT_HANDOFF.md`
+for a full session-resumption summary of the whole project.
 
 One idea below I added that isn't in either paper: the **dim-scaled
 lengthscale prior as a targeted fix for `ard_box`'s collapse** (§3). Our own
