@@ -189,6 +189,13 @@ LABEL_OVERRIDES = {
         "tr_shape": "ard_pca_ellipsoid",
         "use_dim_scaled_ls_prior": True,
     },
+    # Per-TR multi-armed bandit over {isotropic, ard_box, pca_ellipsoid,
+    # ard_pca_ellipsoid, cma_ellipsoid}: since no single shape wins on every
+    # problem (PCA wins on DTLZ2, no shape robustly wins on Rover), let each
+    # trust region learn from its own reward history which geometry suits
+    # its own local landscape (AS-SMEA's own answer to this, Wang et al.
+    # 2026 Sec. 3.3's LS-IMA/MASS). See TurboHParams.tr_shape docstring.
+    "mab_shape": {"tr_shape": "mab_shape"},
 }
 
 if __name__ == "__main__":

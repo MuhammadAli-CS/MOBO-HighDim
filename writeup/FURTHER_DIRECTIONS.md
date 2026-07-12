@@ -162,28 +162,47 @@ Why this matters for us, honestly:
 - **The `cma_ellipsoid` variant** (Sec. 1 above) — highest-value new method,
   and reuses all the rotated-box plumbing we already built.
 
-**High value, medium effort:**
-- **MAB-guided variant selection (AS-SMEA's LS-IMA/MASS, Sec. 3.3).** We
-  found *no single shape wins everywhere* (PCA on DTLZ2, isotropic on
-  Rover). AS-SMEA's answer to exactly this "which strategy per region"
-  problem is a multi-armed-bandit that picks among candidate generators per
-  local region by a hypervolume-improvement reward. We could treat
-  `{isotropic, ard_box, pca, ard_pca, cma}` as bandit arms *per trust
-  region per iteration*, letting each TR learn which geometry suits its
-  local landscape — directly turning our "it's conditional" limitation into
-  an adaptive strength.
-- **The linear-kernel baseline + local composition** (Sec. 2).
+**High value, medium effort — both now CODED, cluster jobs pending:**
+- **MAB-guided variant selection (AS-SMEA's LS-IMA/MASS, Sec. 3.3) — DONE.**
+  New `tr_shape="mab_shape"` mode (`morbo/trust_region.py`): a per-trust-region
+  epsilon-greedy bandit over `{isotropic, ard_box, pca_ellipsoid,
+  ard_pca_ellipsoid, cma_ellipsoid}` (`TurboHParams.mab_arms`), rewarded 1.0
+  whenever this TR's existing success-streak counter (`n_successes`) was just
+  incremented, folded into a per-arm exponential moving average
+  (`mab_reward_ema_alpha`, default 0.3) and re-selected each time the local
+  model refits (`mab_epsilon`, default 0.15). Reuses the streak counter TuRBO
+  already tracks rather than adding a new hypervolume-history buffer — see
+  `TrustRegion._select_mab_arm`/`_compute_shape_for_mode`. Label: `mab_shape`.
+  Smoke-tested (`smoke_test_tr_shape.py`'s `check_mab_shape`, forces
+  `mab_epsilon=1.0` to reliably exercise a non-isotropic arm in a short run).
+  Submission: `cluster/submit_mab_shape.sh` (d=100/150/200 + Rover — Rover is
+  the most interesting test case, since no *fixed* shape variant won there
+  robustly; this is the direct test of whether adaptivity recovers what
+  fixed-shape variants couldn't).
+- **The linear-kernel baseline + local composition** (Sec. 2) — done, see
+  results in `experiments/tr_shape_dtlz2_100d/RESULTS.md` §4.
 
-**Medium value:**
-- **Crossover-point characterization.** We have d ∈ {20,50,100,150,200}.
-  The transition from "no effect" to "dramatic" happens between 50 and 100.
-  A finer grid (60, 70, 80, 90) + a theory of where it should occur (tied
-  to DTLZ2's fixed effective dim of ~1 vs nominal d) would be a clean
-  mechanistic result.
-- **Non-DTLZ2 low-effective-dim problems.** Rover (all dims matter) and
-  DTLZ2 (1 effective dim) are the two extremes. A problem with, say, 5
-  effective dims out of 100 would test whether the benefit scales with the
-  *gap* between nominal and effective dimension, as the mechanism predicts.
+**Medium value — both now CODED as one new problem, cluster jobs pending:**
+- **Crossover-point characterization + gap-scaling test — DONE (combined
+  into one problem).** New `evalfn="SparseDTLZ2"`
+  (`morbo/problems/sparse_dtlz2.py`): masks all but `k_eff` of DTLZ2's
+  `k = dim - M + 1` distance dimensions out of `g(x)` entirely (the rest
+  become literal no-ops on every objective, not just "less informative"),
+  so nominal dimension and true effective dimension can be varied
+  independently — plain DTLZ2 confounds them, since its `k` necessarily
+  grows with nominal `d`. Two sweeps wired up in
+  `cluster/submit_sparse_dtlz2.sh`:
+    - Group A (`sparse_dtlz2_d{60,80,100,150,200}_keff5`): effective dim
+      pinned at `(M-1)+k_eff = 6` while nominal `d` scales 60→200 — tests
+      whether the benefit keeps growing with nominal `d` alone (supporting
+      the "gap" framing) or plateaus once effective dim is fixed (a
+      correction to it).
+    - Group B (`sparse_dtlz2_d100_keff{2,10,20,50}`): nominal `d` pinned at
+      100 while `k_eff` (effective dim) varies — the direct dose-response
+      version of the same question.
+  Each experiment runs the 4 core methods (`morbo`, `pca_ellipsoid`,
+  `ard_pca_ellipsoid`, `cma_ellipsoid`), seed 0. Smoke-tested
+  (`check_sparse_dtlz2`, `k_eff=2` at `dim=10`).
 
 **Speculative / bigger:**
 - **Learned rotation instead of PCA/CMA.** Both PCA and CMA derive `R` from
@@ -195,15 +214,29 @@ Why this matters for us, honestly:
 
 ---
 
-## Suggested immediate next batch (cluster)
+## Suggested immediate next batch (cluster) — updated
 
-1. Multi-seed (seeds 1–4) the existing `tr_shape_dtlz2_{50,100,150}d` +
-   `tr_shape_dtlz2_200d_2000ev` + `tr_shape_rover` — confirms the headline.
-2. `composite_penicillin_pca` / `composite_penicillin_ard_pca` vs.
-   `morbo` / `composite_penicillin` — the composite×shape 2×2 (labels
-   already wired in).
-3. Implement + run `cma_ellipsoid` at d=100/200 — the single most promising
-   new method.
+Items 1–3 below (multi-seed sweep, composite×shape 2×2, `cma_ellipsoid`/
+linear-kernel/dim-prior) are **done** — see
+`experiments/tr_shape_dtlz2_100d/RESULTS.md` for full results. The next
+batch, now coded and smoke-tested, needs only a cluster run:
 
-Items 1–2 need no new code (just cluster submission). Item 3 is a
-contained addition to `morbo/utils.py` + one new buffer.
+```bash
+bash cluster/submit_mab_shape.sh       # mab_shape @ d=100/150/200 + Rover
+bash cluster/submit_sparse_dtlz2.sh    # SparseDTLZ2 gap-scaling, 9 experiments x 4 methods
+```
+
+After these land, aggregate with `python aggregate_seeds.py <experiment_name>`
+and update `experiments/tr_shape_dtlz2_100d/RESULTS.md` +
+`writeup/methods.tex` `sec:tr-shape` with two new subsections: mab_shape's
+performance relative to the best fixed shape per problem (does it recover
+Rover's lost ground without giving up DTLZ2's win?), and whether the
+SparseDTLZ2 sweep supports "benefit tracks the gap" or "benefit tracks
+nominal d alone, once you can decouple them."
+
+**Further ideas not yet coded** (ranked, unchanged from before):
+- Learned/objective-aware rotation (see Speculative section below) — the
+  remaining ranked idea with no code yet.
+- Multi-seed the new-methods sweep (cma/linear-kernel/dimprior/mab_shape/
+  SparseDTLZ2) — everything past the original 4-method sweep is currently
+  single-seed only.

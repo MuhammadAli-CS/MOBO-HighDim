@@ -64,16 +64,42 @@ restatement of results.
 
 - `morbo/trust_region.py` — `TurboHParams` dataclass carries the
   `tr_shape` hyperparameter (`"isotropic"` default = old behavior exactly,
-  `"ard_box"`, `"pca_ellipsoid"`, `"ard_pca_ellipsoid"`, `"cma_ellipsoid"`),
-  plus `cma_c_mu`/`cma_c1`/`cma_c_p` (CMA learning rates),
-  `use_linear_kernel`, `use_dim_scaled_ls_prior`. `TrustRegion` holds
-  buffers `R` (rotation), `axis_lengths`, and (CMA-only) `cma_C`/`cma_path`/
-  `cma_prev_center`. `_update_tr_shape()` dispatches by mode, **wrapped in
+  `"ard_box"`, `"pca_ellipsoid"`, `"ard_pca_ellipsoid"`, `"cma_ellipsoid"`,
+  `"mab_shape"`), plus `cma_c_mu`/`cma_c1`/`cma_c_p` (CMA learning rates),
+  `use_linear_kernel`, `use_dim_scaled_ls_prior`, and
+  `mab_epsilon`/`mab_reward_ema_alpha`/`mab_arms` (bandit config — see
+  below). `TrustRegion` holds buffers `R` (rotation), `axis_lengths`, (CMA
+  only) `cma_C`/`cma_path`/`cma_prev_center`, and (mab_shape only)
+  `mab_arm_values`/`mab_arm_pulls`/`mab_last_arm`. `_update_tr_shape()`
+  dispatches by mode via `_compute_shape_for_mode(shape)`, **wrapped in
   `torch.no_grad()`** (critical — see Gotchas below). Read the `tr_shape`
   docstring on `TurboHParams` for the full per-mode math and citations.
+  - **`tr_shape="mab_shape"`** (added after the write-up below was first
+    drafted — not yet run on the cluster, only smoke-tested locally): a
+    per-trust-region epsilon-greedy bandit over
+    `{isotropic, ard_box, pca_ellipsoid, ard_pca_ellipsoid, cma_ellipsoid}`.
+    Reward is binary — 1.0 if this TR's existing success-streak counter
+    (`n_successes`) was just incremented, else 0.0 — folded into a per-arm
+    EMA (`_select_mab_arm`). Motivated by this project's own finding that no
+    single fixed shape wins on every problem (PCA wins on DTLZ2, no shape
+    robustly wins on Rover); mirrors AS-SMEA's own answer to that exact
+    problem (Wang et al. 2026, Sec. 3.3, their LS-IMA/MASS). Label:
+    `mab_shape`. Cluster script: `cluster/submit_mab_shape.sh`.
 - `morbo/utils.py` — `compute_cma_ellipsoid_shape(...)` (CMA update math),
   `HypersphereProjection` (input transform for the linear-kernel variants),
   `get_fitted_model(..., use_linear_kernel=..., use_dim_scaled_ls_prior=...)`.
+- `morbo/problems/sparse_dtlz2.py` (new, `evalfn="SparseDTLZ2"`) — DTLZ2
+  variant that masks all but `k_eff` of the `k = dim - M + 1` distance
+  dimensions out of `g(x)` entirely (the masked ones are literal no-ops on
+  every objective), so nominal and effective dimension can be varied
+  independently. Not yet run on the cluster (smoke-tested only); cluster
+  script `cluster/submit_sparse_dtlz2.sh` sweeps both nominal-d-at-fixed-
+  effective-dim and effective-dim-at-fixed-nominal-d. See
+  `writeup/FURTHER_DIRECTIONS.md`'s "Medium value" section for the exact
+  motivation (this directly tests whether shape adaptation's benefit tracks
+  the *gap* between nominal and effective dimension, or nominal dimension
+  alone — plain DTLZ2 can't disentangle the two since its own `k` grows
+  with nominal `d`).
 - `morbo/state.py`, `morbo/run_one_replication.py` — thread the new kwargs
   through to `TurboHParams` construction; `run_one_replication.py`'s
   `supported_labels` list is the authoritative list of runnable experiment

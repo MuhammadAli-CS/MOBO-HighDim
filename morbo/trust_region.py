@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 from abc import abstractmethod, abstractproperty, ABC
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from botorch.acquisition.objective import MCAcquisitionObjective
@@ -153,6 +153,31 @@ class TurboHParams:
             d=100 (~99 lengthscales pinned at the ceiling); a prior that *expects*
             lengthscales to grow like sqrt(d) both regularizes the ratios ard_box
             consumes and removes the ceiling.
+        mab_epsilon, mab_reward_ema_alpha, mab_arms: see tr_shape="mab_shape" above.
+
+        tr_shape="mab_shape": per-trust-region multi-armed bandit over `mab_arms`
+            (default: the 5 shapes above, including "isotropic" itself as an arm).
+            Motivated by AS-SMEA's own answer (Wang et al. 2026, Sec. 3.3, their
+            LS-IMA/MASS) to this project's own finding that no single shape wins on
+            every problem (PCA wins on DTLZ2, no shape robustly wins on Rover):
+            let each trust region learn, from its own local reward history, which
+            geometry suits its own local landscape, rather than fixing one shape
+            globally for the whole run. Each time `_update_tr_shape` fires (i.e.
+            each time the local model is refit), the arm chosen the *previous* time
+            is credited with a reward of 1.0 if this TR's success streak was just
+            incremented (`n_successes > 0`, i.e. the streak counter TuRBO already
+            tracks for its own length-doubling logic -- reused here rather than
+            adding a separate hypervolume-history buffer) and 0.0 otherwise, folded
+            into a per-arm exponential moving average with rate `mab_reward_ema_alpha`.
+            The next arm is chosen epsilon-greedily: with probability `mab_epsilon`
+            uniformly at random (exploration), otherwise the argmax of the per-arm
+            EMA reward estimates (exploitation). Every arm still shares this TR's
+            single scalar `length` (only the shape -- rotation and relative axis
+            widths -- is chosen per-arm; total "volume" stays governed by the
+            existing success/failure streak dynamics, identically to every other
+            tr_shape). CMA's persistent covariance state updates only on iterations
+            where "cma_ellipsoid" happens to be the selected arm -- consistent with
+            being a genuinely lazy, sparsely-updated state under this variant.
     """
 
     length_init: float = 0.8
@@ -204,6 +229,15 @@ class TurboHParams:
     cma_c_p: float = 0.3
     use_linear_kernel: bool = False
     use_dim_scaled_ls_prior: bool = False
+    mab_epsilon: float = 0.15
+    mab_reward_ema_alpha: float = 0.3
+    mab_arms: tuple = (
+        "isotropic",
+        "ard_box",
+        "pca_ellipsoid",
+        "ard_pca_ellipsoid",
+        "cma_ellipsoid",
+    )
 
     _TR_SHAPES = {
         "isotropic",
@@ -211,6 +245,7 @@ class TurboHParams:
         "pca_ellipsoid",
         "ard_pca_ellipsoid",
         "cma_ellipsoid",
+        "mab_shape",
     }
 
     def __post_init__(self) -> None:
@@ -226,6 +261,12 @@ class TurboHParams:
             )
         if not (0.0 < self.cma_c_p <= 1.0):
             raise ValueError("cma_c_p must be in (0,1].")
+        if not (0.0 <= self.mab_epsilon <= 1.0):
+            raise ValueError("mab_epsilon must be in [0,1].")
+        if not (0.0 < self.mab_reward_ema_alpha <= 1.0):
+            raise ValueError("mab_reward_ema_alpha must be in (0,1].")
+        if self.tr_shape == "mab_shape" and len(self.mab_arms) < 2:
+            raise ValueError("mab_arms must contain at least 2 arms.")
 
     @classmethod
     def from_dict(cls, tr_hparams: Dict) -> None:
@@ -328,6 +369,24 @@ class TrustRegion(ABC, Module):
             "cma_path", torch.zeros(self.dim, device=bounds.device, dtype=bounds.dtype)
         )
         self.register_buffer("cma_prev_center", None)
+        # mab_shape-only persistent state: per-arm EMA reward estimate and
+        # pull count (both indexed identically to `tr_hparams.mab_arms`), and
+        # the index of the arm chosen the last time `_update_tr_shape` ran (so
+        # its reward can be credited next time). -1 = "no arm chosen yet".
+        # Registered unconditionally (like the CMA buffers above) since
+        # `tr_hparams` is fixed at construction and small tensors are cheap.
+        n_mab_arms = len(tr_hparams.mab_arms)
+        self.register_buffer(
+            "mab_arm_values",
+            torch.zeros(n_mab_arms, device=bounds.device, dtype=bounds.dtype),
+        )
+        self.register_buffer(
+            "mab_arm_pulls",
+            torch.zeros(n_mab_arms, device=bounds.device, dtype=torch.int64),
+        )
+        self.register_buffer(
+            "mab_last_arm", torch.tensor(-1, device=bounds.device, dtype=torch.int64)
+        )
         self.register_buffer(
             "n_successes", torch.tensor(0, device=bounds.device, dtype=torch.int64)
         )
@@ -678,15 +737,107 @@ class TrustRegion(ABC, Module):
             axis_lengths=self.axis_lengths * length_multiplier,
         )
 
+    def _compute_shape_for_mode(self, shape: str) -> Tuple[Tensor, Tensor]:
+        r"""Compute `(R, axis_lengths)` for a single named shape mode.
+
+        Factored out of `_update_tr_shape` so that `tr_shape == "mab_shape"`
+        can dispatch to whichever arm the bandit selects using exactly the
+        same per-mode logic as running that shape directly. Must be called
+        from within a `torch.no_grad()` context (see `_update_tr_shape`).
+        Falls back to the isotropic shape (identity `R`, uniform
+        `axis_lengths`) if ARD lengthscales aren't available (e.g.
+        `use_ard=False`, or `self.model` is a `KroneckerMultiTaskGP`) for the
+        `ard_box`/`ard_pca_ellipsoid` modes.
+        """
+        if shape == "isotropic":
+            return (
+                torch.eye(self.dim, device=self.length.device, dtype=self.length.dtype),
+                self.length.expand(self.dim).clone(),
+            )
+        needs_ard = shape in ("ard_box", "ard_pca_ellipsoid")
+        lengthscale = (
+            extract_ard_lengthscale(self.model, self.dim) if needs_ard else None
+        )
+        if needs_ard and lengthscale is None:
+            return (
+                torch.eye(self.dim, device=self.length.device, dtype=self.length.dtype),
+                self.length.expand(self.dim).clone(),
+            )
+        elif shape == "ard_box":
+            return compute_ard_box_shape(
+                lengthscale=lengthscale, length=self.length, dim=self.dim
+            )
+        elif shape == "pca_ellipsoid":
+            return compute_pca_ellipsoid_shape(
+                X=normalize(self.X, bounds=self.bounds),
+                X_center=self.X_center_normalized,
+                length=self.length,
+                dim=self.dim,
+            )
+        elif shape == "cma_ellipsoid":
+            if self.best_X is not None and self.best_X.numel() > 0:
+                elites = normalize(self.best_X, bounds=self.bounds)
+            else:
+                elites = torch.zeros(
+                    0, self.dim, device=self.length.device, dtype=self.length.dtype
+                )
+            R, axis_lengths, C_new, path_new = compute_cma_ellipsoid_shape(
+                elites=elites,
+                X_center=self.X_center_normalized,
+                prev_center=self.cma_prev_center,
+                C=self.cma_C,
+                path=self.cma_path,
+                length=self.length,
+                dim=self.dim,
+                c_mu=self.tr_hparams.cma_c_mu,
+                c1=self.tr_hparams.cma_c1,
+                c_p=self.tr_hparams.cma_c_p,
+            )
+            self.cma_C = C_new.detach()
+            self.cma_path = path_new.detach()
+            self.cma_prev_center = self.X_center_normalized.detach().clone()
+            return R, axis_lengths
+        else:  # "ard_pca_ellipsoid"
+            return compute_ard_pca_ellipsoid_shape(
+                X=normalize(self.X, bounds=self.bounds),
+                X_center=self.X_center_normalized,
+                lengthscale=lengthscale,
+                length=self.length,
+                dim=self.dim,
+            )
+
+    def _select_mab_arm(self) -> int:
+        r"""Credit the previous arm's reward, then epsilon-greedily pick the next.
+
+        Reward is binary: 1.0 if this TR's success streak was just
+        incremented (`self.n_successes > 0`), else 0.0 -- reuses the streak
+        counter TuRBO already maintains for its own length-doubling logic,
+        rather than adding a separate hypervolume-history buffer. Folded into
+        a per-arm exponential moving average (`mab_reward_ema_alpha`).
+        """
+        if self.mab_last_arm.item() >= 0:
+            reward = 1.0 if self.n_successes.item() > 0 else 0.0
+            i = self.mab_last_arm.item()
+            alpha = self.tr_hparams.mab_reward_ema_alpha
+            self.mab_arm_values[i] = (
+                1 - alpha
+            ) * self.mab_arm_values[i] + alpha * reward
+            self.mab_arm_pulls[i] += 1
+        n_arms = len(self.tr_hparams.mab_arms)
+        if torch.rand(()).item() < self.tr_hparams.mab_epsilon:
+            arm = torch.randint(0, n_arms, ()).item()
+        else:
+            arm = self.mab_arm_values.argmax().item()
+        self.mab_last_arm = torch.tensor(
+            arm, device=self.mab_last_arm.device, dtype=self.mab_last_arm.dtype
+        )
+        return arm
+
     def _update_tr_shape(self) -> None:
         r"""Recompute `self.R`/`self.axis_lengths` per `tr_hparams.tr_shape`.
 
         No-op for `tr_shape == "isotropic"` (never called for that mode, see
-        `update()`). Falls back to the isotropic shape (identity `R`,
-        uniform `axis_lengths`) if ARD lengthscales aren't available (e.g.
-        `use_ard=False`, or `self.model` is a `KroneckerMultiTaskGP` --
-        shape-adaptation's ARD-based variants are not supported together
-        with `use_kronecker_gp`) for the `ard_box`/`ard_pca_ellipsoid` modes.
+        `update()`).
         """
         # GP kernel lengthscales are `nn.Parameter`s (`requires_grad=True`).
         # Without `no_grad()`, R/axis_lengths (and everything derived from
@@ -697,55 +848,10 @@ class TrustRegion(ABC, Module):
         # smoke-test run before this guard was added).
         with torch.no_grad():
             shape = self.tr_hparams.tr_shape
-            needs_ard = shape in ("ard_box", "ard_pca_ellipsoid")
-            lengthscale = (
-                extract_ard_lengthscale(self.model, self.dim) if needs_ard else None
-            )
-            if needs_ard and lengthscale is None:
-                R, axis_lengths = torch.eye(
-                    self.dim, device=self.length.device, dtype=self.length.dtype
-                ), self.length.expand(self.dim).clone()
-            elif shape == "ard_box":
-                R, axis_lengths = compute_ard_box_shape(
-                    lengthscale=lengthscale, length=self.length, dim=self.dim
-                )
-            elif shape == "pca_ellipsoid":
-                R, axis_lengths = compute_pca_ellipsoid_shape(
-                    X=normalize(self.X, bounds=self.bounds),
-                    X_center=self.X_center_normalized,
-                    length=self.length,
-                    dim=self.dim,
-                )
-            elif shape == "cma_ellipsoid":
-                if self.best_X is not None and self.best_X.numel() > 0:
-                    elites = normalize(self.best_X, bounds=self.bounds)
-                else:
-                    elites = torch.zeros(
-                        0, self.dim, device=self.length.device, dtype=self.length.dtype
-                    )
-                R, axis_lengths, C_new, path_new = compute_cma_ellipsoid_shape(
-                    elites=elites,
-                    X_center=self.X_center_normalized,
-                    prev_center=self.cma_prev_center,
-                    C=self.cma_C,
-                    path=self.cma_path,
-                    length=self.length,
-                    dim=self.dim,
-                    c_mu=self.tr_hparams.cma_c_mu,
-                    c1=self.tr_hparams.cma_c1,
-                    c_p=self.tr_hparams.cma_c_p,
-                )
-                self.cma_C = C_new.detach()
-                self.cma_path = path_new.detach()
-                self.cma_prev_center = self.X_center_normalized.detach().clone()
-            else:  # "ard_pca_ellipsoid"
-                R, axis_lengths = compute_ard_pca_ellipsoid_shape(
-                    X=normalize(self.X, bounds=self.bounds),
-                    X_center=self.X_center_normalized,
-                    lengthscale=lengthscale,
-                    length=self.length,
-                    dim=self.dim,
-                )
+            if shape == "mab_shape":
+                arm_idx = self._select_mab_arm()
+                shape = self.tr_hparams.mab_arms[arm_idx]
+            R, axis_lengths = self._compute_shape_for_mode(shape)
             axis_lengths = axis_lengths.clamp(
                 self.tr_hparams.length_min, self.tr_hparams.length_max
             )

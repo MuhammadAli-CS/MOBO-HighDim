@@ -50,6 +50,7 @@ from morbo.problems.composite_penicillin import (
     composite_penicillin_reduction,
     get_composite_penicillin_fn,
 )
+from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
 from morbo.benchmark_function import (
     BenchmarkFunction,
 )
@@ -73,6 +74,7 @@ supported_labels = [
     "linear_gp_cma",
     "ard_box_dimprior",
     "ard_pca_dimprior",
+    "mab_shape",
 ]
 
 BASE_SEED = 12346
@@ -130,8 +132,12 @@ def run_one_replication(
     cma_c_p: float = TurboHParams.cma_c_p,
     use_linear_kernel: bool = TurboHParams.use_linear_kernel,
     use_dim_scaled_ls_prior: bool = TurboHParams.use_dim_scaled_ls_prior,
+    mab_epsilon: float = TurboHParams.mab_epsilon,
+    mab_reward_ema_alpha: float = TurboHParams.mab_reward_ema_alpha,
+    mab_arms: tuple = TurboHParams.mab_arms,
     n_curve_points: int = 8,
     n_penicillin_checkpoints: int = 10,
+    sparse_dtlz2_k_eff: int = 5,
     dtype: torch.device = torch.double,
     device: Optional[torch.device] = None,
     save_callback: Optional[Callable[[Tensor], None]] = None,
@@ -256,6 +262,19 @@ def run_one_replication(
         bounds = bounds.to(**tkwargs)
         num_outputs = n_curve_points
         composite_reduction = composite_dtlz2_curve_reduction
+    elif evalfn == "SparseDTLZ2":
+        # NOTE: must be special-cased ahead of the generic `"DTLZ" in evalfn`
+        # branch below, which would otherwise misroute this name (it isn't in
+        # that branch's `constructor_map`).
+        f, bounds = get_sparse_dtlz2_fn(
+            dim=dim,
+            num_objectives=num_objectives,
+            k_eff=sparse_dtlz2_k_eff,
+            dtype=dtype,
+            device=device,
+        )
+        bounds = bounds.to(**tkwargs)
+        num_outputs = num_objectives
     elif evalfn == "Penicillin":
         problem = Penicillin(negate=False)
         f = problem
@@ -350,6 +369,9 @@ def run_one_replication(
         cma_c_p=cma_c_p,
         use_linear_kernel=use_linear_kernel,
         use_dim_scaled_ls_prior=use_dim_scaled_ls_prior,
+        mab_epsilon=mab_epsilon,
+        mab_reward_ema_alpha=mab_reward_ema_alpha,
+        mab_arms=tuple(mab_arms),
     )
 
     trbo_state = TRBOState(

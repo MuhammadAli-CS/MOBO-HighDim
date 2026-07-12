@@ -1,0 +1,15 @@
+{
+    "evalfn": "SparseDTLZ2",
+    "max_evals": 400,
+    "n_initial_points": 150,
+    "batch_size": 40,
+    "n_trust_regions": 3,
+    "min_tr_size": 150,
+    "max_reference_point": [
+        -6,
+        -6
+    ],
+    "verbose": true,
+    "dim": 60,
+    "sparse_dtlz2_k_eff": 5
+}

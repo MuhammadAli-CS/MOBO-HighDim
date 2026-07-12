@@ -119,6 +119,31 @@ After the multi-seed jobs land, aggregate with:
 python aggregate_seeds.py tr_shape_dtlz2_100d   # mean ± std per method
 ```
 
+## 4d. Bandit-guided shape selection and the effective-dimension sweep
+
+Two more follow-ups, coded and smoke-tested locally, not yet run on the
+cluster (see `writeup/FURTHER_DIRECTIONS.md` for full motivation):
+
+```
+bash cluster/submit_mab_shape.sh       # mab_shape @ d=100/150/200 + Rover
+bash cluster/submit_sparse_dtlz2.sh    # SparseDTLZ2, 9 experiments x 4 methods
+```
+
+`mab_shape` (new `tr_shape` mode) is a per-trust-region epsilon-greedy
+bandit over `{isotropic, ard_box, pca_ellipsoid, ard_pca_ellipsoid,
+cma_ellipsoid}`, rewarded by whether the TR's own success streak just
+incremented. Motivated by this project's own finding that no single fixed
+shape wins everywhere (PCA wins on DTLZ2, no shape robustly won on Rover) --
+mirrors AS-SMEA's own answer to that (Wang et al. 2026, Sec. 3.3).
+
+`SparseDTLZ2` (new `evalfn`) masks all but `k_eff` of DTLZ2's distance
+dimensions out of `g(x)` entirely, so nominal and effective dimension can be
+varied independently -- tests whether shape adaptation's benefit tracks the
+*gap* between them (as this project's diagnosis implies) or nominal
+dimension alone (which plain DTLZ2 can't distinguish, since its own `k`
+grows with nominal `d`). `cluster/submit_sparse_dtlz2.sh` runs two sweeps:
+nominal `d` at fixed effective dim, and effective dim at fixed nominal `d`.
+
 ## 5. LLM-dependent parts (Parts 2 and 3)
 
 ```

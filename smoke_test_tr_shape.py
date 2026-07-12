@@ -132,6 +132,47 @@ def check_dim_prior() -> None:
     print("OK: ard_box + dim-scaled prior ran to completion.")
 
 
+def check_mab_shape() -> None:
+    print("=== mab_shape (per-TR bandit over shapes) ===")
+    # Force exploration (mab_epsilon=1.0) so a short smoke run reliably
+    # visits a non-isotropic arm at least once, without depending on the
+    # exploitation path's argmax tie-breaking (which favors the first arm,
+    # "isotropic", when reward estimates are still equal/near-zero).
+    out = run_and_capture_kw("mab_shape", tr_shape="mab_shape", mab_epsilon=1.0)
+    assert "axis_lengths:" in out, "mab_shape: shape update never fired"
+    r_lines = [l for l in out.splitlines() if l.startswith("R is identity:")]
+    assert any("False" in l for l in r_lines), (
+        "mab_shape: R was identity for the entire run even under full "
+        "exploration (mab_epsilon=1.0) -- arm selection likely isn't wired up."
+    )
+    print("OK: bandit selected a rotated arm at least once under full exploration.")
+
+
+def check_sparse_dtlz2() -> None:
+    print("=== SparseDTLZ2 (partial effective-dimension problem) ===")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        run_one_replication(
+            seed=0,
+            label="pca_ellipsoid",
+            max_evals=MAX_EVALS,
+            evalfn="SparseDTLZ2",
+            dim=DIM,
+            batch_size=BATCH_SIZE,
+            n_initial_points=N_INITIAL_POINTS,
+            n_trust_regions=N_TRUST_REGIONS,
+            min_tr_size=MIN_TR_SIZE,
+            max_reference_point=[-6, -6],
+            sparse_dtlz2_k_eff=2,
+            tr_shape="pca_ellipsoid",
+            verbose=True,
+            save_callback=lambda output: None,
+        )
+    out = buf.getvalue()
+    assert "axis_lengths:" in out, "SparseDTLZ2: pca_ellipsoid shape update never fired"
+    print("OK: SparseDTLZ2 BO loop with k_eff=2 ran to completion.")
+
+
 if __name__ == "__main__":
     torch.manual_seed(0)
     check_isotropic()
@@ -141,4 +182,6 @@ if __name__ == "__main__":
     check_variant("cma_ellipsoid", "cma_ellipsoid", expect_rotation=True)
     check_linear_kernel()
     check_dim_prior()
+    check_mab_shape()
+    check_sparse_dtlz2()
     print("\nAll smoke tests passed.")
