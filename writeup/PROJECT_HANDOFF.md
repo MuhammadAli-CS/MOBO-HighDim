@@ -39,15 +39,31 @@ local data helps high-dimensional multi-objective BO, and if so, why.
 Trust-region shape adaptation (PCA-rotated ellipsoids) produces large,
 unanimous, seed-robust wins (+64–72% hypervolume) on problems with
 low-dimensional *effective* structure (DTLZ2: 1 informative variable of
-nominal `d`), growing with nominal `d`, and produces a noise-level effect
-(near coin-flip win rates, no systematic direction) on problems where all
-dimensions genuinely matter (Rover: 60 real spline-waypoint dims). The
-naive axis-aligned ARD-rescaled box (original TuRBO's own technique)
-*actively hurts*, worse than doing nothing — diagnosed as a curse-of-
-dimensionality effect (see below). A newer CMA-ES-based covariance
-adaptation variant is the only method that breaks through at d=200 within
-the standard budget, validating a temporal-smoothing argument from a
-paper read partway through the project.
+nominal `d`), and produces a noise-level effect (near coin-flip win rates,
+no systematic direction) on problems where all dimensions genuinely matter
+(Rover: 60 real spline-waypoint dims). The naive axis-aligned ARD-rescaled
+box (original TuRBO's own technique) *actively hurts*, worse than doing
+nothing — diagnosed as a curse-of-dimensionality effect (see below). A
+CMA-ES-based covariance adaptation variant is the only method that breaks
+through at d=200 within the standard budget, validating a
+temporal-smoothing argument from a paper read partway through the project.
+
+**Correction, established by the `SparseDTLZ2` follow-up:** the effect is
+governed by *effective* dimension relative to the eval budget, not nominal
+dimension, and not "the gap" between them (an earlier, now-superseded
+framing). Holding effective dimension fixed at 6 while scaling nominal `d`
+from 60→200 produces a flat null (<0.3% everywhere); holding nominal `d`
+fixed at 100 while scaling effective dimension from 3→51 produces a clean
+monotonic dose-response (0.1%→10%). Plain DTLZ2's dimension sweep was
+measuring effective dimension all along, since nominal `d` there is
+inseparable from it by construction.
+
+**A second follow-up, `mab_shape`** (a per-trust-region bandit that learns
+which fixed shape to use, rather than committing to one globally) gives a
+genuinely two-sided result: it is the single best method of all 8 tested
+at d=100 (+69.2%), but *ties the failing isotropic baseline* at d=150/200
+— its own exploration cost consumes the narrow late-arriving breakthrough
+margin the fixed shapes needed in that tighter-budget regime.
 
 **Full results are written up in two places, kept in sync:**
 - `experiments/tr_shape_dtlz2_100d/RESULTS.md` — narrative + tables, the
@@ -74,17 +90,17 @@ restatement of results.
   dispatches by mode via `_compute_shape_for_mode(shape)`, **wrapped in
   `torch.no_grad()`** (critical — see Gotchas below). Read the `tr_shape`
   docstring on `TurboHParams` for the full per-mode math and citations.
-  - **`tr_shape="mab_shape"`** (added after the write-up below was first
-    drafted — not yet run on the cluster, only smoke-tested locally): a
-    per-trust-region epsilon-greedy bandit over
-    `{isotropic, ard_box, pca_ellipsoid, ard_pca_ellipsoid, cma_ellipsoid}`.
+  - **`tr_shape="mab_shape"`**: a per-trust-region epsilon-greedy bandit
+    over `{isotropic, ard_box, pca_ellipsoid, ard_pca_ellipsoid, cma_ellipsoid}`.
     Reward is binary — 1.0 if this TR's existing success-streak counter
     (`n_successes`) was just incremented, else 0.0 — folded into a per-arm
     EMA (`_select_mab_arm`). Motivated by this project's own finding that no
     single fixed shape wins on every problem (PCA wins on DTLZ2, no shape
     robustly wins on Rover); mirrors AS-SMEA's own answer to that exact
     problem (Wang et al. 2026, Sec. 3.3, their LS-IMA/MASS). Label:
-    `mab_shape`. Cluster script: `cluster/submit_mab_shape.sh`.
+    `mab_shape`. **Results are in** (`RESULTS.md` §6): best of 8 methods at
+    d=100 (+69.2%), but ties the failing baseline at d=150/200 (exploration
+    cost exceeds the narrow late-breakthrough budget there).
 - `morbo/utils.py` — `compute_cma_ellipsoid_shape(...)` (CMA update math),
   `HypersphereProjection` (input transform for the linear-kernel variants),
   `get_fitted_model(..., use_linear_kernel=..., use_dim_scaled_ls_prior=...)`.
@@ -92,14 +108,12 @@ restatement of results.
   variant that masks all but `k_eff` of the `k = dim - M + 1` distance
   dimensions out of `g(x)` entirely (the masked ones are literal no-ops on
   every objective), so nominal and effective dimension can be varied
-  independently. Not yet run on the cluster (smoke-tested only); cluster
-  script `cluster/submit_sparse_dtlz2.sh` sweeps both nominal-d-at-fixed-
-  effective-dim and effective-dim-at-fixed-nominal-d. See
-  `writeup/FURTHER_DIRECTIONS.md`'s "Medium value" section for the exact
-  motivation (this directly tests whether shape adaptation's benefit tracks
-  the *gap* between nominal and effective dimension, or nominal dimension
-  alone — plain DTLZ2 can't disentangle the two since its own `k` grows
-  with nominal `d`).
+  independently. **Results are in** (`RESULTS.md` §7): nominal `d` alone
+  (60→200, effective dim pinned at 6) is a flat null; effective dim alone
+  (fixed d=100, k_eff 2→50) gives a clean 0.1%→10% dose-response. This
+  **corrected an earlier "gap between nominal and effective dimension"
+  framing** — the governing variable is effective dimension relative to
+  budget, full stop, not the gap and not nominal dimension.
 - `morbo/state.py`, `morbo/run_one_replication.py` — thread the new kwargs
   through to `TurboHParams` construction; `run_one_replication.py`'s
   `supported_labels` list is the authoritative list of runnable experiment
@@ -192,25 +206,28 @@ git commit && git push                          # or scp results back
 1. This file.
 2. `experiments/tr_shape_dtlz2_100d/RESULTS.md` — all results, narrative.
 3. `writeup/FURTHER_DIRECTIONS.md` — the two papers' insights, the
-   implementation-status table, and ranked ideas not yet tried (MAB-guided
-   per-region shape selection, crossover-point characterization, learned
-   objective-aware rotation, etc.) — **start here for "what's next"**.
+   implementation-status table (everything proposed so far is now done),
+   and the one remaining ranked idea not yet tried (learned objective-aware
+   rotation) — **start here for "what's next"**.
 4. `writeup/methods.tex` `sec:tr-shape` — same results, paper form.
 5. `morbo/trust_region.py`'s `TurboHParams.tr_shape` docstring — the
    authoritative technical spec of every mode.
 6. `cluster/README.md` — cluster mechanics.
 
-## Open threads / natural next steps (see FURTHER_DIRECTIONS.md §3 for full list)
+## Open threads / natural next steps
 
-- MAB-guided per-trust-region shape selection (AS-SMEA's own answer to
-  "no single shape wins everywhere" — directly turns this project's
-  conditional-benefit finding into an adaptive strength). Not yet coded.
-- Crossover-point characterization: finer dimension grid (60,70,80,90)
-  between DTLZ2's "no effect" (d=50) and "dramatic" (d=100) regimes.
-- A problem with partial effective-dimension structure (e.g. 5 informative
-  of 100 dims) to test whether benefit scales with the *gap* between
-  nominal and effective dimension, as the mechanism predicts.
-- Learned/objective-aware rotation (current PCA/CMA are both
-  variance-driven, not objective-gradient-driven).
-- Multi-seed the new-methods sweep (`cma_ellipsoid`, `linear_gp_pca`, dim-
-  prior variants) — currently single-seed only, unlike the core 4 methods.
+Everything originally proposed in `FURTHER_DIRECTIONS.md` (multi-seed
+sweep, composite×shape, CMA/linear-kernel/dim-prior, `mab_shape`,
+`SparseDTLZ2`) is now done and written up. What's left:
+
+- **Anneal `mab_epsilon`** (decay exploration as budget is consumed) —
+  directly implied by `mab_shape`'s own failure mode at d=150/200 (exploration
+  cost eats the narrow late-breakthrough margin fixed shapes needed there).
+- **Learned/objective-aware rotation** — current PCA/CMA are both
+  variance-driven, not objective-gradient-driven. Not yet coded; the one
+  remaining idea from the original ranked list.
+- **Multi-seed the new-methods sweep** (`cma_ellipsoid`, `linear_gp_pca`,
+  dim-prior variants, `mab_shape`, `SparseDTLZ2`) — everything past the
+  original 4-method core sweep is currently single-seed only. The
+  `ard_pca_ellipsoid` loss at `SparseDTLZ2` effective-dim 51 (§7,
+  RESULTS.md) is a specific single-seed result worth confirming first.

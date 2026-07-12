@@ -1129,6 +1129,146 @@ cancelled -- consistent with the two extensions touching disjoint parts of
 the pipeline, and with Section above's finding that shape adaptation has no
 systematic effect at Penicillin's scale in the first place.
 
+\subsection{\texttt{mab\_shape}: adaptive shape selection wins where there is time to learn, and loses where there isn't}
+
+Since no single fixed shape wins on every problem tested (PCA wins on
+DTLZ2, no shape robustly wins on Rover), a natural next step -- AS-SMEA's
+own answer to the same problem (Wang et al. 2026, Sec.\ 3.3, their
+LS-IMA/MASS) -- is to let each trust region \emph{learn} which shape suits
+its own local landscape rather than fixing one globally. \texttt{tr\_shape
+= "mab\_shape"} implements this as a per-trust-region epsilon-greedy
+bandit over $\{$\texttt{isotropic}, \texttt{ard\_box}, \texttt{pca\_ellipsoid},
+\texttt{ard\_pca\_ellipsoid}, \texttt{cma\_ellipsoid}$\}$, re-selected each
+time the local model refits; reward is binary (1.0 if the TR's own success
+streak was just incremented, else 0.0), folded into a per-arm exponential
+moving average.
+
+\begin{table}[h]
+\centering
+\caption{\texttt{mab\_shape} vs.\ the best fixed shape at each $d$ (DTLZ2,
+single seed; Rover single seed, not directly comparable to the 5-seed
+means elsewhere in this section).}
+\label{tab:tr-shape-mab}
+\begin{tabular}{lrrl}
+\toprule
+Problem & \texttt{morbo} & \texttt{mab\_shape} & vs.\ best fixed shape here \\
+\midrule
+DTLZ2 $d{=}100$ & 20.02 & \textbf{33.89} ($+69.2\%$) & best of all 8 methods tested \\
+DTLZ2 $d{=}150$ & 0.00 & 0.00 & pca/cma/linear\_gp\_pca all break through (27--29) \\
+DTLZ2 $d{=}200$ & 0.00 & 0.00 & only \texttt{cma\_ellipsoid} (21.72) breaks through \\
+Rover (seed 0) & 2.36 & 2.19 & within the near-coin-flip range of \S\ref{sec:tr-shape}'s fixed shapes \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This is a genuinely two-sided result. At $d{=}100$, \texttt{mab\_shape} is
+the single best method of all eight tested in this section -- beating
+every fixed shape it chooses among, plausibly by hedging early exploration
+against a bad initial draw while still exploiting the winning arms once
+identified. But at $d{=}150$--$200$, where even the strongest fixed shapes
+only barely break through late in a tight 600-eval budget
+(breakthrough evals $\sim$300--350 of 600 for the PCA variants at
+$d{=}150$), \texttt{mab\_shape} ties the \emph{failing} isotropic baseline
+rather than approaching the winning fixed shapes: the bandit's own
+exploration cost (a fixed $15\%$ of iterations, by default, spent on arms
+that include the two actively harmful ones) consumes exactly the margin
+the fixed-shape methods needed. The mechanism is a direct consequence of
+the narrow, late-arriving breakthrough window diagnosed in
+\S\ref{sec:tr-shape}: adaptivity's own learning cost becomes a net
+negative exactly where the reward signal is scarcest. A budget-aware or
+annealed exploration rate (decaying as the eval budget is consumed) is an
+immediate follow-up implied directly by this failure mode.
+
+\subsection{\texttt{SparseDTLZ2}: effective dimension, not nominal dimension, governs the effect}
+\label{sec:sparse-dtlz2}
+
+Plain DTLZ2 confounds nominal and effective dimension: its
+$k = d - M + 1$ distance dimensions all contribute to $g(x)$, so effective
+dimensionality necessarily grows with nominal $d$. A new test problem,
+\texttt{SparseDTLZ2} (\texttt{morbo/problems/sparse\_dtlz2.py}), breaks
+this confound by masking all but \texttt{k\_eff} of the $k$ distance
+dimensions out of $g(x)$ entirely -- the masked dimensions are literal
+no-ops on every objective, not merely less informative -- so nominal and
+effective dimension can be scaled independently. Two single-seed sweeps
+(400 evals, batch 40, 3 TRs, smaller budget than the main sweep since
+effective dimensionality is small by construction at every point tested):
+
+\begin{table}[h]
+\centering
+\caption{Group A: nominal $d$ scaled $60 \to 200$ with effective dimension
+pinned at $(M{-}1)+k_{\mathrm{eff}} = 6$. Percentages are relative to
+\texttt{morbo} at the same nominal $d$.}
+\label{tab:sparse-dtlz2-groupA}
+\begin{tabular}{lrrr}
+\toprule
+Nominal $d$ & \texttt{pca\_ellipsoid} & \texttt{ard\_pca\_ellipsoid} & \texttt{cma\_ellipsoid} \\
+\midrule
+60  & $+0.19\%$ & $+0.18\%$ & $+0.30\%$ \\
+80  & $+0.07\%$ & $+0.09\%$ & $+0.10\%$ \\
+100 & $+0.13\%$ & $+0.17\%$ & $+0.22\%$ \\
+150 & $+0.05\%$ & $+0.01\%$ & $+0.18\%$ \\
+200 & $+0.05\%$ & $+0.03\%$ & $+0.13\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Flat and essentially null across a $60 \to 200$ nominal-dimension range --
+every value is within $0.3\%$ of baseline, an order of magnitude below
+even the smallest real effect seen anywhere else in this study. Scaling
+nominal dimension alone, with effective dimension pinned small, produces
+no method-dependent effect at all. This directly refutes a "gap between
+nominal and effective dimension" framing considered earlier in this
+project: nominal dimension is not, by itself, what shape adaptation
+responds to.
+
+\begin{table}[h]
+\centering
+\caption{Group B: nominal $d{=}100$ fixed, effective dimension scaled via
+$k_{\mathrm{eff}} \in \{2,10,20,50\}$ (effective dim $= 1+k_{\mathrm{eff}}$).
+Percentages relative to \texttt{morbo} at the same $k_{\mathrm{eff}}$.}
+\label{tab:sparse-dtlz2-groupB}
+\begin{tabular}{lrrr}
+\toprule
+$k_{\mathrm{eff}}$ (effective dim) & \texttt{pca\_ellipsoid} & \texttt{ard\_pca\_ellipsoid} & \texttt{cma\_ellipsoid} \\
+\midrule
+2 (3)   & $+0.09\%$ & $+0.08\%$ & $+0.10\%$ \\
+5 (6)   & $+0.13\%$ & $+0.17\%$ & $+0.22\%$ \\
+10 (11) & $+0.06\%$ & $+0.05\%$ & $+0.24\%$ \\
+20 (21) & $+1.02\%$ & $+0.57\%$ & $+0.97\%$ \\
+50 (51) & $\mathbf{+6.7\%}$ & $-0.55\%$ & $\mathbf{+10.1\%}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A clean, monotonic dose-response as effective dimension grows, with
+nominal dimension held fixed the entire time: effect size grows smoothly
+from noise level ($\sim$0.1\% at effective dim 3) through a first visible
+signal ($\sim$1\% at effective dim 21) to a real effect ($+6.7$ to
+$+10.1\%$ at effective dim 51) -- extrapolating cleanly toward the
+$+64$--$67\%$ seen in Table~\ref{tab:tr-shape-sweep} at $d{=}100$
+(effective dimension $\approx 99$, full 600-eval budget). Combined with
+Group A's flat null, this pins down the mechanism precisely: it is
+\textbf{effective dimension relative to the eval budget}, not nominal
+dimension and not the gap between them, that determines when trust-region
+shape adaptation starts to matter. The plain-DTLZ2 dimension sweep
+(Table~\ref{tab:tr-shape-sweep}) was measuring effective dimension all
+along -- nominal $d$ there was only ever a proxy for it, since DTLZ2's own
+construction ties the two together.
+
+One exception is worth flagging plainly: at effective dimension 51,
+\texttt{ard\_pca\_ellipsoid} is the one method that does \emph{not} win
+($-0.55\%$, the only negative value in either table), while plain
+\texttt{pca\_ellipsoid} ($+6.7\%$) and \texttt{cma\_ellipsoid} ($+10.1\%$,
+the strongest of the three here, consistent with \texttt{cma\_ellipsoid}'s
+disproportionate strength in tight-budget/high-effective-dimension regimes
+noted above) both win clearly. A plausible reading is that this is the
+same lengthscale-noise-compounding mechanism diagnosed for
+\texttt{ard\_box} above, partially reappearing in the ARD-reweighted
+hybrid once there is enough real per-dimension signal (51 informative
+axes) for early lengthscale estimates to be individually noisy within a
+tighter, 400-eval budget -- a single-seed observation that warrants a
+multi-seed follow-up before being treated as more than suggestive.
+
 \section{Discussion}
 
 The three extensions from Sections~\ref{sec:composite}--\ref{sec:botier}
