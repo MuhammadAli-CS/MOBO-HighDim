@@ -256,6 +256,19 @@ liability exactly when there isn't. A budget-aware or annealed `mab_epsilon`
 (decaying exploration as the eval budget is consumed) is an obvious
 follow-up implied directly by this failure mode.
 
+**QUEUED, not yet run:** is the d=150/200 failure a budget artifact (like
+`morbo`/`ard_box`'s own d=200/600-eval `0.00`s turned out to be — §3's
+2000-eval rerun showed those recover) or a real design flaw (constant
+15% exploration tax that never amortizes, however long the run)?
+`cluster/submit_mab_shape_extended_budget.sh` reruns `mab_shape` at 2000
+evals at both d=150 (`tr_shape_dtlz2_150d_2000ev`, new dir, full 4-method
+comparison) and d=200 (added to the existing
+`tr_shape_dtlz2_200d_2000ev`). If `mab_shape` recovers and even wins here,
+the d=150/200 failure was budget-limited, same as the baseline's own
+d=200/600ev zero. If it still lags the best fixed shape substantially even
+at 2000 evals, that's evidence the fixed `mab_epsilon` really is a
+standing tax, strengthening the case for annealing it.
+
 ## 7. `SparseDTLZ2`: effective dimension, not nominal dimension, governs the effect
 
 Plain DTLZ2 confounds nominal and effective dimension — its own

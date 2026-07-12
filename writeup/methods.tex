@@ -1177,7 +1177,13 @@ the narrow, late-arriving breakthrough window diagnosed in
 \S\ref{sec:tr-shape}: adaptivity's own learning cost becomes a net
 negative exactly where the reward signal is scarcest. A budget-aware or
 annealed exploration rate (decaying as the eval budget is consumed) is an
-immediate follow-up implied directly by this failure mode.
+immediate follow-up implied directly by this failure mode. Whether the
+$d{=}150$--$200$ failure is itself only a budget artifact -- as it was for
+the isotropic baseline's own $d{=}200$/600-eval zero, which
+Table~\ref{tab:tr-shape-200d-2000ev} showed recovers given 2000 evals -- or
+a standing tax that never amortizes is an open question, queued as a
+2000-eval rerun (\texttt{cluster/submit\_mab\_shape\_extended\_budget.sh})
+not yet completed at the time of writing.
 
 \subsection{\texttt{SparseDTLZ2}: effective dimension, not nominal dimension, governs the effect}
 \label{sec:sparse-dtlz2}
