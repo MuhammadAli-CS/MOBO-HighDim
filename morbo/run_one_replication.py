@@ -65,6 +65,8 @@ supported_labels = [
     "ard_box",
     "pca_ellipsoid",
     "ard_pca_ellipsoid",
+    "composite_penicillin_ard_pca",
+    "composite_penicillin_pca",
 ]
 
 BASE_SEED = 12346

@@ -137,6 +137,21 @@ LABEL_OVERRIDES = {
     "ard_pca_ellipsoid": {
         "tr_shape": "ard_pca_ellipsoid",
     },
+    # Composite modeling x shape adaptation: composes with zero new code.
+    # tr_shape only changes candidate sampling/containment in design space;
+    # composite modeling only changes what the GP models (the raw response)
+    # and how objectives are reconstructed. extract_ard_lengthscale already
+    # geometric-means across however many outputs the local ModelListGP has
+    # (K raw dims for composite, M objectives for direct), so the
+    # lengthscale-based variants work unchanged too.
+    "composite_penicillin_ard_pca": {
+        "evalfn": "CompositePenicillin",
+        "tr_shape": "ard_pca_ellipsoid",
+    },
+    "composite_penicillin_pca": {
+        "evalfn": "CompositePenicillin",
+        "tr_shape": "pca_ellipsoid",
+    },
 }
 
 if __name__ == "__main__":
