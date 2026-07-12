@@ -67,6 +67,12 @@ supported_labels = [
     "ard_pca_ellipsoid",
     "composite_penicillin_ard_pca",
     "composite_penicillin_pca",
+    "cma_ellipsoid",
+    "linear_gp",
+    "linear_gp_pca",
+    "linear_gp_cma",
+    "ard_box_dimprior",
+    "ard_pca_dimprior",
 ]
 
 BASE_SEED = 12346
@@ -119,6 +125,11 @@ def run_one_replication(
     llm_problem_description: str = TurboHParams.llm_problem_description,
     use_kronecker_gp: bool = TurboHParams.use_kronecker_gp,
     tr_shape: str = TurboHParams.tr_shape,
+    cma_c_mu: float = TurboHParams.cma_c_mu,
+    cma_c1: float = TurboHParams.cma_c1,
+    cma_c_p: float = TurboHParams.cma_c_p,
+    use_linear_kernel: bool = TurboHParams.use_linear_kernel,
+    use_dim_scaled_ls_prior: bool = TurboHParams.use_dim_scaled_ls_prior,
     n_curve_points: int = 8,
     n_penicillin_checkpoints: int = 10,
     dtype: torch.device = torch.double,
@@ -334,6 +345,11 @@ def run_one_replication(
         llm_problem_description=llm_problem_description,
         use_kronecker_gp=use_kronecker_gp,
         tr_shape=tr_shape,
+        cma_c_mu=cma_c_mu,
+        cma_c1=cma_c1,
+        cma_c_p=cma_c_p,
+        use_linear_kernel=use_linear_kernel,
+        use_dim_scaled_ls_prior=use_dim_scaled_ls_prior,
     )
 
     trbo_state = TRBOState(

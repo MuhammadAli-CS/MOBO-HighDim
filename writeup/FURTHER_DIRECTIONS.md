@@ -14,6 +14,36 @@ project's contribution would be.
 
 ---
 
+## Implementation status (as of this commit)
+
+The following are now **coded, unit-validated, and wired as runnable labels**
+— cluster scripts below submit them; no results yet (that's the pending
+cluster run):
+
+| Idea (from below) | Label(s) | Status |
+|---|---|---|
+| CMA-ES covariance adaptation (§1) | `cma_ellipsoid` | coded + math unit-tested |
+| Composite × shape (§1) | `composite_penicillin_pca`, `composite_penicillin_ard_pca` | coded + smoke-verified |
+| Linear-kernel baseline (§2) | `linear_gp`, `linear_gp_pca`, `linear_gp_cma` | coded + GP-fit-tested |
+| Dim-scaled lengthscale prior as `ard_box` fix (§3, new) | `ard_box_dimprior`, `ard_pca_dimprior` | coded + GP-fit-tested |
+| Multi-seed robustness | (all core labels, seeds 1–4) | `cluster/submit_tr_shape_multiseed.sh` + `aggregate_seeds.py` |
+
+Local validation kept minimal (per constraint): import/validation checks,
+single GP fits for the linear + dim-prior model paths, and a direct unit
+test of the CMA shape math (orthonormal R, geometric-mean-normalized axes,
+active evolution path). Full BO-loop smoke coverage runs on the cluster via
+`cluster/submit_smoke.sh` before the big sweeps.
+
+One idea below I added that isn't in either paper: the **dim-scaled
+lengthscale prior as a targeted fix for `ard_box`'s collapse** (§3). Our own
+diagnosis was that ~99/100 fitted lengthscales pin against the
+`Interval(0.05, 4.0)` ceiling at d=100; Hvarfner et al.'s prior both removes
+that ceiling and *expects* lengthscales to grow like √d, so it directly
+attacks the mechanism we identified. `ard_box_dimprior` tests whether that
+rescues the method that otherwise fails worst.
+
+---
+
 ## 1. Answering your direct questions
 
 ### "Does the ellipsoid have to use PCA?"

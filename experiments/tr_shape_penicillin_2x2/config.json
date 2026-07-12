@@ -1,0 +1,16 @@
+{
+    "dim": 7,
+    "evalfn": "Penicillin",
+    "n_penicillin_checkpoints": 5,
+    "max_evals": 200,
+    "n_initial_points": 20,
+    "batch_size": 10,
+    "n_trust_regions": 3,
+    "min_tr_size": 8,
+    "max_reference_point": [
+      -1.85,
+      -86.93,
+      -514.70
+    ],
+    "verbose": true
+  }

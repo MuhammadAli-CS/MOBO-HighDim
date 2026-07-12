@@ -93,10 +93,52 @@ def check_variant(label: str, tr_shape: str, expect_rotation: bool) -> None:
         print(f"OK: axis_lengths varied, R stayed identity as expected for ard_box.")
 
 
+def run_and_capture_kw(label: str, **kwargs) -> str:
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        run_one_replication(
+            seed=0,
+            label=label,
+            max_evals=MAX_EVALS,
+            evalfn="DTLZ2",
+            dim=DIM,
+            batch_size=BATCH_SIZE,
+            n_initial_points=N_INITIAL_POINTS,
+            n_trust_regions=N_TRUST_REGIONS,
+            min_tr_size=MIN_TR_SIZE,
+            max_reference_point=[-6, -6],
+            verbose=True,
+            save_callback=lambda output: None,
+            **kwargs,
+        )
+    return buf.getvalue()
+
+
+def check_linear_kernel() -> None:
+    print("=== linear_gp (spherical linear kernel, isotropic shape) ===")
+    out = run_and_capture_kw("linear_gp", tr_shape="isotropic", use_linear_kernel=True)
+    # Isotropic shape => no shape-adaptation output; this check just confirms
+    # the linear-kernel model path runs a full BO loop end-to-end.
+    assert "axis_lengths:" not in out
+    print("OK: linear-kernel BO loop ran to completion.")
+
+
+def check_dim_prior() -> None:
+    print("=== ard_box_dimprior (dim-scaled lengthscale prior) ===")
+    out = run_and_capture_kw(
+        "ard_box_dimprior", tr_shape="ard_box", use_dim_scaled_ls_prior=True
+    )
+    assert "axis_lengths:" in out, "ard_box shape update never fired"
+    print("OK: ard_box + dim-scaled prior ran to completion.")
+
+
 if __name__ == "__main__":
     torch.manual_seed(0)
     check_isotropic()
     check_variant("ard_box", "ard_box", expect_rotation=False)
     check_variant("pca_ellipsoid", "pca_ellipsoid", expect_rotation=True)
     check_variant("ard_pca_ellipsoid", "ard_pca_ellipsoid", expect_rotation=True)
+    check_variant("cma_ellipsoid", "cma_ellipsoid", expect_rotation=True)
+    check_linear_kernel()
+    check_dim_prior()
     print("\nAll smoke tests passed.")

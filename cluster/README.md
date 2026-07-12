@@ -91,6 +91,34 @@ repo (`experiments/tr_shape_dtlz2_100d/morbo/0000_morbo.pt`, identical to
 `fig2_dtlz2_100d`'s own `morbo` result) rather than resubmitted — `git pull`
 already has it, no job needed.
 
+## 4c. New shape methods, robustness, and 2×2 (post-sweep follow-ups)
+
+After the initial sweep, four more submission scripts were added (see
+`writeup/FURTHER_DIRECTIONS.md` for the motivation and paper sources).
+**Run `submit_smoke.sh` first** — it validates every new code path with a
+tiny BO loop on the cluster before the multi-hour sweeps:
+
+```
+bash cluster/submit_smoke.sh          # ~5 min; wait for "All smoke tests passed."
+bash cluster/submit_tr_shape_new_methods.sh   # cma_ellipsoid, linear-kernel, dim-prior fix @ d=100/150/200
+bash cluster/submit_penicillin_2x2.sh          # composite modeling × shape adaptation, Penicillin
+bash cluster/submit_tr_shape_multiseed.sh      # seeds 1–4 for the core methods (64 jobs — check sinfo first)
+```
+
+New methods (all reuse the existing `run_experiment.sub`, so the 16-CPU /
+64 GB / 1-GPU / aimi / kilian config applies):
+- `cma_ellipsoid` — CMA-ES covariance adaptation (AS-SMEA).
+- `linear_gp` / `linear_gp_pca` / `linear_gp_cma` — spherically-projected
+  linear kernel (linear-bo challenge baseline), alone and crossed with shape.
+- `ard_box_dimprior` / `ard_pca_dimprior` — dimension-scaled lengthscale
+  prior (Hvarfner) as a candidate fix for `ard_box`'s high-d collapse.
+- `composite_penicillin_pca` / `_ard_pca` — composite modeling × shape.
+
+After the multi-seed jobs land, aggregate with:
+```
+python aggregate_seeds.py tr_shape_dtlz2_100d   # mean ± std per method
+```
+
 ## 5. LLM-dependent parts (Parts 2 and 3)
 
 ```

@@ -152,6 +152,43 @@ LABEL_OVERRIDES = {
         "evalfn": "CompositePenicillin",
         "tr_shape": "pca_ellipsoid",
     },
+    # CMA-ES-style covariance adaptation (AS-SMEA, Wang et al. 2026):
+    # persistent per-TR covariance updated from Pareto-elite points plus an
+    # evolution-path term -- success-weighted and temporally smoothed, vs.
+    # the one-shot data-covariance PCA variants above.
+    "cma_ellipsoid": {
+        "tr_shape": "cma_ellipsoid",
+    },
+    # Spherically-projected linear kernel (Doumont et al. 2026, "We Still
+    # Don't Understand High-Dimensional BO"): the challenge baseline -- in
+    # the N ~ d regime a cosine-similarity linear kernel reportedly matches
+    # TuRBO-class methods. Run alone and crossed with the shape variants
+    # (shape adaptation is model-agnostic: it only consumes the model via
+    # posterior sampling and, for ARD variants, lengthscales -- which a
+    # linear kernel doesn't have, hence no linear_gp_ard_* labels).
+    "linear_gp": {
+        "use_linear_kernel": True,
+    },
+    "linear_gp_pca": {
+        "use_linear_kernel": True,
+        "tr_shape": "pca_ellipsoid",
+    },
+    "linear_gp_cma": {
+        "use_linear_kernel": True,
+        "tr_shape": "cma_ellipsoid",
+    },
+    # Dimension-scaled lengthscale prior (Hvarfner et al. 2024): does the
+    # sqrt(d)-scaled LogNormal prior -- which removes the Interval(0.05, 4.0)
+    # ceiling that ~99/100 fitted lengthscales pin against at d=100 --
+    # rescue ard_box from its constraint-compounding region collapse?
+    "ard_box_dimprior": {
+        "tr_shape": "ard_box",
+        "use_dim_scaled_ls_prior": True,
+    },
+    "ard_pca_dimprior": {
+        "tr_shape": "ard_pca_ellipsoid",
+        "use_dim_scaled_ls_prior": True,
+    },
 }
 
 if __name__ == "__main__":

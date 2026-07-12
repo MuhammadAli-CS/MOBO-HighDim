@@ -748,6 +748,8 @@ class TRBOState(Module):
             max_cholesky_size=self.tr_hparams.max_cholesky_size,
             input_transform=intf,
             outcome_transform=octf,
+            use_linear_kernel=self.tr_hparams.use_linear_kernel,
+            use_dim_scaled_ls_prior=self.tr_hparams.use_dim_scaled_ls_prior,
         )
 
         # optimize a HV scalarization

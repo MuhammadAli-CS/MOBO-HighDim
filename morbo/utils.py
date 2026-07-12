@@ -21,11 +21,12 @@ from botorch.optim.fit import fit_gpytorch_mll_torch
 from botorch.utils.sampling import draw_sobol_samples
 from gpytorch import settings as gpytorch_settings
 from gpytorch.constraints import GreaterThan, Interval
-from gpytorch.kernels import MaternKernel, ScaleKernel
+from gpytorch.kernels import LinearKernel, MaternKernel, ScaleKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood, SumMarginalLogLikelihood
-from gpytorch.priors.torch_priors import GammaPrior
+from gpytorch.priors.torch_priors import GammaPrior, LogNormalPrior
 from torch import Tensor
+from torch.nn import Module
 from torch.distributions import Normal
 
 
@@ -319,7 +320,13 @@ def extract_ard_lengthscale(model: Model, dim: int) -> Optional[Tensor]:
     models = [model] if not isinstance(model, ModelListGP) else model.models
     log_ls_per_output = []
     for m in models:
-        ls = m.covar_module.base_kernel.lengthscale.reshape(-1)
+        try:
+            ls = m.covar_module.base_kernel.lengthscale
+        except AttributeError:
+            return None
+        if ls is None:  # e.g. LinearKernel: has_lengthscale is False
+            return None
+        ls = ls.reshape(-1)
         if ls.numel() != dim:
             return None
         log_ls_per_output.append(ls.log())
@@ -446,6 +453,125 @@ def compute_ard_pca_ellipsoid_shape(
     return R, axis_lengths
 
 
+def compute_cma_ellipsoid_shape(
+    elites: Tensor,
+    X_center: Tensor,
+    prev_center: Optional[Tensor],
+    C: Tensor,
+    path: Tensor,
+    length: Tensor,
+    dim: int,
+    c_mu: float,
+    c1: float,
+    c_p: float,
+    eig_floor: float = 1e-8,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    r"""CMA-ES-style covariance adaptation for a trust region's shape
+    (cf. Wang et al. 2026's AS-SMEA, which maintains each local region as a
+    search distribution N(m, sigma^2 C) updated by CMA).
+
+    Two differences from the one-shot PCA variants
+    (`compute_pca_ellipsoid_shape`): (1) the covariance `C` is *persistent*
+    per-TR state, exponentially smoothed across iterations rather than
+    recomputed from scratch -- so one noisy batch can't whipsaw the region's
+    orientation; (2) the update is weighted toward *success* (the TR's
+    current Pareto-elite points), plus a rank-one evolution-path term
+    tracking sustained center movement -- rather than toward wherever
+    candidates happened to be sampled, which for PCA partly reflects the
+    sampler's own previous shape (a feedback loop this construction avoids).
+
+    Multi-objective adaptation note: classical CMA weights elites by
+    fitness rank; a Pareto set has no total order, so elites (the TR's
+    current Pareto points, already selected by non-dominated sorting
+    upstream) are weighted equally -- the same top-samples-by-nondominated-
+    sorting selection AS-SMEA uses.
+
+    Args:
+        elites: `k x d`-dim tensor of elite points in normalized `[0,1]^d`
+            coordinates (the TR's current Pareto points). May be empty.
+        X_center: `1 x d`-dim tensor, current TR center (normalized).
+        prev_center: `1 x d`-dim tensor, the TR center at the previous shape
+            update, or None on the first update (path term is skipped).
+        C: `d x d`-dim tensor, the current persistent covariance state.
+        path: `d`-dim tensor, the current evolution path state.
+        length: 0-dim tensor, the TR's current (isotropic) edge length --
+            used as the step-size sigma normalizing both updates, and as the
+            geometric-mean target for `axis_lengths`.
+        dim: input dimension `d`.
+        c_mu, c1, c_p: CMA learning rates (see `TurboHParams`).
+        eig_floor: minimum eigenvalue before sqrt.
+
+    Returns:
+        (R, axis_lengths, C_new, path_new): the shape decomposition of the
+        updated covariance (same conventions as the other compute_*_shape
+        functions -- `axis_lengths.prod()**(1/d) == length`), plus the
+        updated persistent state to write back into the TR's buffers.
+    """
+    sigma = length.clamp_min(1e-12)
+
+    # Evolution path: sustained, direction-consistent center movement.
+    if prev_center is not None:
+        delta_m = (X_center - prev_center).reshape(-1) / sigma
+        path_new = (1 - c_p) * path + (c_p * (2 - c_p)) ** 0.5 * delta_m
+    else:
+        path_new = path.clone()
+
+    # Rank-mu update from equally-weighted elites (see docstring).
+    if elites.numel() > 0 and elites.shape[0] >= 1:
+        Y = (elites - X_center) / sigma  # `k x d`
+        rank_mu = (Y.t() @ Y) / elites.shape[0]
+        C_new = (1 - c_mu - c1) * C + c_mu * rank_mu + c1 * torch.outer(
+            path_new, path_new
+        )
+    else:
+        # No elites this iteration: decay toward what we had, path term only.
+        C_new = (1 - c1) * C + c1 * torch.outer(path_new, path_new)
+
+    # Symmetrize against floating-point drift before eigh.
+    C_new = 0.5 * (C_new + C_new.t())
+
+    eigvals, eigvecs = torch.linalg.eigh(C_new)
+    eigvals = eigvals.clamp_min(eig_floor)
+    scale = eigvals.sqrt()
+    log_scale = scale.log()
+    weights = (log_scale - log_scale.mean()).exp()
+    axis_lengths = length * weights
+    return eigvecs, axis_lengths, C_new, path_new
+
+
+class HypersphereProjection(InputTransform, Module):
+    r"""Bijectively project the (normalized) unit hypercube onto the upper
+    hypersphere in `R^{d+1}`, following Doumont et al. 2026 ("We Still Don't
+    Understand High-Dimensional Bayesian Optimization"): a linear kernel
+    applied to raw hypercube inputs is pathologically boundary-seeking, but
+    on the sphere the same kernel becomes a cosine-similarity kernel with
+    provable immunity from boundary-seeking behavior.
+
+    The map: center the cube (`x - 0.5`), append a constant bias coordinate
+    (0.5, the same scale as the centered coordinates' range), and normalize
+    to unit Euclidean norm. Strictly positive bias => upper hemisphere =>
+    injective. Applied AFTER the usual Normalize chain, so inputs arriving
+    here are in `[0, 1]^d`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.transform_on_train = True
+        self.transform_on_eval = True
+        self.transform_on_fantasize = True
+
+    def transform(self, X: Tensor) -> Tensor:
+        X_centered = X - 0.5
+        bias = torch.full(
+            X.shape[:-1] + (1,), 0.5, dtype=X.dtype, device=X.device
+        )
+        X_aug = torch.cat([X_centered, bias], dim=-1)
+        return X_aug / X_aug.norm(dim=-1, keepdim=True)
+
+    def equals(self, other: InputTransform) -> bool:
+        return type(self) is type(other)
+
+
 def get_fitted_model(
     X: Tensor,
     Y: Tensor,
@@ -455,7 +581,26 @@ def get_fitted_model(
     input_transform: Optional[InputTransform] = None,
     outcome_transform: Optional[OutcomeTransform] = None,
     fit_gpytorch_options: Optional[Dict[str, Any]] = None,
+    use_linear_kernel: bool = False,
+    use_dim_scaled_ls_prior: bool = False,
 ) -> Model:
+    r"""Fit one independent SingleTaskGP per output column (bundled as a
+    ModelListGP when there is more than one).
+
+    Kernel options (both default off; existing behavior unchanged):
+      use_linear_kernel: ScaleKernel(LinearKernel()) over inputs projected
+        onto the hypersphere in R^{d+1} (`HypersphereProjection`, chained
+        after the usual Normalize transform) -- the linear-bo challenge
+        baseline. No lengthscales exist in this mode
+        (`extract_ard_lengthscale` returns None; ARD-based tr_shape
+        variants fall back to isotropic).
+      use_dim_scaled_ls_prior: replace the Matern lengthscale's hard
+        Interval(0.05, 4.0) constraint with the dimension-scaled prior of
+        Hvarfner et al. 2024, lengthscale ~ LogNormal(sqrt(2) + ln(d)/2,
+        sqrt(3)) -- expects lengthscales to grow ~sqrt(d), removing the 4.0
+        ceiling that ~99/100 of a fitted d=100 model's lengthscales pin
+        against (the direct input to ard_box's region collapse).
+    """
     print("Fitting a model")
     use_fast_mvms = True if X.shape[0] > max_cholesky_size else False
     with gpytorch_settings.fast_computations(
@@ -463,16 +608,41 @@ def get_fitted_model(
         covar_root_decomposition=use_fast_mvms,
         solves=use_fast_mvms,
     ):
+        if use_linear_kernel:
+            sphere = HypersphereProjection()
+            if input_transform is not None:
+                from botorch.models.transforms.input import ChainedInputTransform
+
+                input_transform = ChainedInputTransform(
+                    base=input_transform, sphere=sphere
+                )
+            else:
+                input_transform = sphere
         models = []
         for i in range(Y.shape[-1]):
-            ard_num_dims = X.shape[-1] if use_ard else 1
-            covar_module = ScaleKernel(
-                MaternKernel(
-                    nu=2.5,
-                    ard_num_dims=ard_num_dims,
-                    lengthscale_constraint=Interval(0.05, 4.0),
-                ),
-            )
+            if use_linear_kernel:
+                covar_module = ScaleKernel(LinearKernel())
+            elif use_dim_scaled_ls_prior:
+                d = X.shape[-1]
+                covar_module = ScaleKernel(
+                    MaternKernel(
+                        nu=2.5,
+                        ard_num_dims=d if use_ard else 1,
+                        lengthscale_prior=LogNormalPrior(
+                            loc=2.0**0.5 + log(d) / 2.0, scale=3.0**0.5
+                        ),
+                        lengthscale_constraint=GreaterThan(1e-4),
+                    ),
+                )
+            else:
+                ard_num_dims = X.shape[-1] if use_ard else 1
+                covar_module = ScaleKernel(
+                    MaternKernel(
+                        nu=2.5,
+                        ard_num_dims=ard_num_dims,
+                        lengthscale_constraint=Interval(0.05, 4.0),
+                    ),
+                )
             likelihood = GaussianLikelihood(
                 noise_constraint=GreaterThan(1e-6),
                 noise_prior=GammaPrior(0.9, 10.0),

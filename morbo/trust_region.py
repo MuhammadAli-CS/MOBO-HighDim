@@ -32,6 +32,7 @@ from botorch.utils.transforms import normalize
 from morbo.utils import (
     compute_ard_box_shape,
     compute_ard_pca_ellipsoid_shape,
+    compute_cma_ellipsoid_shape,
     compute_pca_ellipsoid_shape,
     extract_ard_lengthscale,
     get_constraint_slack_and_feasibility,
@@ -123,8 +124,35 @@ class TurboHParams:
             rescaled per-dimension by the TR's own fitted GP ARD lengthscales.
             "pca_ellipsoid": box rotated into the PCA frame of the TR's local data.
             "ard_pca_ellipsoid": PCA rotation with axis widths additionally reweighted
-            by lengthscales projected onto each principal axis. Only "isotropic" is
-            supported together with `use_kronecker_gp`.
+            by lengthscales projected onto each principal axis. "cma_ellipsoid":
+            CMA-ES-style covariance adaptation (rank-mu update from the TR's current
+            Pareto-elite points plus an evolution-path term tracking sustained center
+            movement, temporally smoothed across iterations -- unlike the one-shot
+            PCA variants, the covariance is a persistent per-TR state that adapts to
+            *success*, not just to where data happens to lie; cf. Wang et al. 2026,
+            AS-SMEA). Only "isotropic" is supported together with `use_kronecker_gp`.
+        cma_c_mu: (cma_ellipsoid only) learning rate for the rank-mu covariance
+            update from elite points. Higher adapts faster but is noisier.
+        cma_c1: (cma_ellipsoid only) learning rate for the rank-one evolution-path
+            covariance term.
+        cma_c_p: (cma_ellipsoid only) decay rate of the evolution path itself.
+        use_linear_kernel: Replace each local GP's Matern-ARD kernel with a linear
+            kernel over inputs bijectively projected onto a hypersphere in R^{d+1}
+            (cosine-similarity kernel), following Doumont et al. 2026 ("We Still
+            Don't Understand High-Dimensional BO"): in the N ~ d regime the budget
+            cannot support learning beyond locally-linear structure, and the
+            spherical projection removes the linear kernel's boundary-seeking
+            pathology. Composes with any tr_shape except the ARD-based ones
+            ("ard_box"/"ard_pca_ellipsoid" fall back to isotropic shape -- a linear
+            kernel has no per-dimension lengthscales to read).
+        use_dim_scaled_ls_prior: Replace the Matern kernel's hard lengthscale
+            constraint Interval(0.05, 4.0) with a dimension-scaled LogNormal prior
+            (loc = sqrt(2) + ln(d)/2, scale = sqrt(3)), following Hvarfner et al.
+            2024's "vanilla BO" recipe. Motivation here: the constraint ceiling of
+            4.0 is exactly what ard_box's collapsed-region failure mode hits at
+            d=100 (~99 lengthscales pinned at the ceiling); a prior that *expects*
+            lengthscales to grow like sqrt(d) both regularizes the ratios ard_box
+            consumes and removes the ceiling.
     """
 
     length_init: float = 0.8
@@ -171,14 +199,33 @@ class TurboHParams:
     llm_problem_description: str = ""
     use_kronecker_gp: bool = False
     tr_shape: str = "isotropic"
+    cma_c_mu: float = 0.3
+    cma_c1: float = 0.1
+    cma_c_p: float = 0.3
+    use_linear_kernel: bool = False
+    use_dim_scaled_ls_prior: bool = False
 
-    _TR_SHAPES = {"isotropic", "ard_box", "pca_ellipsoid", "ard_pca_ellipsoid"}
+    _TR_SHAPES = {
+        "isotropic",
+        "ard_box",
+        "pca_ellipsoid",
+        "ard_pca_ellipsoid",
+        "cma_ellipsoid",
+    }
 
     def __post_init__(self) -> None:
         if self.tr_shape not in self._TR_SHAPES:
             raise ValueError(
                 f"tr_shape must be one of {self._TR_SHAPES}, got {self.tr_shape!r}."
             )
+        if not (0.0 < self.cma_c_mu < 1.0 and 0.0 <= self.cma_c1 < 1.0):
+            raise ValueError("cma_c_mu must be in (0,1) and cma_c1 in [0,1).")
+        if self.cma_c_mu + self.cma_c1 >= 1.0:
+            raise ValueError(
+                "cma_c_mu + cma_c1 must be < 1 (the remainder is the old-C weight)."
+            )
+        if not (0.0 < self.cma_c_p <= 1.0):
+            raise ValueError("cma_c_p must be in (0,1].")
 
     @classmethod
     def from_dict(cls, tr_hparams: Dict) -> None:
@@ -267,6 +314,20 @@ class TrustRegion(ABC, Module):
         self.register_buffer(
             "axis_lengths", length.expand(self.dim).clone()
         )
+        # cma_ellipsoid-only persistent state: the adapted covariance `C`
+        # (identity = isotropic start), the evolution path `p` (zeros), and
+        # the previous normalized center (for the path update). Unlike the
+        # one-shot PCA variants these carry information ACROSS iterations;
+        # they reinitialize naturally on TR restart because restart creates
+        # a fresh TrustRegion object. Never read unless tr_shape ==
+        # "cma_ellipsoid".
+        self.register_buffer(
+            "cma_C", torch.eye(self.dim, device=bounds.device, dtype=bounds.dtype)
+        )
+        self.register_buffer(
+            "cma_path", torch.zeros(self.dim, device=bounds.device, dtype=bounds.dtype)
+        )
+        self.register_buffer("cma_prev_center", None)
         self.register_buffer(
             "n_successes", torch.tensor(0, device=bounds.device, dtype=torch.int64)
         )
@@ -348,6 +409,8 @@ class TrustRegion(ABC, Module):
                     input_transform=intf,
                     outcome_transform=octf,
                     fit_gpytorch_options=self.tr_hparams.fit_gpytorch_options,
+                    use_linear_kernel=self.tr_hparams.use_linear_kernel,
+                    use_dim_scaled_ls_prior=self.tr_hparams.use_dim_scaled_ls_prior,
                 )
             return True
         return False
@@ -653,6 +716,28 @@ class TrustRegion(ABC, Module):
                     length=self.length,
                     dim=self.dim,
                 )
+            elif shape == "cma_ellipsoid":
+                if self.best_X is not None and self.best_X.numel() > 0:
+                    elites = normalize(self.best_X, bounds=self.bounds)
+                else:
+                    elites = torch.zeros(
+                        0, self.dim, device=self.length.device, dtype=self.length.dtype
+                    )
+                R, axis_lengths, C_new, path_new = compute_cma_ellipsoid_shape(
+                    elites=elites,
+                    X_center=self.X_center_normalized,
+                    prev_center=self.cma_prev_center,
+                    C=self.cma_C,
+                    path=self.cma_path,
+                    length=self.length,
+                    dim=self.dim,
+                    c_mu=self.tr_hparams.cma_c_mu,
+                    c1=self.tr_hparams.cma_c1,
+                    c_p=self.tr_hparams.cma_c_p,
+                )
+                self.cma_C = C_new.detach()
+                self.cma_path = path_new.detach()
+                self.cma_prev_center = self.X_center_normalized.detach().clone()
             else:  # "ard_pca_ellipsoid"
                 R, axis_lengths = compute_ard_pca_ellipsoid_shape(
                     X=normalize(self.X, bounds=self.bounds),
