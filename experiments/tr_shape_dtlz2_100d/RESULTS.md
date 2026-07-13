@@ -380,6 +380,16 @@ document: shape adaptation's +64-72% wins are on top of an already-large
 base advantage MORBO has over random search, not the whole story by
 themselves.
 
+**QUEUED, not yet run:** the d=150/200 numbers above are at the standard
+600-eval budget, where nothing breaks through reliably regardless of
+method. `sobol` hasn't been run yet at the 2000-eval extended budget
+(`tr_shape_dtlz2_150d_2000ev` / `tr_shape_dtlz2_200d_2000ev`, §6's
+`mab_shape` extended-budget experiments) — that's the more interesting
+comparison, since that's exactly the regime where `mab_shape` and the PCA
+variants separate from each other. Does MORBO's advantage hold up once
+budget is no longer the bottleneck, or does random search close the gap
+given enough evals? `cluster/submit_sobol_extended_budget.sh`.
+
 ## Timing note
 
 All cluster runs on one B200 GPU each. Shape variants' gen_time at d=100
