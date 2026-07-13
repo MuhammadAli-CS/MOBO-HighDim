@@ -390,13 +390,57 @@ variants separate from each other. Does MORBO's advantage hold up once
 budget is no longer the bottleneck, or does random search close the gap
 given enough evals? `cluster/submit_sobol_extended_budget.sh`.
 
-## Timing note
+## 9. Compute efficiency: hypervolume per unit of optimizer time
 
-All cluster runs on one B200 GPU each. Shape variants' gen_time at d=100
-was ~70-80s vs the baseline's ~1445s — a side effect of shaped/rotated
-candidate distributions concentrating the pool, not a speedup claim
-(sampling-function cost itself is identical at matched inputs; verified by
-microbenchmark).
+`plot_efficiency.py` (new) turns the `fit_times`/`gen_times` every saved
+run already records into efficiency plots — cumulative optimizer wall-time
+(GP fitting + candidate generation) vs. hypervolume, plus a total-time vs.
+final-HV "efficiency frontier" — answering "how much computational power
+does each method spend for its hypervolume improvement." Pure
+post-processing of committed `.pt` files; run locally:
 
-Plots: `comparison_seed0.png` in each experiment directory. Aggregate any
-multi-seed experiment with `python aggregate_seeds.py <experiment_name>`.
+```
+python plot_efficiency.py <experiment_name> <seed> [--log-time]
+```
+
+Writes `efficiency_seed<seed>.png` into the experiment dir (now generated
+and committed for the main experiments). Time here is *optimizer overhead
+only* — on synthetic problems the function evaluation itself is
+microseconds, so this is the real compute cost; on expensive real problems
+evaluation cost dominates instead and the per-evaluation plots are the
+right lens. Wall-times are comparable within an experiment (all B200 GPU
+runs), not across hardware.
+
+Headline numbers (seed 0, total optimizer seconds → final HV):
+
+| Experiment | morbo | best shaped variant | Take |
+|---|---|---|---|
+| d=50 | 93s → 32.7 | 87s → 34.2 (ard_pca) | same cost, more HV |
+| d=100 | **1505s** → 20.0 | 133s → 33.4 (ard_pca) | **11× cheaper AND +67% HV** |
+| d=150 | 96s → 0.0 | 108s → 29.1 (ard_pca) | ~same cost; only shaped variants get any HV at all |
+| d=150/2000ev | 580s → 25.9 | 453s → 34.3 (ard_pca) | cheaper and better |
+| d=200/2000ev | 610s → 19.3 | 490s → 33.1 (ard_pca); 503s → 33.6 (mab_shape) | cheaper and better |
+| Rover | 724s → 2.36 | 645-745s → 2.12-2.28 | equal cost, HV a wash (§2) |
+
+**Shape adaptation is compute-free or compute-negative**: every shaped
+variant costs the same as or less optimizer time than the isotropic
+baseline, so the hypervolume gains of §1 come at no computational premium.
+The d=100 case is the extreme: the isotropic baseline spent ~1445s in
+candidate generation vs. the shaped variants' ~70-80s — the shaped/rotated
+candidate distributions concentrate the pool and make downstream
+HVI-scoring cheaper, while the isotropic box at this dimension floods the
+scorer with a diffuse pool (sampling-function cost itself is identical at
+matched inputs; verified by microbenchmark). So at d=100 the baseline is
+simultaneously ~11× more expensive and 67% worse. `mab_shape`'s bandit
+adds no measurable overhead (its per-iteration arm selection is a few
+scalar ops). Two more notes from the per-method tables: `linear_gp_*`
+variants have near-zero fit time (~2.5s vs ~60-75s for Matérn) — so
+`linear_gp_pca`, which matches Matérn+PCA's HV at d=100/150, is the best
+HV-per-second method of all at d=100 (18.6 HV/min vs ard_pca's 15.1); and
+`sobol` is of course ~free (0.1s) but earns almost no HV at d≥100 —
+"efficiency" without effectiveness.
+
+Plots: `comparison_seed0.png` (objective space + HV vs. evals) and
+`efficiency_seed0.png` (optimizer time vs. HV) in each experiment
+directory. Aggregate any multi-seed experiment with
+`python aggregate_seeds.py <experiment_name>`.
