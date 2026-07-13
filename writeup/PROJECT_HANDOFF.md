@@ -218,30 +218,44 @@ git commit && git push                          # or scp results back
 
 1. This file.
 2. `experiments/tr_shape_dtlz2_100d/RESULTS.md` — all results, narrative.
-3. `writeup/FURTHER_DIRECTIONS.md` — the two papers' insights, the
-   implementation-status table (everything proposed so far is now done),
-   and the one remaining ranked idea not yet tried (learned objective-aware
-   rotation) — **start here for "what's next"**.
-4. `writeup/methods.tex` `sec:tr-shape` — same results, paper form.
-5. `morbo/trust_region.py`'s `TurboHParams.tr_shape` docstring — the
+3. `writeup/FURTHER_DIRECTIONS.md` — motivating papers, implementation
+   status (everything originally proposed is now done), and a
+   literature-informed "Where to steer this next" section (§ at the
+   bottom) — **start here for "what's next"**.
+4. `LITERATURE_REVIEW.md`'s "Follow-up review: trust-region shape
+   adaptation" section — the fuller literature pass behind that "what's
+   next" list (closest prior art to differentiate from: LABCAT, CMA-BO;
+   better bandit designs for `mab_shape`; real benchmark candidates to
+   validate the effective-dimension finding beyond `SparseDTLZ2`).
+5. `writeup/methods.tex` `sec:tr-shape` — same results, paper form, now
+   with a related-work paragraph differentiating from LABCAT/CMA-BO.
+6. `morbo/trust_region.py`'s `TurboHParams.tr_shape` docstring — the
    authoritative technical spec of every mode.
-6. `cluster/README.md` — cluster mechanics.
+7. `cluster/README.md` — cluster mechanics.
 
 ## Open threads / natural next steps
 
 Everything originally proposed in `FURTHER_DIRECTIONS.md` (multi-seed
 sweep, composite×shape, CMA/linear-kernel/dim-prior, `mab_shape`,
-`SparseDTLZ2`) is now done and written up. What's left:
+`SparseDTLZ2`) is now done and written up. A `label="sobol"` pure
+random-search baseline is coded and smoke-tested but not yet run on the
+cluster (`cluster/submit_sobol_baseline.sh`). Top literature-informed
+priorities (full list in `FURTHER_DIRECTIONS.md`'s last section):
 
+- **Validate the effective-dimension finding on a real problem** —
+  LassoBench made bi-objective is the best available bridge from our
+  synthetic `SparseDTLZ2` result to something reviewers won't dismiss as
+  self-constructed.
+- **Upgrade `mab_shape` to a contextual bandit** using an online
+  effective-dimension estimate (top-k PCA eigenvalue mass ratio, already
+  computed by `pca_ellipsoid`) as context — turns the empirical
+  "recovers the best of both worlds" result into a mechanistic one.
 - **Anneal `mab_epsilon`** (decay exploration as budget is consumed) — a
   budget-*efficiency* improvement now (the d=150/200 failure itself is
   resolved as a budget artifact, not a design flaw — `mab_shape` fully
-  recovers and even wins at 2000 evals), not a fix for a standing flaw. An
-  annealed rate should let it reach the same endpoint with less wasted
-  exploration, possibly narrowing the 600-eval gap too.
+  recovers and even wins at 2000 evals), not a fix for a standing flaw.
 - **Learned/objective-aware rotation** — current PCA/CMA are both
-  variance-driven, not objective-gradient-driven. Not yet coded; the one
-  remaining idea from the original ranked list.
+  variance-driven, not objective-gradient-driven. Not yet coded.
 - **Multi-seed the new-methods sweep** (`cma_ellipsoid`, `linear_gp_pca`,
   dim-prior variants, `mab_shape`, `SparseDTLZ2`) — everything past the
   original 4-method core sweep is currently single-seed only. The

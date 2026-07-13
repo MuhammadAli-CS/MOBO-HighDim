@@ -490,6 +490,159 @@ high-dimensional method paper.
 
 ---
 
+## Follow-up review: trust-region shape adaptation (2026-07-12)
+
+Targeted search after building `tr_shape` (isotropic/ard_box/pca_ellipsoid/
+ard_pca_ellipsoid/cma_ellipsoid/mab_shape, see
+[`writeup/PROJECT_HANDOFF.md`](writeup/PROJECT_HANDOFF.md)) — looking for
+prior art on shape-adaptive trust regions specifically, better bandit
+designs for `mab_shape`, and real benchmarks to validate the
+effective-dimension finding beyond our own synthetic `SparseDTLZ2`.
+
+### Directly overlapping prior art (must cite / differentiate from)
+
+**LABCAT** — Visser, van Daalen & Schoeman, arXiv:2311.11328 (2023, rev. 2024).
+Rotates the trust region to align with weighted principal components of
+local data *and* rescales axes by GP ARD lengthscales — essentially the
+union of our `pca_ellipsoid` and `ard_box` ideas, single-objective only,
+tested on COCO/BBOB. No effective-vs-nominal-dimension analysis, no MO
+extension, no bandit-over-shapes. **This is the closest single prior-art
+match to our work and needs an explicit differentiation paragraph in
+`methods.tex`**: our contribution is (a) the MORBO/multi-objective setting,
+(b) the effective-dimension-vs-budget governing-variable result backed by
+`SparseDTLZ2`, (c) `cma_ellipsoid` as a persistent-covariance alternative
+with a distinct low-data regime where it wins, and (d) `mab_shape` as a
+portfolio mechanism over shape families, none of which LABCAT has.
+
+**CMA-BO / CMA-TuRBO / CMA-BAxUS** — Ngo, Ha, Chan, Nguyen & Zhang, TMLR 2024,
+arXiv:2402.03104. Uses CMA-ES as a *meta-algorithm* estimating a
+distribution over where the optimum likely lies, then restricts an existing
+method (BO/TuRBO/BAxUS) to that region — a softer "focus region," not an
+ellipsoidal trust region built directly from CMA's rank-mu/evolution-path
+covariance the way our `cma_ellipsoid` is. Confirms CMA+TuRBO is an active,
+validated combination (supports the motivation) but is mechanistically
+distinct enough to just need a differentiating footnote, not a rewrite.
+
+**FuRBO** — Ascia et al., AutoML 2025, arXiv:2506.14619. Replaces TuRBO's
+hyperrectangle with a hypersphere for constrained BO — still isotropic, not
+anisotropic. Useful as "the field agrees hyperrectangle shape is a
+weakness," but doesn't go as far as ellipsoid/PCA/CMA.
+
+**AdaScale-TuRBO** — Tang & Paulson, arXiv:2604.22967 (2026),
+github.com/PaulsonLab/AdaScale-TuRBO. Scales the GP lengthscale prior
+*jointly* with both dimension and current trust-region size, rather than
+just dimension (as the Hvarfner prior we already tried does). **Concrete
+follow-up experiment, not just a citation**: worth checking whether this
+joint scaling — unlike the static Hvarfner-style prior we tried — actually
+rescues `ard_box`'s collapse. If it does, our negative result gets a
+nuance; if it still fails, that's an even stronger case that the failure
+is structural (treating `d` lengthscale estimates as `d` separate hard
+constraints), not a lengthscale-*value* artifact at all.
+
+**Regional Expected Improvement (REI)** — Namura & Takemori, arXiv:2412.11456
+(2024). Not shape adaptation — a region-averaged acquisition function for
+choosing *which* trust region to explore next (orthogonal to our "what
+shape is each region" question; the two could compose). Their benchmark
+set includes a Human-Powered Aircraft design family (d=17/32/32/108, real
+engineering) — see benchmark table below.
+
+MTRBO (arXiv:2605.06618) and LAGO's cousin-paper family confirm trust-region
+BO is an active area generally, but neither addresses geometry — lower
+priority, citation-list only.
+
+**Bottom line**: no paper combines (a) a bandit over multiple trust-region
+*shape families*, (b) in a multi-objective setting, (c) with an explicit
+effective-dimension-vs-budget theory of when it helps. That combination
+remains genuinely open territory for us.
+
+### Better bandit designs for `mab_shape` (currently plain epsilon-greedy)
+
+**GP-Hedge** — Hoffman, Brochu & de Freitas, UAI 2011, arXiv:1009.5419. The
+foundational "bandit over BO strategies" paper — treats acquisition-function
+selection as an adversarial bandit, uses Hedge/EXP3-style exponential
+weights with a regret bound, not epsilon-greedy or UCB. Good origin
+citation for `mab_shape`'s framing, and Hedge/EXP3 (softmax over cumulative
+reward) is a concrete ablation against our epsilon-greedy choice.
+
+**Self-tuning portfolio-based BO** (ScienceDirect, 2021) — replaces
+GP-Hedge's hand-tuned hyperparameters with **Thompson sampling** over the
+portfolio (Beta posterior per arm, sample-and-pick). Directly actionable:
+a Thompson-sampling `mab_shape` variant removes the `mab_epsilon`
+hyperparameter entirely.
+
+**PCR-BO** (2024 book chapter) — a recent bandit-portfolio method whose
+reward signal weighs recent progress with a discount/window, not just the
+instantaneous success/fail we use. Suggests enriching `mab_shape`'s binary
+success-streak reward with a windowed or magnitude-weighted signal
+(e.g. hypervolume-improvement size, not just sign).
+
+**Contextual bandits** (general HPO literature, e.g. LinUCB-style). The
+most promising upgrade path specifically for us: since our own finding is
+that *effective dimension relative to budget* governs which shape wins,
+that's a natural context feature (a cheap online estimate — e.g. the ratio
+of top-k PCA eigenvalue mass to total variance in a TR's local data, which
+`pca_ellipsoid` already computes) for a contextual bandit replacing pure
+trial-and-error. This would turn `mab_shape` from "epsilon-greedy recovers
+the best of both worlds" into "the bandit learns exactly the rule we
+discovered" — a substantially stronger result.
+
+### Other SOTA HDBO methods as potential baselines/arms
+
+| Method | What it does | Fit for us |
+|---|---|---|
+| SAASBO (Eriksson & Jankowiak, UAI 2021) | Sparse axis-aligned GP prior (half-Cauchy on lengthscales), automatically discovers active dims | Baseline, conceptually adjacent to our effective-dim story; not a TR-shape arm |
+| BAxUS (Papenmeier et al., NeurIPS 2022) | Nested random embeddings, adaptively grows subspace dim inside a TuRBO-like loop | Could be a fixed `mab_shape` arm: "embed into growing random subspace" |
+| Bounce (Papenmeier, Nardi, Poloczek, NeurIPS 2023, arXiv:2307.00618) | Extends BAxUS-style embeddings to mixed continuous/discrete spaces | Future mixed-variable extension, not core now |
+| Vanilla-BO w/ dim-scaled prior (Hvarfner et al., ICML 2024) | Already tried as an `ard_box` fix (didn't work) | Missing as a **standalone global-BO baseline** (no trust region at all) |
+| Linear-kernel + boundary-avoiding transform (Doumont et al., AISTATS 2026, arXiv:2512.00170) | Already tried (`linear_gp`); worth double-checking our transform matches their exact geometric fix | Verify implementation detail against the paper |
+| Automated Kernel Discovery (2026, arXiv:2605.20249) | LLM-driven evolutionary search over GP kernel forms | Different axis (kernel search vs. TR geometry); citation only |
+
+### Real benchmarks to validate the effective-dimension finding beyond `SparseDTLZ2`
+
+Our strongest current result (§7, `experiments/tr_shape_dtlz2_100d/RESULTS.md`)
+— that effective dimension relative to budget, not nominal dimension, governs
+the benefit — rests entirely on a synthetic construction we built ourselves.
+The most obvious reviewer objection is "does this generalize to a real
+problem?" Candidates, ranked by how directly they'd answer that:
+
+1. **LassoBench synthetic variants** (Šehić et al., AutoML 2022,
+   arXiv:2111.02790; already in the benchmark table below as a
+   single-objective scalability stress test) — tunable *true* sparsity of
+   the regression coefficients maps directly to effective dimension, the
+   closest available bridge between our synthetic SparseDTLZ2 and a real
+   problem. Currently single-objective (test MSE); a natural second
+   objective (number of active/nonzero coefficients, already computed
+   internally) would make it bi-objective for free.
+2. **Human-Powered Aircraft design family** (Namura & Takemori 2024,
+   d=17/32/32/108) — real engineering, moderate-high dimension, currently
+   single-objective but naturally has competing objectives (weight vs.
+   drag vs. structural margin).
+3. **PMO (Practical Molecular Optimization) latent-space tasks**
+   (González-Duque et al. 2024, arXiv:2406.04739) — 128D latent-space
+   molecule design with known low effective dimensionality relative to the
+   much higher raw representation; drug-design objectives are naturally
+   multi-objective (potency/synthesizability/toxicity).
+4. **MOPTA08** (d=124, widely used single-objective constrained benchmark)
+   — could be made bi-objective (mass vs. worst constraint violation
+   magnitude), used by the REI paper above among others.
+5. **YAHPO Gym / JAHS-Bench-201** — surrogate-backed multi-objective HPO/NAS
+   benchmarks, cheap to run at scale (no live simulator), good for a
+   large-batch high-nominal-dim study once the above are validated.
+
+### Ranked recommendations (from this pass)
+
+1. Validate the effective-dimension finding on a real problem — LassoBench
+   (made bi-objective) or the HPA family are the best bridges available.
+2. Upgrade `mab_shape` to a contextual bandit using an online effective-dim
+   estimate (top-k PCA eigenvalue mass ratio) as context — cheap (the PCA
+   computation already exists), and turns an empirical finding into a
+   mechanism.
+3. Add an explicit LABCAT/CMA-BO differentiation paragraph to `methods.tex`,
+   plus a Hvarfner-style global vanilla-BO baseline (no trust region at
+   all) and an AdaScale-TuRBO follow-up on the `ard_box` fix question.
+
+---
+
 ## Benchmark / problem candidates
 
 | Problem | d / M | Access | Matched baselines | Notes |
@@ -506,12 +659,17 @@ high-dimensional method paper.
 | **MOBO_aircraft** (CFRP wing aerostructural design) | d=5, M=2 (drag, weight) | not open-source (paper only) | NSGA-II, EPBII | New real-world domain (aerospace) not covered elsewhere on this list. |
 | Optical AR/VR display design | d=146 | **not runnable** — hours per proprietary physics sim | — | MORBO's benchmark; aspirational only. |
 | Mazda 3-vehicle design | d=222, V=54 | **not runnable** — original solve took ~3,000 CPU-years | — | MORBO's benchmark; aspirational only. |
+| **LassoBench, made bi-objective** (MSE + active-coefficient count) | tunable true sparsity → tunable *effective dim*, up to 1000+D | same LassoBench install, +1 line to expose the existing internal coefficient count as a 2nd objective | — | Best available real bridge between synthetic `SparseDTLZ2` and a real problem for the tr_shape work — see "Follow-up review" section above. |
+| **Human-Powered Aircraft design family** | d=17/32/32/108, real engineering, currently single-objective | Namura & Takemori 2024 (arXiv:2412.11456) | REI | Weight/drag/structural-margin are naturally competing objectives; not yet exposed as MO by the source paper. |
+| **PMO molecular latent-space tasks** | 128D latent, known low effective dim | González-Duque et al. 2024 (arXiv:2406.04739) | — | Drug-design objectives (potency/synthesizability/toxicity) are naturally MO. |
 
 **Recommendation**: Penicillin first (cheapest, validates pipeline generalizes
 with near-zero engineering cost), then Summit's SnAr/Suzuki as the "real second
 problem" (mirrors our composite/cost-tradeoff structure, ships its own baselines).
 Rover is the best fit if/when we want a genuinely high-dimensional +
-multi-objective test case for MORBO-based work specifically.
+multi-objective test case for MORBO-based work specifically. **For the
+tr_shape/effective-dimension line of work specifically**, LassoBench (made
+bi-objective) is the top pick — see "Follow-up review" section above.
 
 ---
 

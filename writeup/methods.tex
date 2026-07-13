@@ -712,6 +712,27 @@ local data improves search efficiency at high $d$, where an axis-aligned
 box wastes volume on directions that don't matter and cannot capture
 correlated structure across dimensions.
 
+\paragraph{Relation to prior work.} The closest single prior-art match is
+\textbf{LABCAT} \citep{visser2023labcat}, which rotates a trust region to
+align with weighted principal components of local data \emph{and} rescales
+axes by GP ARD lengthscales -- essentially the union of our
+\texttt{pca\_ellipsoid} and \texttt{ard\_box} ideas. LABCAT is
+single-objective only, evaluated on COCO/BBOB, and offers no analysis of
+\emph{when} shape adaptation should help; our contribution differs in four
+ways this section and the next establish: the multi-objective MORBO
+setting, an explicit effective-dimension-versus-budget theory of when the
+benefit appears (\S\ref{sec:sparse-dtlz2}), \texttt{cma\_ellipsoid} as a
+persistent-covariance alternative with a distinct low-data regime where it
+alone wins, and \texttt{mab\_shape} as a portfolio mechanism over shape
+families rather than a single fixed geometry. \textbf{CMA-BO}
+\citep{ngo2024cmabo} also combines CMA-ES with TuRBO-family methods, but as
+a softer meta-algorithm that restricts an existing method to a
+CMA-ES-estimated region of high posterior mass over the optimum, rather
+than building the trust region's own geometry directly from CMA's
+rank-$\mu$/evolution-path covariance the way \texttt{cma\_ellipsoid} does;
+the two are complementary evidence that CMA-ES/BO hybridization is a
+productive direction, not competing implementations of the same idea.
+
 \subsection{Three geometries, one scoping decision}
 
 We implement three alternatives, selected via a new \texttt{tr\_shape}
@@ -1368,6 +1389,16 @@ D. Eriksson, M. Pearce, J. Gardner, R. D. Turner, and M. Poloczek.
 Y. Wang, et al.
 \newblock Surrogate-assisted evolutionary algorithm with adaptive local region search.
 \newblock \emph{Swarm and Evolutionary Computation}, 2026.
+
+\bibitem{visser2023labcat}
+E. Visser, C. van Daalen, and J. Schoeman.
+\newblock LABCAT: Locally adaptive Bayesian optimization using principal-component-aligned trust regions.
+\newblock \emph{arXiv:2311.11328}, 2023.
+
+\bibitem{ngo2024cmabo}
+D. Ngo, B. Ha, T. Chan, B. Nguyen, and M. Zhang.
+\newblock High-dimensional Bayesian optimization via covariance matrix adaptation strategy.
+\newblock \emph{Transactions on Machine Learning Research (TMLR)}, 2024.
 
 \bibitem{doumont2026linearbo}
 N. Doumont, et al.

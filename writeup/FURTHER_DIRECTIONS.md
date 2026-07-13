@@ -249,3 +249,36 @@ adds it to the existing 5-seed DTLZ2 dimension sweep and Rover experiments.
 - Multi-seed the new-methods sweep (cma/linear-kernel/dimprior/mab_shape/
   SparseDTLZ2) — everything past the original 4-method sweep is currently
   single-seed only.
+
+## Where to steer this next (literature-informed, 2026-07-12)
+
+Full findings in `LITERATURE_REVIEW.md`'s "Follow-up review: trust-region
+shape adaptation" section — this is the short version. Ranked:
+
+1. **Validate the effective-dimension finding on a real problem.**
+   `SparseDTLZ2` (§7 of RESULTS.md) is our strongest result and rests
+   entirely on a synthetic construction we built ourselves. LassoBench
+   (made bi-objective — its true coefficient sparsity already controls
+   effective dimension, and its internal active-coefficient count is a
+   free second objective) is the best available bridge to a real problem.
+2. **Upgrade `mab_shape` to a contextual bandit.** Use an online estimate
+   of effective dimension (top-k PCA eigenvalue mass ratio in the TR's
+   local data — `pca_ellipsoid` already computes the eigendecomposition
+   this would reuse) as context, replacing epsilon-greedy trial-and-error.
+   This turns "the bandit recovers the best of both worlds empirically"
+   into "the bandit learns the exact rule we discovered mechanistically" —
+   a much stronger result, and cheap since the underlying computation
+   already exists.
+3. **Add missing baselines/citations.** LABCAT (Visser et al. 2023/24) and
+   CMA-BO (Ngo et al., TMLR 2024) are the closest prior art and now have a
+   differentiation paragraph in `methods.tex`; still missing a true
+   no-trust-region global-BO baseline (Hvarfner et al. 2024's
+   dimension-scaled-prior vanilla BO) and an AdaScale-TuRBO (2026) rerun
+   of the `ard_box` fix question (their joint lengthscale/TR-size scaling,
+   unlike the static prior we tried, might actually rescue it).
+
+Lower priority: Thompson-sampling or Hedge/EXP3 variants of `mab_shape`
+(remove the `mab_epsilon` hyperparameter — see GP-Hedge and self-tuning
+portfolio-BO in the literature review), and the Human-Powered
+Aircraft/PMO/MOPTA08-MO benchmark candidates as further real-world
+validation once LassoBench is done.

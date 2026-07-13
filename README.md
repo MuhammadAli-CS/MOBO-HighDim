@@ -270,5 +270,60 @@ python run_comparison.py penicillin_composite composite_penicillin 0
 python plot_comparison.py penicillin_composite 0
 ```
 
+## Trust-Region Shape Adaptation
+
+**This is the project's main, most-developed line of work.** MORBO's trust
+regions were purely isotropic axis-aligned hypercubes — no per-dimension
+lengthscale rescaling at all, a step below even the original TuRBO paper.
+This work asks whether adapting trust-region *shape* (not just size) to
+local data improves search efficiency in high dimension, tests why, and
+where it breaks.
+
+**Headline finding**, confirmed across 5 seeds and multiple problem types:
+shape adaptation produces large, unanimous, seed-robust wins (+64-72%
+hypervolume) on problems with low-dimensional *effective* structure, and a
+noise-level effect (no systematic direction) on problems where all
+dimensions genuinely matter. A follow-up synthetic problem (`SparseDTLZ2`)
+pinned this down precisely: **the governing variable is effective
+dimension relative to the eval budget — not nominal dimension, and not
+"the gap" between them.**
+
+Six `tr_shape` modes are implemented in `morbo/trust_region.py`
+(`TurboHParams.tr_shape` docstring has the full per-mode math):
+`isotropic` (baseline, unchanged behavior), `ard_box` (axis-aligned,
+ARD-lengthscale-rescaled — the original TuRBO technique; **fails badly**,
+worse than the isotropic baseline, a diagnosed curse-of-dimensionality
+effect), `pca_ellipsoid` / `ard_pca_ellipsoid` (PCA-rotated ellipsoids —
+the main winners), `cma_ellipsoid` (CMA-ES-style persistent covariance
+adaptation — the only method that breaks through at the highest dimension
+tested within a tight budget), and `mab_shape` (a per-trust-region
+multi-armed bandit that learns which of the above to use, recovering the
+best of all of them given adequate budget). A `use_linear_kernel` /
+`use_dim_scaled_ls_prior` pair of orthogonal kernel-level variants and a
+`label="sobol"` pure-random-search baseline are also available.
+
+```
+python run_comparison.py tr_shape_dtlz2_100d pca_ellipsoid 0
+python plot_comparison.py tr_shape_dtlz2_100d 0
+```
+
+**Full results, reproduction instructions, and session-resumption notes
+live in `writeup/`, not here** (this README section is a pointer, not the
+source of truth — the numbers change as new cluster runs land):
+- [`experiments/tr_shape_dtlz2_100d/RESULTS.md`](experiments/tr_shape_dtlz2_100d/RESULTS.md) —
+  the primary results document, all dimensions/problems/methods.
+- [`writeup/methods.tex`](writeup/methods.tex) (`sec:tr-shape`) — same
+  results in paper form.
+- [`writeup/FURTHER_DIRECTIONS.md`](writeup/FURTHER_DIRECTIONS.md) — the
+  motivating papers, what's been tried, and ranked ideas not yet tried.
+- [`writeup/PROJECT_HANDOFF.md`](writeup/PROJECT_HANDOFF.md) — **start
+  here** to resume this work in a new session: architecture, headline
+  findings, debugged gotchas, and how to run everything.
+- [`LITERATURE_REVIEW.md`](LITERATURE_REVIEW.md) — broader related-work
+  notes for the project, including the most closely related prior art
+  (LABCAT, CMA-BO) and candidate next benchmarks.
+- [`cluster/README.md`](cluster/README.md) — how to run any of this on
+  Cornell's Unicorn SLURM cluster.
+
 ## License
 This repository is MIT licensed, as found in the [LICENSE](LICENSE) file.
