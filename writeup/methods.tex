@@ -1421,6 +1421,75 @@ $\sim$2.5s against Mat\'ern's $\sim$60--75s, making \texttt{linear\_gp\_pca}
 -- which matches Mat\'ern+PCA's hypervolume at $d{=}100$--$150$ -- the most
 hypervolume-per-second-efficient method tested at $d{=}100$.
 
+\subsection{Benchmark battery: real problems and mechanism probes}
+\label{sec:benchmark-battery}
+
+A final battery tests the effective-dimension mechanism outside its home
+territory: two real problems (bi-objective LassoBench at that paper's own
+30-repetition/1000--5000-eval protocol \citep{sehic2022lassobench}; Rover
+padded with no-op dimensions), a rotated-subspace variant of
+\texttt{SparseDTLZ2}, and DTLZ landscape variants. Several predictions
+failed, and the failures sharpen the claim considerably.
+
+\paragraph{LassoBench-MO (30 seeds).} On best validation loss -- exactly
+LassoBench's own metric -- MORBO is competitive with that paper's
+dedicated single-objective methods (DNA: ours $0.304 \pm 0.004$ vs.\ their
+best, TuRBO, at $0.292$; synt\_medium: ours $1.10$--$1.14$ against their
+TuRBO $0.95$ / CMA-ES $1.07$ / Sparse-HO $1.23$) \emph{while
+simultaneously optimizing a second objective} (model sparsity) they do
+not track. But \textbf{shape adaptation does not help here}: every
+variant is at or slightly below baseline on both hypervolume and
+best-loss (\texttt{mab\_shape} is the best variant throughout). The
+diagnosis is that LassoBench's "known effective dimensionality" is the
+sparsity of the \emph{true regression coefficients}; every \emph{input}
+dimension (a per-feature regularization weight) still affects the loss
+weakly. That is structurally different from \texttt{SparseDTLZ2}'s literal
+input no-ops. Refined claim: shape adaptation requires low effective
+dimensionality \emph{in the input space}, not merely an underlying sparse
+model.
+
+\paragraph{SparseRover (5 seeds).} Padding Rover ($d{=}60$, all real dims
+matter) with 60 or 120 literal no-op dimensions was predicted to unlock
+the shape-adaptation benefit. It did not: $d{=}120$ shows a weak
+suggestive positive (\texttt{ard\_pca\_ellipsoid} $+4.3\%$, 4/5) that
+flips negative at $d{=}180$ (2/5 or worse for every variant) -- the same
+near-coin-flip signature as unpadded Rover. Input no-ops are therefore
+\textbf{necessary but not sufficient}: the effective subspace's landscape
+(Rover's remains hard and multimodal) must also be tractable for local GP
+modeling within budget.
+
+\paragraph{RotatedSparseDTLZ2 (5 seeds, $k_{\mathrm{eff}}{=}50$).} With
+the informative subspace randomly rotated, \texttt{ard\_box} degrades as
+designed ($-4.3\%$, 0/5 -- it is axis-aligned by construction), and
+\texttt{cma\_ellipsoid} is the \emph{only} method retaining a unanimous
+win ($+4.8\%$, 5/5). Unexpectedly, \texttt{pca\_ellipsoid} loses its
+axis-aligned edge entirely ($+6.7\% \to -1.9\%$, 1/5); whether the
+axis-aligned figure was single-seed noise or rotation genuinely hurts
+PCA's estimation requires a multi-seed axis-aligned rerun (open).
+
+\paragraph{DTLZ landscape variants ($d{=}100$, 5 seeds).} The PCA
+variants' win generalizes across every landscape character tested --
+DTLZ3 (severe multimodality, $+19$--$21\%$), DTLZ5 (degenerate front,
+$+13\%$), DTLZ7 (disconnected front, $+8\%$), all 5/5 -- with DTLZ1
+uninformative (all methods at exactly 0 in 600 evals). Notably,
+\texttt{ard\_box}'s failure is \emph{landscape-dependent}: catastrophic on
+the smooth-$g$ problems (DTLZ2/DTLZ5) but winning 5/5 on DTLZ3 and DTLZ7,
+consistent with rugged local landscapes not producing the degenerate
+99-flat/1-sharp lengthscale pattern that triggers its
+constraint-compounding collapse (a diagnostic lengthscale-spread check
+remains to be run).
+
+\paragraph{Net effect on the headline claim.} Shape adaptation helps when
+the problem has low effective dimensionality \emph{in the input space}
+and the effective subspace's landscape is tractable for local GP
+modeling; the benefit generalizes across Pareto-front geometries but does
+not appear on real problems whose inputs all matter weakly (LassoBench,
+Rover, padded or not). \texttt{cma\_ellipsoid} is the most robust
+adaptive geometry under rotation; \texttt{mab\_shape} is the safest
+default. MORBO itself is externally competitive with dedicated
+single-objective HDBO methods on LassoBench while carrying a second
+objective.
+
 \section{Discussion}
 
 The three extensions from Sections~\ref{sec:composite}--\ref{sec:botier}
@@ -1495,6 +1564,11 @@ D. Ngo, B. Ha, T. Chan, B. Nguyen, and M. Zhang.
 N. Doumont, et al.
 \newblock We Still Don't Understand High-Dimensional Bayesian Optimization.
 \newblock \emph{International Conference on Artificial Intelligence and Statistics (AISTATS)}, 2026.
+
+\bibitem{sehic2022lassobench}
+K. \v{S}ehi\'c, A. Gramfort, J. Salmon, and L. Nardi.
+\newblock LassoBench: A High-Dimensional Hyperparameter Optimization Benchmark Suite for Lasso.
+\newblock \emph{AutoML Conference}, 2022.
 
 \bibitem{hvarfner2024vanilla}
 C. Hvarfner, E. O. Hellsten, and L. Nardi.

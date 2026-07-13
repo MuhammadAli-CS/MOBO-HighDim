@@ -247,35 +247,35 @@ and shape adaptation's own wins sit on top of that larger base advantage.
   SparseDTLZ2) — everything past the original 4-method sweep is currently
   single-seed only.
 
-## New benchmark battery — CODED, queued for the cluster (2026-07-12, overnight batch)
+## New benchmark battery — DONE, results in (see RESULTS.md §10 for full tables)
 
-All coded, wired, and locally smoke-tested; full rationale in
-`experiments/tr_shape_dtlz2_100d/RESULTS.md` §10 and the problem files'
-docstrings. Morning run order (see `cluster/README.md` §4e; LassoBench
-must be installed in morbo-env first — the script checks):
+All ran on the cluster (30 seeds for LassoBench per its paper's protocol,
+5 seeds everywhere else). One-line outcomes — note two honest prediction
+failures that sharpened the claim:
 
-```bash
-bash cluster/submit_real_benchmarks.sh      # LassoBench-MO synt_medium (30 seeds, paper protocol) + SparseRover
-bash cluster/submit_new_synthetic.sh        # RotatedSparseDTLZ2 + TimeVaryingSparseDTLZ2
-bash cluster/submit_dtlz_variants.sh        # DTLZ1/3/5/7 landscape variants @ d=100
-bash cluster/submit_real_benchmarks.sh dna       # optional stage 2
-bash cluster/submit_real_benchmarks.sh synt_high # optional stage 3 (long 5000-eval jobs)
-```
-
-- **LassoBench-MO** — implements ranked recommendation #1 below (real-problem
-  validation of the effective-dimension finding), at the LassoBench paper's
-  own protocol (1000/5000 evals, 30 repetitions) so best-loss curves are
-  directly comparable to their published TuRBO/CMA-ES numbers.
-- **SparseRover** — real Rover + dummy dims; the mechanism predicts shape
-  adaptation should now *help* where it previously didn't.
-- **RotatedSparseDTLZ2** — closes SparseDTLZ2's axis-alignment gap (is it
-  *rotation* doing the work, or just axis identification?).
-- **TimeVaryingSparseDTLZ2** — probes re-adaptation; the one regime where
-  cma_ellipsoid's persistent memory should hurt.
-- **DTLZ1/3/5/7 variants** — does the DTLZ2 win generalize across landscape
-  characters (multimodal/degenerate/disconnected fronts)?
-- Deferred: MOPTA08 (proprietary binary), HPA/PMO (porting effort) — next
-  in line after LassoBench lands.
+- **LassoBench-MO** — MORBO is *externally competitive* with their published
+  dedicated single-objective methods (DNA 0.304 vs their TuRBO 0.292) while
+  also optimizing sparsity. But **shape adaptation does not help** —
+  prediction failed, informatively: LassoBench's effective dim is
+  coefficient sparsity, not input no-ops; every input dim matters weakly.
+  Refined claim: shape adaptation needs low effective dim *in the input
+  space*.
+- **SparseRover** — prediction failed: no-op padding did not unlock the
+  benefit (weak positive at d=120 flips negative at d=180). Input no-ops
+  are necessary but not sufficient; the effective subspace's landscape must
+  also be GP-tractable.
+- **RotatedSparseDTLZ2** — ard_box degrades under rotation (0/5, as
+  designed); **cma_ellipsoid is the only unanimous winner (5/5, +4.8%)**;
+  pca_ellipsoid unexpectedly lost its axis-aligned edge (needs a multi-seed
+  axis-aligned rerun to distinguish noise from a real rotation effect).
+- **TimeVaryingSparseDTLZ2** — null by design flaw: run at k_eff=5 where
+  shape adaptation has no effect to disrupt. Rerun at k_eff=50 — follow-up.
+- **DTLZ1/3/5/7 variants** — strong generalization: PCA variants win 5/5 on
+  every informative landscape (+8 to +21% on DTLZ3/5/7; DTLZ1 all-zeros
+  budget artifact). Twist: **ard_box's failure is landscape-dependent** —
+  it wins 5/5 on the rugged-g problems (DTLZ3/7) while failing on smooth-g
+  ones (DTLZ2/5).
+- Deferred: MOPTA08 (proprietary binary), HPA/PMO (porting effort).
 
 ## Where to steer this next (literature-informed, 2026-07-12)
 

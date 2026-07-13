@@ -237,20 +237,22 @@ git commit && git push                          # or scp results back
 
 ## Open threads / natural next steps
 
-**QUEUED (coded + smoke-tested, awaiting cluster run — 2026-07-12 overnight
-batch):** a full new benchmark battery. Real problems: **LassoBench-MO**
-(bi-objective LassoBench at the paper's own 30-seed/1000-5000-eval
-protocol, `morbo/problems/lasso_bench_mo.py` — the real-problem test of
-the effective-dimension finding; needs LassoBench installed in morbo-env,
-`setup_env.sh` now does it) and **SparseRover** (real Rover + dummy dims).
-New synthetics: **RotatedSparseDTLZ2** (non-axis-aligned effective
-subspace — the discriminating test between "finds the subspace" and
-"finds the axes"), **TimeVaryingSparseDTLZ2** (mid-run informative-dim
-switch — probes cma_ellipsoid's memory as a liability), and
-**DTLZ1/3/5/7 landscape variants**. Submit scripts:
-`cluster/submit_real_benchmarks.sh` (staged, 240-600 jobs),
-`cluster/submit_new_synthetic.sh` (70), `cluster/submit_dtlz_variants.sh`
-(80). Full details: `RESULTS.md` §10, `cluster/README.md` §4e.
+**Benchmark battery: DONE, results in `RESULTS.md` §10.** Key outcomes —
+two honest prediction failures that sharpened the headline claim:
+LassoBench-MO (30 seeds, their paper's protocol) shows MORBO externally
+competitive with their dedicated single-objective methods (DNA 0.304 vs.
+their TuRBO 0.292) but **no shape-adaptation benefit** — LassoBench's
+effective dim is coefficient sparsity, not input no-ops; SparseRover's
+no-op padding also failed to unlock the benefit. Refined claim: shape
+adaptation needs low effective dimensionality *in the input space* AND a
+GP-tractable effective-subspace landscape. RotatedSparseDTLZ2 confirmed
+ard_box degrades under rotation and crowned **cma_ellipsoid as the only
+rotation-robust winner (5/5)** while unexpectedly demoting pca_ellipsoid
+(needs a multi-seed axis-aligned rerun to interpret). DTLZ3/5/7 show
+strong generalization (PCA variants 5/5 everywhere informative, +8-21%)
+with ard_box's failure revealed as landscape-dependent (wins on rugged-g
+DTLZ3/7). TimeVaryingSparseDTLZ2 was a null-by-design-flaw (wrong k_eff)
+— rerun at k_eff=50 pending.
 
 Everything originally proposed in `FURTHER_DIRECTIONS.md` (multi-seed
 sweep, composite×shape, CMA/linear-kernel/dim-prior, `mab_shape`,

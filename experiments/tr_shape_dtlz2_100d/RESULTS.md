@@ -440,61 +440,148 @@ HV-per-second method of all at d=100 (18.6 HV/min vs ard_pca's 15.1); and
 `sobol` is of course ~free (0.1s) but earns almost no HV at d≥100 —
 "efficiency" without effectiveness.
 
-## 10. New benchmark battery — QUEUED, not yet run
+## 10. New benchmark battery — results: the honest, sharpening batch
 
-Coded, locally smoke-tested, and wired up (2026-07-12, overnight batch);
-submit scripts in `cluster/` (see `cluster/README.md` §4e for exact
-commands and the LassoBench install prerequisite). Ordered real-first per
-plan:
+The full battery from the overnight submission (real problems + mechanism
+probes) is in. Several predictions confirmed, several **failed in
+informative ways** — net effect is a substantially sharper claim about
+when shape adaptation works.
 
-**Real problems:**
-- **LassoBench-MO** (`lasso_synt_medium_mo` d=100/effective-dim 5,
-  `lasso_dna_mo` d=180/eff 43, `lasso_synt_high_mo` d=300/eff 15;
-  `morbo/problems/lasso_bench_mo.py`) — bi-objective LassoBench:
-  objective 1 is *exactly* their own `evaluate()` validation loss (so our
-  best-loss-so-far curves are directly comparable to the LassoBench
-  paper's published TuRBO/CMA-ES/Sparse-HO numbers), objective 2 is the
-  fitted Lasso solution's active-coefficient fraction (accuracy vs. model
-  sparsity — a real tradeoff their machinery already computes).
-  **Protocol matches their paper: 1000 evals (synt_medium/DNA), 5000
-  (synt_high), 30 seeds.** This is the real-problem validation of §7's
-  effective-dimension finding — LassoBench's synthetic benchmarks have
-  *known, documented* effective dimensionality.
-- **SparseRover** (`sparse_rover_d{120,180}`,
-  `morbo/problems/sparse_rover.py`) — the real Rover trajectory objective
-  embedded in 2×/3× nominal dims (extra dims are literal no-ops). The
-  effective-dimension mechanism predicts shape adaptation should now
-  *help* on Rover (it didn't at nominal=effective=60, §2) because the
-  isotropic box wastes volume on the dummy half. Rover's own protocol
-  (2000 evals), 5 seeds.
-- **Deferred: MOPTA08 / Human-Powered Aircraft / PMO** — MOPTA08 needs a
-  proprietary Fortran binary wrangled onto the cluster; HPA/PMO need
-  nontrivial porting. Listed in `LITERATURE_REVIEW.md`'s follow-up section
-  as next candidates after LassoBench validates (or fails to validate)
-  the story.
+### 10a. LassoBench-MO (30 seeds, the paper's own protocol)
 
-**New synthetics (mechanism probes):**
-- **RotatedSparseDTLZ2** (`rotated_sparse_dtlz2_d100_keff{5,50}`,
-  `morbo/problems/rotated_sparse_dtlz2.py`) — closes §7's axis-alignment
-  gap: SparseDTLZ2's informative dims are axis-aligned (the one geometry
-  `ard_box` could in principle exploit); a fixed random rotation makes the
-  effective subspace non-axis-aligned. Rotation-based shapes should be
-  ~invariant; `ard_box` should get strictly worse; isotropic unaffected.
-  The cleanest possible test that *rotation specifically* does the work.
-  400 evals matching §7, 5 seeds, `ard_box` deliberately included.
-- **TimeVaryingSparseDTLZ2** (`tv_sparse_dtlz2_d100_keff5`,
-  `morbo/problems/time_varying_sparse_dtlz2.py`) — informative dims switch
-  at 50% budget; probes re-adaptation. `cma_ellipsoid`'s persistent
-  covariance (its strength at d=200) should *hurt* here; memoryless
-  `pca_ellipsoid` should recover fast. **Metric caveat:** analyze
-  post-switch HV recovery, not the final mixed-history HV (pre-switch
-  evaluations were scored under the old mask — see the problem file's
-  docstring). 600 evals, 5 seeds.
-- **DTLZ landscape variants** (`tr_shape_dtlz{1,3,5,7}_100d`) — same
-  effective-dimension structure as DTLZ2 at d=100, different landscape
-  characters (multimodal / degenerate / disconnected fronts). Fresh dirs
-  with *correct* evalfns (the legacy `dtlz5_m2`/`dtlz7_m2` dirs have the
-  known evalfn swap bug). 600 evals, 5 seeds, 4 core methods.
+Best validation loss (their metric, objective 1 = their exact `evaluate()`),
+mean ± std over 30 seeds, vs. their published single-objective numbers:
+
+| Benchmark | morbo | best shape variant | sobol | LassoBench paper (their best HDBO) |
+|---|---|---|---|---|
+| synt_medium (d=100, eff 5, 1000 ev) | 1.141±0.050 | **mab_shape 1.104±0.067** | 1.713 | TuRBO 0.95, CMA-ES 1.07, MS-Sparse-HO 1.23 |
+| DNA (d=180, eff 43, 1000 ev) | **0.304±0.004** | mab_shape 0.308 | 0.331 | TuRBO 0.292 (their best) |
+| synt_high (d=300, eff 15, 5000 ev) | **1.057±0.037** | mab_shape 1.108±0.350 | 13.02 | — |
+
+Two findings, one external and one internal:
+
+**External validity: MORBO is competitive with the paper's dedicated
+single-objective methods** — our DNA best-loss (0.304) essentially matches
+their best method (TuRBO, 0.292), and synt_medium (1.10–1.14) sits between
+their TuRBO (0.95)/CMA-ES (1.07) and Sparse-HO (1.23) — *while
+simultaneously optimizing a second objective* (model sparsity) they don't
+track at all. Splitting a fixed budget across a Pareto front and still
+landing within ~5–15% of the best dedicated single-objective optimizer is
+a genuinely strong external check.
+
+**Internal: shape adaptation does NOT help on LassoBench** — every variant
+is ≈ baseline or slightly worse on both hypervolume and best-loss
+(`mab_shape` is the best variant, and the only one to edge the baseline's
+best-loss on synt_medium). **This is a prediction failure that sharpens
+the mechanism.** LassoBench's "known effective dimension" is the sparsity
+of the *true regression coefficients* — but every one of its input
+dimensions (per-feature regularization weights) still affects the loss at
+least weakly. That is a fundamentally different structure from
+SparseDTLZ2's literal input no-ops. Refined claim: **shape adaptation
+needs low effective dimensionality in the INPUT space (directions that
+genuinely don't matter), not merely an underlying sparse model.** On
+problems where all inputs matter somewhat — Rover, LassoBench — the
+benefit disappears, exactly as §2's original Rover finding suggested.
+(Also note synt_high's variance: shape variants occasionally fail badly
+there — cma 1.56±1.28 — while the isotropic baseline is the most stable.)
+
+### 10b. SparseRover — the mechanism does not transfer cleanly (prediction failed)
+
+| | d=120 (60 real + 60 no-op) | d=180 (60 real + 120 no-op) |
+|---|---|---|
+| morbo | 2.148±0.132 | 2.173±0.153 |
+| pca_ellipsoid | +1.6% (3/5) | −2.2% (2/5) |
+| ard_pca_ellipsoid | +4.3% (4/5) | −4.0% (2/5) |
+| cma_ellipsoid | +1.5% (3/5) | −4.7% (1/5) |
+| mab_shape | −0.1% (4/5) | −4.8% (1/5) |
+| sobol | 1.316 (−39%) | 1.291 (−41%) |
+
+The prediction was that padding Rover with literal no-op dims would unlock
+the shape-adaptation benefit (SparseDTLZ2's construction, on a real
+problem). It did not: d=120 shows a weak, suggestive positive
+(`ard_pca_ellipsoid` 4/5, +4.3%) that **flips negative at d=180** — no
+robust effect at either scale, same near-coin-flip signature as plain
+Rover (§2). Contrast with SparseDTLZ2 at a comparable effective dim (51 of
+100, +6.7–10%): the difference is the landscape. Rover's 60 real
+dimensions remain a hard, multimodal trajectory problem whether or not
+no-op dims surround them; DTLZ2's effective subspace is smooth and
+unimodal. So **input no-ops are necessary but not sufficient** — the
+low-dimensional structure also has to be one the local GP machinery can
+actually exploit within budget.
+
+### 10c. RotatedSparseDTLZ2 — rotation demotes PCA, crowns CMA (partially surprising)
+
+At k_eff=50 (effective dim 51, the regime where axis-aligned SparseDTLZ2
+showed clear wins), with the informative subspace now randomly rotated
+(5 seeds, paired vs. morbo 31.01±0.63):
+
+| Method | vs. morbo | win-rate | axis-aligned counterpart (§7, single seed) |
+|---|---|---|---|
+| ard_box | −4.3% | 0/5 | (not run axis-aligned) |
+| pca_ellipsoid | −1.9% | 1/5 | +6.7% |
+| ard_pca_ellipsoid | −0.7% | 2/5 | −0.6% |
+| **cma_ellipsoid** | **+4.8%** | **5/5** | +10.1% |
+
+Confirmed: `ard_box` (axis-aligned by construction) degrades under
+rotation, 0/5 — as designed, this problem discriminates against it.
+Confirmed: `cma_ellipsoid` keeps a unanimous 5/5 win — the most
+rotation-robust adaptive geometry. **Surprise: `pca_ellipsoid` lost its
+axis-aligned edge entirely** (+6.7% → −1.9%, 1/5). Two candidate
+explanations we can't separate yet: the axis-aligned +6.7% was single-seed
+noise (the rotated result is 5-seed), or the rotation genuinely hurts
+PCA's shape estimation. A multi-seed rerun of axis-aligned
+`sparse_dtlz2_d100_keff50` would settle it — flagged as follow-up.
+At k_eff=5 rotated, everything is a flat null (all within 0.1%), matching
+the axis-aligned k_eff=5 null — consistent.
+
+### 10d. TimeVaryingSparseDTLZ2 — null by design flaw (honest miss)
+
+All four methods land within 0.15% of each other (35.00–35.05, 5 seeds).
+In hindsight the experiment was configured in the wrong regime: at
+k_eff=5 (effective dim 6), shape adaptation has ~no effect *even without*
+the mid-run switch (§7 Group B), so there was no adaptation advantage for
+the switch to disrupt. The cma-memory-liability hypothesis is untested,
+not refuted. Rerun at k_eff=50 to actually probe it — follow-up.
+
+### 10e. DTLZ landscape variants (d=100, 5 seeds) — strong generalization, with an ard_box twist
+
+| Problem (landscape) | morbo | ard_box | pca_ellipsoid | ard_pca_ellipsoid |
+|---|---|---|---|---|
+| DTLZ3 (severe multimodal) | 5.40e7 | **+19.3% (5/5)** | +19.0% (5/5) | +21.2% (5/5) |
+| DTLZ5 (degenerate front) | 81.9 | −21.3% (0/5) | +13.0% (5/5) | +13.4% (5/5) |
+| DTLZ7 (disconnected front) | 117.6 | **+5.4% (5/5)** | +7.6% (5/5) | +8.1% (5/5) |
+| DTLZ1 (extreme multimodal) | 0.00 | 0.00 | 0.00 | 0.00 |
+
+The PCA variants' win **generalizes across every landscape character
+tested** — multimodal, degenerate, disconnected — always 5/5, +8 to +21%.
+DTLZ1 is uninformative (everything at exactly 0 within 600 evals,
+presumably the same budget artifact as d=200 DTLZ2 — its 11^k local fronts
+are brutal).
+
+The twist: **`ard_box`'s failure is landscape-dependent, not universal.**
+It fails catastrophically on DTLZ2/DTLZ5 (the smooth-`g` problems) but
+*wins 5/5* on DTLZ3 and DTLZ7. A plausible reading: on multimodal/rugged
+`g` landscapes, the fitted lengthscales don't degenerate into the
+99-flat-dims-1-sharp-dim pattern that triggers the constraint-compounding
+collapse (§ "Why ard_box hurts") — the local landscape looks genuinely
+multi-scale, the lengthscale ratios stay moderate, and per-axis rescaling
+behaves. Worth a diagnostic (fit a GP on DTLZ3 local data and check the
+lengthscale spread) before treating that as more than a hypothesis.
+
+### 10f. What this batch does to the headline claim
+
+Before: "shape adaptation helps when effective dimension is low relative
+to budget." After, more precisely: **shape adaptation helps when the
+problem has low effective dimensionality in the input space (directions
+that literally don't matter) AND the effective subspace's landscape is
+tractable for local GP modeling; the benefit generalizes across front
+geometries (DTLZ3/5/7) but does not appear on real problems whose inputs
+all matter weakly (LassoBench, Rover — padded or not). `cma_ellipsoid` is
+the most robust adaptive geometry (only unanimous winner under rotation);
+`mab_shape` is the safest default (never far from the best variant, best
+variant on 2 of 3 LassoBench benchmarks).** MORBO itself is externally
+competitive with the LassoBench paper's dedicated single-objective
+methods while also carrying a second objective.
 
 Plots: `comparison_seed0.png` (objective space + HV vs. evals) and
 `efficiency_seed0.png` (optimizer time vs. HV) in each experiment
