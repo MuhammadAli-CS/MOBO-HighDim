@@ -77,6 +77,20 @@ else
     echo "WARNING: LassoBench install failed -- lasso_*_mo experiments will" >&2
     echo "not run until it's installed manually. Everything else is unaffected." >&2
   }
+  # CRITICAL: LassoBench's dependency resolution can silently upgrade
+  # botorch/gpytorch past the pinned versions (confirmed on the cluster:
+  # after installing LassoBench, `botorch.sampling.deterministic` no longer
+  # existed and every job died on import). Force the pins back afterward,
+  # unconditionally.
+  pip install "gpytorch==1.11" "botorch==0.9.5"
+  python - <<'PYEOF'
+import botorch, gpytorch, torch
+from botorch.sampling.deterministic import DeterministicSampler  # the import that broke
+assert botorch.__version__.startswith("0.9.5"), botorch.__version__
+assert gpytorch.__version__.startswith("1.11"), gpytorch.__version__
+print(f"pins OK: botorch={botorch.__version__} gpytorch={gpytorch.__version__} "
+      f"torch={torch.__version__} cuda={torch.cuda.is_available()}")
+PYEOF
 fi
 
 echo "Done. Activate with: conda activate $ENV_PATH"
