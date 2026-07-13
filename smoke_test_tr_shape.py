@@ -196,6 +196,75 @@ def check_sobol() -> None:
     print("OK: sobol baseline ran to completion with a sane hypervolume trace.")
 
 
+def _tiny_bo_loop(evalfn: str, dim: int, **extra) -> None:
+    """A minimal BO loop on a given evalfn -- just proves the wiring works."""
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        run_one_replication(
+            seed=0,
+            label="pca_ellipsoid",
+            max_evals=MAX_EVALS,
+            evalfn=evalfn,
+            dim=dim,
+            batch_size=BATCH_SIZE,
+            n_initial_points=N_INITIAL_POINTS,
+            n_trust_regions=N_TRUST_REGIONS,
+            min_tr_size=MIN_TR_SIZE,
+            tr_shape="pca_ellipsoid",
+            verbose=True,
+            save_callback=lambda output: None,
+            **extra,
+        )
+
+
+def check_rotated_sparse_dtlz2() -> None:
+    print("=== RotatedSparseDTLZ2 ===")
+    _tiny_bo_loop(
+        "RotatedSparseDTLZ2", DIM, sparse_dtlz2_k_eff=2, max_reference_point=[-6, -6]
+    )
+    print("OK: RotatedSparseDTLZ2 BO loop ran to completion.")
+
+
+def check_tv_sparse_dtlz2() -> None:
+    print("=== TimeVaryingSparseDTLZ2 ===")
+    _tiny_bo_loop(
+        "TimeVaryingSparseDTLZ2",
+        DIM,
+        sparse_dtlz2_k_eff=2,
+        tv_switch_frac=0.5,
+        max_reference_point=[-6, -6],
+    )
+    print("OK: TimeVaryingSparseDTLZ2 BO loop ran to completion (incl. mid-run switch).")
+
+
+def check_sparse_rover() -> None:
+    print("=== SparseRover ===")
+    # rover's own constructor requires base_dim >= 20 (and even)
+    _tiny_bo_loop(
+        "SparseRover",
+        26,
+        sparse_rover_base_dim=20,
+        max_reference_point=[0, -0.5],
+    )
+    print("OK: SparseRover BO loop ran to completion.")
+
+
+def check_lasso_bench_mo() -> None:
+    print("=== LassoBenchMO (conditional -- skipped if LassoBench not installed) ===")
+    try:
+        import LassoBench  # noqa: F401
+    except ImportError:
+        print("SKIPPED: LassoBench not installed (fine locally; required on cluster).")
+        return
+    _tiny_bo_loop(
+        "LassoBenchMO",
+        60,
+        lasso_bench_name="synt_simple",
+        max_reference_point=[-100.0, -1.0],
+    )
+    print("OK: LassoBenchMO BO loop ran to completion.")
+
+
 if __name__ == "__main__":
     torch.manual_seed(0)
     check_isotropic()
@@ -208,4 +277,8 @@ if __name__ == "__main__":
     check_mab_shape()
     check_sparse_dtlz2()
     check_sobol()
+    check_rotated_sparse_dtlz2()
+    check_tv_sparse_dtlz2()
+    check_sparse_rover()
+    check_lasso_bench_mo()
     print("\nAll smoke tests passed.")

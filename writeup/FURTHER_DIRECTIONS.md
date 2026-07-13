@@ -247,6 +247,36 @@ and shape adaptation's own wins sit on top of that larger base advantage.
   SparseDTLZ2) — everything past the original 4-method sweep is currently
   single-seed only.
 
+## New benchmark battery — CODED, queued for the cluster (2026-07-12, overnight batch)
+
+All coded, wired, and locally smoke-tested; full rationale in
+`experiments/tr_shape_dtlz2_100d/RESULTS.md` §10 and the problem files'
+docstrings. Morning run order (see `cluster/README.md` §4e; LassoBench
+must be installed in morbo-env first — the script checks):
+
+```bash
+bash cluster/submit_real_benchmarks.sh      # LassoBench-MO synt_medium (30 seeds, paper protocol) + SparseRover
+bash cluster/submit_new_synthetic.sh        # RotatedSparseDTLZ2 + TimeVaryingSparseDTLZ2
+bash cluster/submit_dtlz_variants.sh        # DTLZ1/3/5/7 landscape variants @ d=100
+bash cluster/submit_real_benchmarks.sh dna       # optional stage 2
+bash cluster/submit_real_benchmarks.sh synt_high # optional stage 3 (long 5000-eval jobs)
+```
+
+- **LassoBench-MO** — implements ranked recommendation #1 below (real-problem
+  validation of the effective-dimension finding), at the LassoBench paper's
+  own protocol (1000/5000 evals, 30 repetitions) so best-loss curves are
+  directly comparable to their published TuRBO/CMA-ES numbers.
+- **SparseRover** — real Rover + dummy dims; the mechanism predicts shape
+  adaptation should now *help* where it previously didn't.
+- **RotatedSparseDTLZ2** — closes SparseDTLZ2's axis-alignment gap (is it
+  *rotation* doing the work, or just axis identification?).
+- **TimeVaryingSparseDTLZ2** — probes re-adaptation; the one regime where
+  cma_ellipsoid's persistent memory should hurt.
+- **DTLZ1/3/5/7 variants** — does the DTLZ2 win generalize across landscape
+  characters (multimodal/degenerate/disconnected fronts)?
+- Deferred: MOPTA08 (proprietary binary), HPA/PMO (porting effort) — next
+  in line after LassoBench lands.
+
 ## Where to steer this next (literature-informed, 2026-07-12)
 
 Full findings in `LITERATURE_REVIEW.md`'s "Follow-up review: trust-region

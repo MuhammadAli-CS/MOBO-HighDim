@@ -53,6 +53,10 @@ from morbo.problems.composite_penicillin import (
     get_composite_penicillin_fn,
 )
 from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
+from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
+from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
+from morbo.problems.sparse_rover import get_sparse_rover_fn
+from morbo.problems.lasso_bench_mo import get_lasso_bench_mo_fn
 from morbo.benchmark_function import (
     BenchmarkFunction,
 )
@@ -141,6 +145,9 @@ def run_one_replication(
     n_curve_points: int = 8,
     n_penicillin_checkpoints: int = 10,
     sparse_dtlz2_k_eff: int = 5,
+    lasso_bench_name: str = "synt_medium",
+    sparse_rover_base_dim: int = 60,
+    tv_switch_frac: float = 0.5,
     dtype: torch.device = torch.double,
     device: Optional[torch.device] = None,
     save_callback: Optional[Callable[[Tensor], None]] = None,
@@ -276,6 +283,50 @@ def run_one_replication(
             dtype=dtype,
             device=device,
         )
+        bounds = bounds.to(**tkwargs)
+        num_outputs = num_objectives
+    elif evalfn == "RotatedSparseDTLZ2":
+        # Same ahead-of-generic-DTLZ placement requirement as SparseDTLZ2.
+        f, bounds = get_rotated_sparse_dtlz2_fn(
+            dim=dim,
+            num_objectives=num_objectives,
+            k_eff=sparse_dtlz2_k_eff,
+            dtype=dtype,
+            device=device,
+        )
+        bounds = bounds.to(**tkwargs)
+        num_outputs = num_objectives
+    elif evalfn == "TimeVaryingSparseDTLZ2":
+        # Same ahead-of-generic-DTLZ placement requirement as SparseDTLZ2.
+        f, bounds = get_time_varying_sparse_dtlz2_fn(
+            dim=dim,
+            num_objectives=num_objectives,
+            k_eff=sparse_dtlz2_k_eff,
+            switch_at_eval=int(tv_switch_frac * max_evals),
+            dtype=dtype,
+            device=device,
+        )
+        bounds = bounds.to(**tkwargs)
+        num_outputs = num_objectives
+    elif evalfn == "SparseRover":
+        num_objectives, num_outputs = 2, 2
+        f, bounds = get_sparse_rover_fn(
+            dim=dim,
+            base_dim=sparse_rover_base_dim,
+            device=device,
+            dtype=dtype,
+            force_goal=False,
+            force_start=True,
+        )
+    elif evalfn == "LassoBenchMO":
+        f, bounds, bench_dim = get_lasso_bench_mo_fn(
+            bench_name=lasso_bench_name, dtype=dtype, device=device
+        )
+        if bench_dim != dim:
+            raise ValueError(
+                f"config dim={dim} does not match LassoBench "
+                f"'{lasso_bench_name}' n_features={bench_dim}."
+            )
         bounds = bounds.to(**tkwargs)
         num_outputs = num_objectives
     elif evalfn == "Penicillin":

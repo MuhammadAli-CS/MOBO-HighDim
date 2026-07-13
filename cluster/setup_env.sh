@@ -61,4 +61,22 @@ pip install "gpytorch==1.11" "botorch==0.9.5" scipy matplotlib jupyter anthropic
 cd "$(dirname "$0")/.."
 pip install -e .
 
+# OPTIONAL: LassoBench, needed only for the evalfn="LassoBenchMO"
+# experiments (lasso_*_mo). Installed from source (not on PyPI); its deps
+# (celer, sparse-ho) compile C extensions, which is why it's opt-in rather
+# than a hard requirement of this repo. submit_real_benchmarks.sh checks
+# for it and refuses to submit LassoBench jobs if missing.
+if python -c "import LassoBench" 2>/dev/null; then
+  echo "LassoBench already installed."
+else
+  echo "Installing LassoBench (optional; needed for lasso_*_mo experiments)..."
+  if [ ! -d "$HOME/LassoBench" ]; then
+    git clone https://github.com/ksehic/LassoBench.git "$HOME/LassoBench" || true
+  fi
+  pip install -e "$HOME/LassoBench" || {
+    echo "WARNING: LassoBench install failed -- lasso_*_mo experiments will" >&2
+    echo "not run until it's installed manually. Everything else is unaffected." >&2
+  }
+fi
+
 echo "Done. Activate with: conda activate $ENV_PATH"

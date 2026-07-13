@@ -144,6 +144,36 @@ dimension alone (which plain DTLZ2 can't distinguish, since its own `k`
 grows with nominal `d`). `cluster/submit_sparse_dtlz2.sh` runs two sweeps:
 nominal `d` at fixed effective dim, and effective dim at fixed nominal `d`.
 
+## 4e. New benchmark battery: real problems + mechanism-probing synthetics
+
+Three new submission scripts (all coded and locally smoke-tested; see the
+problem files' docstrings in `morbo/problems/` for full rationale):
+
+```
+bash cluster/submit_real_benchmarks.sh              # stage 1: LassoBench synt_medium (30 seeds!) + SparseRover (240 jobs)
+bash cluster/submit_real_benchmarks.sh dna          # + LassoBench DNA (180 jobs)
+bash cluster/submit_real_benchmarks.sh synt_high    # + LassoBench synt_high (180 LONG 5000-eval jobs)
+bash cluster/submit_new_synthetic.sh                # RotatedSparseDTLZ2 + TimeVaryingSparseDTLZ2 (70 jobs)
+bash cluster/submit_dtlz_variants.sh                # DTLZ1/3/5/7 landscape variants @ d=100 (80 jobs)
+```
+
+**LassoBench must be installed in morbo-env first** (the submit script
+checks and refuses otherwise). Either re-run `bash cluster/setup_env.sh`
+(now installs it automatically at the end) or manually:
+
+```
+conda activate $HOME/morbo-env
+git clone https://github.com/ksehic/LassoBench.git ~/LassoBench
+pip install -e ~/LassoBench
+```
+
+The LassoBench experiments use **30 seeds** deliberately -- that matches
+the LassoBench paper's own "30 repetitions per method" protocol (and its
+budgets: 1000 evals for synt_medium/DNA, 5000 for synt_high), so our
+best-validation-loss curves are directly comparable against their
+published TuRBO/CMA-ES/Sparse-HO numbers, not just internally against our
+own baseline. Mind the queue: stage 1 alone is 240 jobs.
+
 ## 5. LLM-dependent parts (Parts 2 and 3)
 
 ```

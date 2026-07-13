@@ -440,6 +440,62 @@ HV-per-second method of all at d=100 (18.6 HV/min vs ard_pca's 15.1); and
 `sobol` is of course ~free (0.1s) but earns almost no HV at d≥100 —
 "efficiency" without effectiveness.
 
+## 10. New benchmark battery — QUEUED, not yet run
+
+Coded, locally smoke-tested, and wired up (2026-07-12, overnight batch);
+submit scripts in `cluster/` (see `cluster/README.md` §4e for exact
+commands and the LassoBench install prerequisite). Ordered real-first per
+plan:
+
+**Real problems:**
+- **LassoBench-MO** (`lasso_synt_medium_mo` d=100/effective-dim 5,
+  `lasso_dna_mo` d=180/eff 43, `lasso_synt_high_mo` d=300/eff 15;
+  `morbo/problems/lasso_bench_mo.py`) — bi-objective LassoBench:
+  objective 1 is *exactly* their own `evaluate()` validation loss (so our
+  best-loss-so-far curves are directly comparable to the LassoBench
+  paper's published TuRBO/CMA-ES/Sparse-HO numbers), objective 2 is the
+  fitted Lasso solution's active-coefficient fraction (accuracy vs. model
+  sparsity — a real tradeoff their machinery already computes).
+  **Protocol matches their paper: 1000 evals (synt_medium/DNA), 5000
+  (synt_high), 30 seeds.** This is the real-problem validation of §7's
+  effective-dimension finding — LassoBench's synthetic benchmarks have
+  *known, documented* effective dimensionality.
+- **SparseRover** (`sparse_rover_d{120,180}`,
+  `morbo/problems/sparse_rover.py`) — the real Rover trajectory objective
+  embedded in 2×/3× nominal dims (extra dims are literal no-ops). The
+  effective-dimension mechanism predicts shape adaptation should now
+  *help* on Rover (it didn't at nominal=effective=60, §2) because the
+  isotropic box wastes volume on the dummy half. Rover's own protocol
+  (2000 evals), 5 seeds.
+- **Deferred: MOPTA08 / Human-Powered Aircraft / PMO** — MOPTA08 needs a
+  proprietary Fortran binary wrangled onto the cluster; HPA/PMO need
+  nontrivial porting. Listed in `LITERATURE_REVIEW.md`'s follow-up section
+  as next candidates after LassoBench validates (or fails to validate)
+  the story.
+
+**New synthetics (mechanism probes):**
+- **RotatedSparseDTLZ2** (`rotated_sparse_dtlz2_d100_keff{5,50}`,
+  `morbo/problems/rotated_sparse_dtlz2.py`) — closes §7's axis-alignment
+  gap: SparseDTLZ2's informative dims are axis-aligned (the one geometry
+  `ard_box` could in principle exploit); a fixed random rotation makes the
+  effective subspace non-axis-aligned. Rotation-based shapes should be
+  ~invariant; `ard_box` should get strictly worse; isotropic unaffected.
+  The cleanest possible test that *rotation specifically* does the work.
+  400 evals matching §7, 5 seeds, `ard_box` deliberately included.
+- **TimeVaryingSparseDTLZ2** (`tv_sparse_dtlz2_d100_keff5`,
+  `morbo/problems/time_varying_sparse_dtlz2.py`) — informative dims switch
+  at 50% budget; probes re-adaptation. `cma_ellipsoid`'s persistent
+  covariance (its strength at d=200) should *hurt* here; memoryless
+  `pca_ellipsoid` should recover fast. **Metric caveat:** analyze
+  post-switch HV recovery, not the final mixed-history HV (pre-switch
+  evaluations were scored under the old mask — see the problem file's
+  docstring). 600 evals, 5 seeds.
+- **DTLZ landscape variants** (`tr_shape_dtlz{1,3,5,7}_100d`) — same
+  effective-dimension structure as DTLZ2 at d=100, different landscape
+  characters (multimodal / degenerate / disconnected fronts). Fresh dirs
+  with *correct* evalfns (the legacy `dtlz5_m2`/`dtlz7_m2` dirs have the
+  known evalfn swap bug). 600 evals, 5 seeds, 4 core methods.
+
 Plots: `comparison_seed0.png` (objective space + HV vs. evals) and
 `efficiency_seed0.png` (optimizer time vs. HV) in each experiment
 directory. Aggregate any multi-seed experiment with

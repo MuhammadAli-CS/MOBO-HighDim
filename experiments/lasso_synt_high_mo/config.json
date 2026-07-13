@@ -1,0 +1,15 @@
+{
+    "dim": 300,
+    "evalfn": "LassoBenchMO",
+    "lasso_bench_name": "synt_high",
+    "max_evals": 5000,
+    "n_initial_points": 300,
+    "batch_size": 50,
+    "n_trust_regions": 3,
+    "min_tr_size": 200,
+    "max_reference_point": [
+        -100.0,
+        -1.0
+    ],
+    "verbose": true
+}

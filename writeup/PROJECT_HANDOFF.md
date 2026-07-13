@@ -237,6 +237,21 @@ git commit && git push                          # or scp results back
 
 ## Open threads / natural next steps
 
+**QUEUED (coded + smoke-tested, awaiting cluster run — 2026-07-12 overnight
+batch):** a full new benchmark battery. Real problems: **LassoBench-MO**
+(bi-objective LassoBench at the paper's own 30-seed/1000-5000-eval
+protocol, `morbo/problems/lasso_bench_mo.py` — the real-problem test of
+the effective-dimension finding; needs LassoBench installed in morbo-env,
+`setup_env.sh` now does it) and **SparseRover** (real Rover + dummy dims).
+New synthetics: **RotatedSparseDTLZ2** (non-axis-aligned effective
+subspace — the discriminating test between "finds the subspace" and
+"finds the axes"), **TimeVaryingSparseDTLZ2** (mid-run informative-dim
+switch — probes cma_ellipsoid's memory as a liability), and
+**DTLZ1/3/5/7 landscape variants**. Submit scripts:
+`cluster/submit_real_benchmarks.sh` (staged, 240-600 jobs),
+`cluster/submit_new_synthetic.sh` (70), `cluster/submit_dtlz_variants.sh`
+(80). Full details: `RESULTS.md` §10, `cluster/README.md` §4e.
+
 Everything originally proposed in `FURTHER_DIRECTIONS.md` (multi-seed
 sweep, composite×shape, CMA/linear-kernel/dim-prior, `mab_shape`,
 `SparseDTLZ2`, and the `sobol` random-search baseline) is now done and
