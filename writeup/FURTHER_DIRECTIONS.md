@@ -230,10 +230,18 @@ Why this matters for us, honestly:
 
 Every item originally suggested in this document — the multi-seed sweep,
 composite×shape 2×2, `cma_ellipsoid`/linear-kernel/dim-prior fix,
-`mab_shape`, and the effective-dimension study (`SparseDTLZ2`) — is coded,
-smoke-tested, run on the cluster, and written up in
-`experiments/tr_shape_dtlz2_100d/RESULTS.md` (§1–7) and
-`writeup/methods.tex` (`sec:tr-shape`).
+`mab_shape` (including its extended-budget resolution), and the
+effective-dimension study (`SparseDTLZ2`) — is coded, smoke-tested, run on
+the cluster, and written up in `experiments/tr_shape_dtlz2_100d/RESULTS.md`
+(§1–7) and `writeup/methods.tex` (`sec:tr-shape`).
+
+**One more baseline, coded and smoke-tested, QUEUED not yet run:**
+`label="sobol"` — pure random search (a single continuous Sobol sequence
+over the full space, no trust regions or GP fitting at all). Every result
+so far compares shape-adaptation variants *against MORBO*, which already
+assumes TuRBO's local-modeling machinery is worth having; this answers the
+more basic question underneath that assumption. `cluster/submit_sobol_baseline.sh`
+adds it to the existing 5-seed DTLZ2 dimension sweep and Rover experiments.
 
 **Further ideas not yet coded** (ranked):
 - Learned/objective-aware rotation (see Speculative section below) — the

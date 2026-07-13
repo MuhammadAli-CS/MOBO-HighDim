@@ -173,6 +173,29 @@ def check_sparse_dtlz2() -> None:
     print("OK: SparseDTLZ2 BO loop with k_eff=2 ran to completion.")
 
 
+def check_sobol() -> None:
+    print("=== sobol (pure random-search baseline) ===")
+    outputs = []
+    run_one_replication(
+        seed=0,
+        label="sobol",
+        max_evals=MAX_EVALS,
+        evalfn="DTLZ2",
+        dim=DIM,
+        batch_size=BATCH_SIZE,
+        n_initial_points=N_INITIAL_POINTS,
+        max_reference_point=[-6, -6],
+        verbose=False,
+        save_callback=lambda output: outputs.append(output),
+    )
+    out = outputs[-1]
+    assert out["n_evals"][-1] == MAX_EVALS, "sobol: did not reach max_evals"
+    assert out["X_history"].shape == (MAX_EVALS, DIM), "sobol: wrong X_history shape"
+    assert len(out["true_hv"]) == len(out["n_evals"]), "sobol: true_hv/n_evals length mismatch"
+    assert out["true_hv"][-1] > 0, "sobol: final hypervolume is zero -- sampling or HV bug"
+    print("OK: sobol baseline ran to completion with a sane hypervolume trace.")
+
+
 if __name__ == "__main__":
     torch.manual_seed(0)
     check_isotropic()
@@ -184,4 +207,5 @@ if __name__ == "__main__":
     check_dim_prior()
     check_mab_shape()
     check_sparse_dtlz2()
+    check_sobol()
     print("\nAll smoke tests passed.")

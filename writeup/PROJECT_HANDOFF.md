@@ -119,6 +119,14 @@ restatement of results.
   **corrected an earlier "gap between nominal and effective dimension"
   framing** — the governing variable is effective dimension relative to
   budget, full stop, not the gap and not nominal dimension.
+- `label="sobol"` (`morbo/run_one_replication.py`, a self-contained branch
+  near the top of the function, before `TurboHParams`/`TRBOState` are ever
+  constructed) — pure random search: one continuous `SobolEngine` sequence
+  over the full space, no trust regions or GP fitting. Answers whether
+  TuRBO/MORBO's local-modeling machinery is earning its keep at all, a more
+  basic question than any `tr_shape` comparison (which all implicitly
+  assume it is). Smoke-tested; **QUEUED, not yet run** —
+  `cluster/submit_sobol_baseline.sh`.
 - `morbo/state.py`, `morbo/run_one_replication.py` — thread the new kwargs
   through to `TurboHParams` construction; `run_one_replication.py`'s
   `supported_labels` list is the authoritative list of runnable experiment

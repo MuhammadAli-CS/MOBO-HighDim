@@ -196,6 +196,11 @@ LABEL_OVERRIDES = {
     # its own local landscape (AS-SMEA's own answer to this, Wang et al.
     # 2026 Sec. 3.3's LS-IMA/MASS). See TurboHParams.tr_shape docstring.
     "mab_shape": {"tr_shape": "mab_shape"},
+    # Pure random-search baseline: a single Sobol low-discrepancy sequence
+    # over the whole search space, no trust regions or GP fitting at all.
+    # No kwargs needed -- evalfn/dim/max_reference_point/etc. all come from
+    # the shared config.json like every other label.
+    "sobol": {},
 }
 
 if __name__ == "__main__":

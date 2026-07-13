@@ -345,6 +345,20 @@ informative axes) for early lengthscale estimates to be individually noisy
 within a tighter, 400-eval budget — worth a multi-seed follow-up before
 treating it as more than a single-seed observation.
 
+## 8. `sobol`: pure random-search baseline — QUEUED, not yet run
+
+A new `label="sobol"` (`morbo/run_one_replication.py`) bypasses trust
+regions and GP fitting entirely — a single continuous Sobol low-discrepancy
+sequence over the whole `[0,1]^dim` space, evaluated `batch_size` points at
+a time up to `max_evals`, with hypervolume tracked the same way as every
+other method. Answers a more basic question than any `tr_shape` variant:
+is TuRBO/MORBO's local-modeling machinery (trust regions + GP surrogates)
+earning its keep *at all* on these problems, independent of shape? Smoke
+tested; not yet run for real numbers. Submit with
+`cluster/submit_sobol_baseline.sh` (adds `sobol` to the existing
+`tr_shape_dtlz2_{50,100,150,200}d` and `tr_shape_rover` experiment dirs,
+same 5 seeds already used there).
+
 ## Timing note
 
 All cluster runs on one B200 GPU each. Shape variants' gen_time at d=100

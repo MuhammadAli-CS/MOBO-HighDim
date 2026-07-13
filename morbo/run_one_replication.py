@@ -29,7 +29,9 @@ from botorch.test_functions.multi_objective import (
 from botorch.utils.multi_objective.box_decompositions.dominated import (
     DominatedPartitioning,
 )
+from botorch.utils.multi_objective.pareto import is_non_dominated
 from botorch.utils.sampling import draw_sobol_samples
+from torch.quasirandom import SobolEngine
 from morbo.gen import (
     TS_select_batch_MORBO,
 )
@@ -75,6 +77,7 @@ supported_labels = [
     "ard_box_dimprior",
     "ard_pca_dimprior",
     "mab_shape",
+    "sobol",
 ]
 
 BASE_SEED = 12346
@@ -322,6 +325,86 @@ def run_one_replication(
         observation_noise_std=observation_noise_std,
         observation_noise_bias=observation_noise_bias,
     )
+
+    if label == "sobol":
+        # Pure random-search baseline: no trust regions, no GP, no model
+        # fitting at all -- just a single continuous Sobol low-discrepancy
+        # sequence over the full [0, 1]^dim search space, evaluated
+        # batch_size points at a time up to max_evals. Exists to answer
+        # "is TuRBO/MORBO's local-modeling machinery earning its keep at
+        # all", independent of any tr_shape question. Deliberately
+        # self-contained (bypasses TRBOState/TurboHParams entirely) rather
+        # than threaded through the TS_select_batch_MORBO loop, since that
+        # loop has no code path that skips GP fitting.
+        if constraints is not None:
+            raise ValueError(
+                "label='sobol' does not support constrained evalfns yet "
+                f"(got evalfn={evalfn!r} with constraints set)."
+            )
+        sobol_engine = SobolEngine(dimension=dim, scramble=True, seed=seed)
+        lb, ub = bounds[0], bounds[1]
+        true_ref_point = torch.tensor(max_reference_point, dtype=dtype, device=device)
+
+        n_evals = []
+        true_hv = []
+        pareto_X = []
+        pareto_Y = []
+        gen_times = []
+        X_history = torch.empty(0, dim, **tkwargs)
+        Y_raw_history = torch.empty(0, num_outputs, **tkwargs)
+        partitioning = None
+        n_evals_so_far = 0
+        while n_evals_so_far < max_evals:
+            start_gen = time.time()
+            n = min(batch_size, max_evals - n_evals_so_far)
+            X_batch = lb + (ub - lb) * sobol_engine.draw(n).to(**tkwargs)
+            Y_batch = f(X_batch)
+            gen_times.append(time.time() - start_gen)
+
+            X_history = torch.cat([X_history, X_batch], dim=0)
+            Y_raw_history = torch.cat([Y_raw_history, Y_batch], dim=0)
+            n_evals_so_far += n
+            n_evals.append(n_evals_so_far)
+
+            obj_history = (
+                composite_reduction(Y_raw_history)
+                if composite_reduction is not None
+                else Y_raw_history
+            )
+            better_than_ref = (obj_history > true_ref_point).all(dim=-1)
+            if better_than_ref.any():
+                Y_better = obj_history[better_than_ref]
+                pareto_mask = is_non_dominated(Y_better)
+                partitioning = DominatedPartitioning(
+                    ref_point=true_ref_point, Y=Y_better[pareto_mask]
+                )
+                hv = partitioning.compute_hypervolume().item()
+                pareto_X.append(X_history[better_than_ref][pareto_mask].tolist())
+                pareto_Y.append(Y_better[pareto_mask].tolist())
+            else:
+                hv = 0.0
+                pareto_X.append([])
+                pareto_Y.append([])
+            true_hv.append(hv)
+            if verbose:
+                print(f"{n_evals_so_far}) Current hypervolume: {hv:.3f}")
+
+            output = {
+                "n_evals": n_evals,
+                "X_history": X_history.cpu(),
+                "metric_history": Y_raw_history.cpu(),
+                "objective_history": obj_history.cpu(),
+                "true_pareto_X": pareto_X,
+                "true_pareto_Y": pareto_Y,
+                "true_hv": true_hv,
+                "fit_times": [],
+                "gen_times": gen_times,
+            }
+            if save_during_opt is not None:
+                save_callback(output)
+
+        save_callback(output)
+        return
 
     # Automatically set the failure streak if it isn't specified
     failure_streak = max(dim // 3, 10) if failure_streak is None else failure_streak
