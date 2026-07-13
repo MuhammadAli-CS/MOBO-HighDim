@@ -230,18 +230,15 @@ Why this matters for us, honestly:
 
 Every item originally suggested in this document — the multi-seed sweep,
 composite×shape 2×2, `cma_ellipsoid`/linear-kernel/dim-prior fix,
-`mab_shape` (including its extended-budget resolution), and the
-effective-dimension study (`SparseDTLZ2`) — is coded, smoke-tested, run on
-the cluster, and written up in `experiments/tr_shape_dtlz2_100d/RESULTS.md`
-(§1–7) and `writeup/methods.tex` (`sec:tr-shape`).
-
-**One more baseline, coded and smoke-tested, QUEUED not yet run:**
-`label="sobol"` — pure random search (a single continuous Sobol sequence
-over the full space, no trust regions or GP fitting at all). Every result
-so far compares shape-adaptation variants *against MORBO*, which already
-assumes TuRBO's local-modeling machinery is worth having; this answers the
-more basic question underneath that assumption. `cluster/submit_sobol_baseline.sh`
-adds it to the existing 5-seed DTLZ2 dimension sweep and Rover experiments.
+`mab_shape` (including its extended-budget resolution), the
+effective-dimension study (`SparseDTLZ2`), and the `sobol` pure
+random-search baseline — is coded, smoke-tested, run on the cluster, and
+written up in `experiments/tr_shape_dtlz2_100d/RESULTS.md` (§1–8) and
+`writeup/methods.tex` (`sec:tr-shape`). `sobol`'s result is decisive:
+MORBO beats random search by +38.5% (d=50) up to +3800% (d=100, where
+sobol barely clears the reference point) and +74.6% on Rover — the whole
+local-modeling premise this line of work builds on is solidly validated,
+and shape adaptation's own wins sit on top of that larger base advantage.
 
 **Further ideas not yet coded** (ranked):
 - Learned/objective-aware rotation (see Speculative section below) — the

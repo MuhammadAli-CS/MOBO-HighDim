@@ -1330,6 +1330,49 @@ axes) for early lengthscale estimates to be individually noisy within a
 tighter, 400-eval budget -- a single-seed observation that warrants a
 multi-seed follow-up before being treated as more than suggestive.
 
+\subsection{\texttt{sobol}: is any of this machinery earning its keep?}
+
+Every result above compares shape-adaptation variants against
+\texttt{morbo} itself, which already assumes TuRBO's local trust-region
+and GP-surrogate machinery is worth having in the first place.
+\texttt{label="sobol"} tests that assumption directly: a single continuous
+Sobol low-discrepancy sequence over the whole search space, no trust
+regions or GP fitting at all, evaluated in matched batches.
+
+\begin{table}[h]
+\centering
+\caption{\texttt{sobol} vs.\ \texttt{morbo}, 5 seeds where available (matching
+Table~\ref{tab:tr-shape-sweep}/\S\ref{sec:tr-shape}'s Rover result).}
+\label{tab:tr-shape-sobol}
+\begin{tabular}{lrrl}
+\toprule
+$d$ / problem & \texttt{morbo} & \texttt{sobol} & vs.\ sobol \\
+\midrule
+50  & $32.93\pm0.35$ & $23.78\pm0.34$ & $+38.5\%$ \\
+100 & $19.90\pm0.91$ & $0.51\pm0.25$ & $+3800\%$ (sobol barely clears the ref.\ point) \\
+150 & $0.08\pm0.17$ & $0.00\pm0.00$ & both near zero at this budget \\
+200 & $0.00$ & $0.00\pm0.00$ & both zero at this budget \\
+Rover & $2.20\pm0.14$ & $1.26\pm0.09$ & $+74.6\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+MORBO's local-modeling machinery earns its keep decisively, with the
+margin growing sharply with dimension until both approaches run out of
+budget together at $d{\ge}150$ (not a \texttt{sobol}-specific failure --
+\emph{nothing} breaks through reliably there at this budget, per
+\S\ref{sec:tr-shape}). At $d{=}100$ the gap is enormous: random search
+barely clears the reference point at all ($0.51$) against \texttt{morbo}'s
+$19.90$ and the best shaped variant's $33{+}$ -- roughly a $65\times$ gap
+over \texttt{sobol}. On Rover, where shape adaptation itself showed no
+robust effect (\S\ref{sec:tr-shape}), the underlying trust-region/GP
+machinery still clearly beats random search ($+74.6\%$), confirming that
+Rover's "no shape helps" result is specifically about \emph{geometry}, not
+a sign that local modeling is worthless on that problem too. This is the
+right context for every other result in this section: shape adaptation's
+$+64$--$72\%$ wins sit on top of an already-large base advantage MORBO has
+over random search, not the whole story on their own.
+
 \section{Discussion}
 
 The three extensions from Sections~\ref{sec:composite}--\ref{sec:botier}

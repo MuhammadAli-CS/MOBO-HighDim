@@ -125,8 +125,10 @@ restatement of results.
   over the full space, no trust regions or GP fitting. Answers whether
   TuRBO/MORBO's local-modeling machinery is earning its keep at all, a more
   basic question than any `tr_shape` comparison (which all implicitly
-  assume it is). Smoke-tested; **QUEUED, not yet run** —
-  `cluster/submit_sobol_baseline.sh`.
+  assume it is). **Results are in** (`RESULTS.md` §8): decisive — MORBO
+  beats sobol by +38.5% (d=50) up to +3800% (d=100, sobol barely clears the
+  reference point) and +74.6% on Rover. Shape adaptation's own wins sit on
+  top of this larger base advantage, not instead of it.
 - `morbo/state.py`, `morbo/run_one_replication.py` — thread the new kwargs
   through to `TurboHParams` construction; `run_one_replication.py`'s
   `supported_labels` list is the authoritative list of runnable experiment
@@ -237,9 +239,8 @@ git commit && git push                          # or scp results back
 
 Everything originally proposed in `FURTHER_DIRECTIONS.md` (multi-seed
 sweep, composite×shape, CMA/linear-kernel/dim-prior, `mab_shape`,
-`SparseDTLZ2`) is now done and written up. A `label="sobol"` pure
-random-search baseline is coded and smoke-tested but not yet run on the
-cluster (`cluster/submit_sobol_baseline.sh`). Top literature-informed
+`SparseDTLZ2`, and the `sobol` random-search baseline) is now done and
+written up. Top literature-informed
 priorities (full list in `FURTHER_DIRECTIONS.md`'s last section):
 
 - **Validate the effective-dimension finding on a real problem** —

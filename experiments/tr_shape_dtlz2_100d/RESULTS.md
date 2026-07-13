@@ -345,19 +345,40 @@ informative axes) for early lengthscale estimates to be individually noisy
 within a tighter, 400-eval budget — worth a multi-seed follow-up before
 treating it as more than a single-seed observation.
 
-## 8. `sobol`: pure random-search baseline — QUEUED, not yet run
+## 8. `sobol`: pure random-search baseline — the whole premise, validated
 
-A new `label="sobol"` (`morbo/run_one_replication.py`) bypasses trust
-regions and GP fitting entirely — a single continuous Sobol low-discrepancy
-sequence over the whole `[0,1]^dim` space, evaluated `batch_size` points at
-a time up to `max_evals`, with hypervolume tracked the same way as every
-other method. Answers a more basic question than any `tr_shape` variant:
-is TuRBO/MORBO's local-modeling machinery (trust regions + GP surrogates)
-earning its keep *at all* on these problems, independent of shape? Smoke
-tested; not yet run for real numbers. Submit with
-`cluster/submit_sobol_baseline.sh` (adds `sobol` to the existing
-`tr_shape_dtlz2_{50,100,150,200}d` and `tr_shape_rover` experiment dirs,
-same 5 seeds already used there).
+`label="sobol"` (`morbo/run_one_replication.py`) bypasses trust regions and
+GP fitting entirely — a single continuous Sobol low-discrepancy sequence
+over the whole `[0,1]^dim` space, evaluated `batch_size` points at a time.
+Answers a more basic question than any `tr_shape` variant: is TuRBO/MORBO's
+local-modeling machinery (trust regions + GP surrogates) earning its keep
+*at all* on these problems, independent of shape? 5 seeds, same experiments
+as the core sweep:
+
+| d | morbo | sobol | vs. sobol |
+|---|---|---|---|
+| 50  | 32.93±0.35 | 23.78±0.34 | **+38.5%** |
+| 100 | 19.90±0.91 | 0.51±0.25 | **+3800%** (sobol barely clears the reference point at all) |
+| 150 | 0.08±0.17 | 0.00±0.00 | both near/at zero at this budget |
+| 200 | 0.00 | 0.00±0.00 | both zero at this budget |
+| Rover | 2.20±0.14 | 1.26±0.09 | **+74.6%** |
+
+**MORBO's local-modeling machinery earns its keep decisively, and the
+margin grows sharply with dimension up to the point both approaches run
+out of budget.** At d=50 the gap is already large (+38.5%); at d=100 it's
+enormous — pure random search barely breaks through the reference point at
+all (0.51 vs. MORBO's 19.90, vs. the best shaped variant's 33+, a
+~65x gap over sobol). At d=150/200 the picture changes only because the
+budget is too tight for *any* method to break through reliably at that
+scale (§1, §3) — sobol doesn't uniquely fail there, everything does. On
+Rover, where shape adaptation itself showed no robust effect (§2), MORBO's
+underlying trust-region/GP machinery still clearly beats random search by
++74.6% — confirming that Rover's "no shape helps" result is about
+*geometry* specifically, not a sign that local modeling is worthless there
+too. This is the right context for reading every other result in this
+document: shape adaptation's +64-72% wins are on top of an already-large
+base advantage MORBO has over random search, not the whole story by
+themselves.
 
 ## Timing note
 
