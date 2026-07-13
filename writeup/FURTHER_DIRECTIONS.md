@@ -23,7 +23,7 @@ project's contribution would be.
 | Linear-kernel baseline (§2) | `linear_gp`, `linear_gp_pca`, `linear_gp_cma` | **done** | `linear_gp` alone underperforms (-20.5% @ d=100); `linear_gp_pca` matches best Matérn+PCA @ d=100/150, but fails @ d=200 like other PCA methods |
 | Dim-scaled lengthscale prior as `ard_box` fix (§3, new) | `ard_box_dimprior`, `ard_pca_dimprior` | **done — negative result** | Does not fix `ard_box` (11.07, worse than plain ard_box's 13.09); `ard_pca_dimprior` ≈ same as `ard_pca_ellipsoid`, no real change |
 | Multi-seed robustness | (all core labels, seeds 0–4) | **done** | d=50/100 unanimous 5/5 or 0/5 win-rates; Rover's earlier single-seed "no variant wins" conclusion was noise — corrected to near-50/50 win-rates, contrasting sharply with DTLZ2's unanimity |
-| MAB-guided shape selection (§3) | `mab_shape` | **done — two-sided result** | Best of all 8 methods at d=100 (+69.2%), but ties the *failing* baseline at d=150/200 — exploration cost exceeds the narrow late-breakthrough budget there |
+| MAB-guided shape selection (§3) | `mab_shape` | **done** | Best of all 8 methods at d=100/600ev (+69.2%); ties the failing baseline at d=150/200/600ev but **fully recovers at 2000 evals, becoming the single best method of every shape tested at d=200** (33.61 vs. ard_pca_ellipsoid's 33.15) — confirmed a pure budget artifact, not a design flaw |
 | Effective- vs. nominal-dimension test (§3) | `SparseDTLZ2` (new `evalfn`) | **done** | Nominal `d` alone (60→200, effective dim pinned at 6) produces a flat null; effective dim alone (fixed d=100, k_eff 2→50) produces a clean monotonic dose-response 0.1%→10% — confirms effective dimension, not nominal dimension or "the gap," is the governing variable |
 
 All of the above are written up in full in `experiments/tr_shape_dtlz2_100d/RESULTS.md`
@@ -165,21 +165,27 @@ Why this matters for us, honestly:
   and reuses all the rotated-box plumbing we already built.
 
 **High value, medium effort — both DONE, results in:**
-- **MAB-guided variant selection (AS-SMEA's LS-IMA/MASS, Sec. 3.3) — DONE,
-  two-sided result.** `tr_shape="mab_shape"` (`morbo/trust_region.py`): a
-  per-trust-region epsilon-greedy bandit over `{isotropic, ard_box,
-  pca_ellipsoid, ard_pca_ellipsoid, cma_ellipsoid}`, rewarded 1.0 whenever
-  the TR's own success-streak counter (`n_successes`) was just incremented,
-  folded into a per-arm EMA. **Result:** best of all 8 methods at d=100
-  (+69.2% vs. baseline, beating every fixed shape it chooses among), but
-  ties the *failing* isotropic baseline at d=150/200 — the bandit's own
-  exploration cost eats the narrow late-breakthrough margin the fixed
-  shapes needed there. Did **not** recover Rover's lost ground either
-  (landed in the same near-coin-flip band the fixed shapes occupy, single
-  seed). See `experiments/tr_shape_dtlz2_100d/RESULTS.md` §6 /
-  `writeup/methods.tex` for full numbers and the exploration-cost
-  explanation. Natural follow-up: anneal `mab_epsilon` down as budget is
-  consumed, so exploration cost front-loads rather than taxing the whole run.
+- **MAB-guided variant selection (AS-SMEA's LS-IMA/MASS, Sec. 3.3) — DONE.**
+  `tr_shape="mab_shape"` (`morbo/trust_region.py`): a per-trust-region
+  epsilon-greedy bandit over `{isotropic, ard_box, pca_ellipsoid,
+  ard_pca_ellipsoid, cma_ellipsoid}`, rewarded 1.0 whenever the TR's own
+  success-streak counter (`n_successes`) was just incremented, folded into
+  a per-arm EMA. **Result:** best of all 8 methods at d=100/600ev (+69.2%
+  vs. baseline, beating every fixed shape it chooses among); at
+  d=150/200/600ev it initially tied the failing isotropic baseline
+  (exploration cost eating the narrow late-breakthrough margin), but a
+  2000-eval extended-budget rerun confirmed this was a pure budget
+  artifact, not a design flaw: `mab_shape` fully recovers and becomes the
+  single **best** method of every shape tested at d=200/2000ev (33.61 vs.
+  `ard_pca_ellipsoid`'s 33.15), and a strong second at d=150/2000ev (32.32,
+  behind `ard_pca_ellipsoid`'s 34.26). Did **not** recover Rover's lost
+  ground (landed in the same near-coin-flip band the fixed shapes occupy,
+  single seed, standard budget only). See
+  `experiments/tr_shape_dtlz2_100d/RESULTS.md` §6 / `writeup/methods.tex`
+  for full numbers. An annealed `mab_epsilon` remains worth trying as a
+  budget-*efficiency* improvement (reach the same endpoint with less
+  wasted exploration, possibly narrowing the tight-budget gap too), but is
+  no longer needed to explain the original failure.
 - **The linear-kernel baseline + local composition** (Sec. 2) — done, see
   results in `experiments/tr_shape_dtlz2_100d/RESULTS.md` §4.
 

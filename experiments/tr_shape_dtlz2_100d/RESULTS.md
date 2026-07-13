@@ -222,9 +222,9 @@ reward = whether the TR's success streak just incremented; see
 
 | d | morbo | mab_shape | vs. baseline | vs. best fixed shape at this d |
 |---|---|---|---|---|
-| 100 | 20.02 | **33.89** | **+69.2%** | best of all 8 methods tested (beats `linear_gp_pca`'s 33.34, `ard_pca_dimprior`'s 32.83) |
-| 150 | 0.00 | 0.00 | tied with baseline | `pca_ellipsoid`/`cma_ellipsoid`/`linear_gp_pca` all break through (27-29); mab_shape does not |
-| 200 | 0.00 | 0.00 | tied with baseline | only `cma_ellipsoid` (21.72) breaks through; mab_shape does not |
+| 100 (600 evals) | 20.02 | **33.89** | **+69.2%** | best of all 8 methods tested (beats `linear_gp_pca`'s 33.34, `ard_pca_dimprior`'s 32.83) |
+| 150 (600 evals) | 0.00 | 0.00 | tied with baseline | `pca_ellipsoid`/`cma_ellipsoid`/`linear_gp_pca` all break through (27-29); mab_shape does not — **but see below, this recovers at 2000 evals** |
+| 200 (600 evals) | 0.00 | 0.00 | tied with baseline | only `cma_ellipsoid` (21.72) breaks through; mab_shape does not — **but see below, this recovers at 2000 evals** |
 | Rover (single seed, seed 0) | 2.36 (this seed) | 2.19 | −6.9% (this seed); vs. the 5-seed mean of 2.20, −0.5% | in range of the near-coin-flip fixed-shape variants (§2) |
 
 **This is a genuinely two-sided result, not a clean win.** At d=100,
@@ -248,26 +248,34 @@ in the same noise band the fixed shapes occupy (§2) rather than resolving
 it — consistent with Rover already being a near-coin-flip regime for every
 shape mechanism tried here, adaptive or not.
 
-**Bottom line:** `mab_shape` is not a strict improvement over the best
-fixed shape (that would require knowing which fixed shape is best in
-advance, defeating the purpose) but it is a genuine hedge that pays off
-when there's enough budget left after the exploration cost — and a
-liability exactly when there isn't. A budget-aware or annealed `mab_epsilon`
-(decaying exploration as the eval budget is consumed) is an obvious
-follow-up implied directly by this failure mode.
+### Resolved: the d=150/200 failure was a pure budget artifact
 
-**QUEUED, not yet run:** is the d=150/200 failure a budget artifact (like
-`morbo`/`ard_box`'s own d=200/600-eval `0.00`s turned out to be — §3's
-2000-eval rerun showed those recover) or a real design flaw (constant
-15% exploration tax that never amortizes, however long the run)?
-`cluster/submit_mab_shape_extended_budget.sh` reruns `mab_shape` at 2000
-evals at both d=150 (`tr_shape_dtlz2_150d_2000ev`, new dir, full 4-method
-comparison) and d=200 (added to the existing
-`tr_shape_dtlz2_200d_2000ev`). If `mab_shape` recovers and even wins here,
-the d=150/200 failure was budget-limited, same as the baseline's own
-d=200/600ev zero. If it still lags the best fixed shape substantially even
-at 2000 evals, that's evidence the fixed `mab_epsilon` really is a
-standing tax, strengthening the case for annealing it.
+Rerunning `mab_shape` at the same 2000-eval budget used for §3's extended
+d=200 follow-up (`cluster/submit_mab_shape_extended_budget.sh`) settles the
+question directly — the precedent from §3 held:
+
+| d | morbo | pca_ellipsoid | ard_pca_ellipsoid | `mab_shape` |
+|---|---|---|---|---|
+| 150 (2000 evals) | 25.95 | 29.23 (+12.6%) | **34.26 (+32.1%)** | 32.32 (+24.6%) |
+| 200 (2000 evals) | 19.32 | 28.79 (+49.0%) | 33.15 (+71.6%) | **33.61 (+73.9%)** |
+
+**`mab_shape` fully recovers given enough budget — and at d=200 it becomes
+the single best method of every fixed-and-adaptive shape tested anywhere
+in this study**, edging out `ard_pca_ellipsoid` (previously the best method
+at this scale). At d=150 it's a strong second place, comfortably ahead of
+plain `pca_ellipsoid` and the baseline, just behind `ard_pca_ellipsoid`.
+This confirms the d=150/200/600-eval failure was exactly the same kind of
+budget artifact as the isotropic baseline's own d=200/600-eval zero (§3) —
+not a standing design flaw. The bandit's exploration cost is real (it's why
+`mab_shape` needed the extra budget the pre-converged fixed shapes at
+d=100 didn't), but it amortizes rather than compounding indefinitely: once
+there's enough budget to pay the exploration tax *and* still exploit the
+learned arm, adaptivity's core promise — not needing to know the best fixed
+shape in advance — pays off outright. The annealed-`mab_epsilon` idea
+remains worth trying as a budget-efficiency improvement (it should let
+`mab_shape` reach the same endpoint with less wasted exploration, potentially
+recovering some of the tight-budget d=150/200/600-eval gap too), but is no
+longer needed to explain the earlier failure — that mystery is now closed.
 
 ## 7. `SparseDTLZ2`: effective dimension, not nominal dimension, governs the effect
 

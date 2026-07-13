@@ -1145,9 +1145,10 @@ moving average.
 
 \begin{table}[h]
 \centering
-\caption{\texttt{mab\_shape} vs.\ the best fixed shape at each $d$ (DTLZ2,
-single seed; Rover single seed, not directly comparable to the 5-seed
-means elsewhere in this section).}
+\caption{\texttt{mab\_shape} vs.\ the best fixed shape at each $d$, standard
+600-eval budget (DTLZ2, single seed; Rover single seed, not directly
+comparable to the 5-seed means elsewhere in this section). The $d{=}150$/$200$
+zeros are resolved below as a budget artifact, not a standing failure.}
 \label{tab:tr-shape-mab}
 \begin{tabular}{lrrl}
 \toprule
@@ -1175,15 +1176,48 @@ that include the two actively harmful ones) consumes exactly the margin
 the fixed-shape methods needed. The mechanism is a direct consequence of
 the narrow, late-arriving breakthrough window diagnosed in
 \S\ref{sec:tr-shape}: adaptivity's own learning cost becomes a net
-negative exactly where the reward signal is scarcest. A budget-aware or
-annealed exploration rate (decaying as the eval budget is consumed) is an
-immediate follow-up implied directly by this failure mode. Whether the
-$d{=}150$--$200$ failure is itself only a budget artifact -- as it was for
-the isotropic baseline's own $d{=}200$/600-eval zero, which
-Table~\ref{tab:tr-shape-200d-2000ev} showed recovers given 2000 evals -- or
-a standing tax that never amortizes is an open question, queued as a
-2000-eval rerun (\texttt{cluster/submit\_mab\_shape\_extended\_budget.sh})
-not yet completed at the time of writing.
+negative exactly where the reward signal is scarcest.
+
+\paragraph{Resolved: the $d{=}150$--$200$ failure was a pure budget
+artifact.} Rerunning \texttt{mab\_shape} at the same 2000-eval budget used
+for Table~\ref{tab:tr-shape-200d-2000ev}'s extended-$d{=}200$ follow-up
+settles the question directly:
+
+\begin{table}[h]
+\centering
+\caption{\texttt{mab\_shape} at extended budget (2000 evals), vs.\ the
+established fixed-shape methods at the same budget. Percentages relative
+to \texttt{morbo} at the same $d$.}
+\label{tab:tr-shape-mab-2000ev}
+\begin{tabular}{lrrrr}
+\toprule
+$d$ & \texttt{morbo} & \texttt{pca\_ellipsoid} & \texttt{ard\_pca\_ellipsoid} & \texttt{mab\_shape} \\
+\midrule
+150 & 25.95 & 29.23 ($+12.6\%$) & \textbf{34.26 ($+32.1\%$)} & 32.32 ($+24.6\%$) \\
+200 & 19.32 & 28.79 ($+49.0\%$) & 33.15 ($+71.6\%$) & \textbf{33.61 ($+73.9\%$)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\texttt{mab\_shape} fully recovers given enough budget -- and at $d{=}200$
+it becomes the single best method of every fixed-and-adaptive shape tested
+anywhere in this study, edging out \texttt{ard\_pca\_ellipsoid} (previously
+the strongest method at this scale). At $d{=}150$ it is a strong second
+place, comfortably ahead of plain \texttt{pca\_ellipsoid} and the baseline,
+just behind \texttt{ard\_pca\_ellipsoid}. This confirms the
+$d{=}150$--$200$/600-eval failure was the same kind of budget artifact as
+the isotropic baseline's own $d{=}200$/600-eval zero (Table~\ref{tab:tr-shape-200d-2000ev})
+-- not a standing design flaw. The bandit's exploration cost is real (it is
+why \texttt{mab\_shape} needed the extra budget the pre-converged fixed
+shapes at $d{=}100$ did not), but it amortizes rather than compounding
+indefinitely: once there is enough budget to pay the exploration tax
+\emph{and} still exploit the learned arm, adaptivity's core promise -- not
+needing to know the best fixed shape in advance -- pays off outright. A
+budget-aware or annealed exploration rate remains worth trying as an
+efficiency improvement (it should let \texttt{mab\_shape} reach the same
+endpoint with less wasted exploration, potentially narrowing the
+tight-budget $d{=}150$--$200$/600-eval gap too), but is no longer needed to
+explain the earlier failure.
 
 \subsection{\texttt{SparseDTLZ2}: effective dimension, not nominal dimension, governs the effect}
 \label{sec:sparse-dtlz2}

@@ -59,11 +59,14 @@ measuring effective dimension all along, since nominal `d` there is
 inseparable from it by construction.
 
 **A second follow-up, `mab_shape`** (a per-trust-region bandit that learns
-which fixed shape to use, rather than committing to one globally) gives a
-genuinely two-sided result: it is the single best method of all 8 tested
-at d=100 (+69.2%), but *ties the failing isotropic baseline* at d=150/200
-— its own exploration cost consumes the narrow late-arriving breakthrough
-margin the fixed shapes needed in that tighter-budget regime.
+which fixed shape to use, rather than committing to one globally): at the
+standard 600-eval budget it's the single best method of all 8 tested at
+d=100 (+69.2%), but ties the failing isotropic baseline at d=150/200 —
+its own exploration cost eats the narrow late-arriving breakthrough margin
+the fixed shapes needed there. A 2000-eval extended-budget rerun resolved
+this as a **pure budget artifact**: `mab_shape` fully recovers and becomes
+the single best method of every shape tested at d=200 (33.61 vs.
+`ard_pca_ellipsoid`'s 33.15), and a strong second at d=150.
 
 **Full results are written up in two places, kept in sync:**
 - `experiments/tr_shape_dtlz2_100d/RESULTS.md` — narrative + tables, the
@@ -99,8 +102,10 @@ restatement of results.
     robustly wins on Rover); mirrors AS-SMEA's own answer to that exact
     problem (Wang et al. 2026, Sec. 3.3, their LS-IMA/MASS). Label:
     `mab_shape`. **Results are in** (`RESULTS.md` §6): best of 8 methods at
-    d=100 (+69.2%), but ties the failing baseline at d=150/200 (exploration
-    cost exceeds the narrow late-breakthrough budget there).
+    d=100/600ev (+69.2%); ties the failing baseline at d=150/200/600ev but
+    a 2000-eval rerun confirmed this was a pure budget artifact — it fully
+    recovers and becomes the single best method of every shape tested at
+    d=200/2000ev.
 - `morbo/utils.py` — `compute_cma_ellipsoid_shape(...)` (CMA update math),
   `HypersphereProjection` (input transform for the linear-kernel variants),
   `get_fitted_model(..., use_linear_kernel=..., use_dim_scaled_ls_prior=...)`.
@@ -220,9 +225,12 @@ Everything originally proposed in `FURTHER_DIRECTIONS.md` (multi-seed
 sweep, composite×shape, CMA/linear-kernel/dim-prior, `mab_shape`,
 `SparseDTLZ2`) is now done and written up. What's left:
 
-- **Anneal `mab_epsilon`** (decay exploration as budget is consumed) —
-  directly implied by `mab_shape`'s own failure mode at d=150/200 (exploration
-  cost eats the narrow late-breakthrough margin fixed shapes needed there).
+- **Anneal `mab_epsilon`** (decay exploration as budget is consumed) — a
+  budget-*efficiency* improvement now (the d=150/200 failure itself is
+  resolved as a budget artifact, not a design flaw — `mab_shape` fully
+  recovers and even wins at 2000 evals), not a fix for a standing flaw. An
+  annealed rate should let it reach the same endpoint with less wasted
+  exploration, possibly narrowing the 600-eval gap too.
 - **Learned/objective-aware rotation** — current PCA/CMA are both
   variance-driven, not objective-gradient-driven. Not yet coded; the one
   remaining idea from the original ranked list.
