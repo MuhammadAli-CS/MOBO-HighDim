@@ -85,6 +85,8 @@ supported_labels = [
     "ard_pca_dimprior",
     "mab_shape",
     "sobol",
+    "composite_dtlz2_pca",
+    "composite_dtlz2_ard_pca",
 ]
 
 BASE_SEED = 12346

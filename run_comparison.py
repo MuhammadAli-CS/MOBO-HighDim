@@ -201,6 +201,22 @@ LABEL_OVERRIDES = {
     # No kwargs needed -- evalfn/dim/max_reference_point/etc. all come from
     # the shared config.json like every other label.
     "sobol": {},
+    # Composite modeling x shape adaptation at HIGH dimension. The earlier
+    # Penicillin 2x2 ran at d=7, a regime where shape adaptation has no
+    # effect to interact WITH -- so it couldn't answer the interesting
+    # question. At d=100 shape adaptation is worth +66%; composite DTLZ2's
+    # GP models the scalar g directly (literally the problem's
+    # low-dimensional structure). Does giving the surrogate the effective
+    # structure explicitly make shape adaptation redundant, or do the two
+    # stack? CompositeDTLZ2 is mathematically identical to DTLZ2 (verified
+    # numerically), so these drop into the existing tr_shape_dtlz2_100d
+    # experiment as a controlled A/B against the committed morbo /
+    # pca_ellipsoid / ard_pca_ellipsoid / composite_morbo results.
+    "composite_dtlz2_pca": {"evalfn": "CompositeDTLZ2", "tr_shape": "pca_ellipsoid"},
+    "composite_dtlz2_ard_pca": {
+        "evalfn": "CompositeDTLZ2",
+        "tr_shape": "ard_pca_ellipsoid",
+    },
 }
 
 if __name__ == "__main__":
