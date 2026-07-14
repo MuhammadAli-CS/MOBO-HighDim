@@ -623,7 +623,20 @@ variant on 2 of 3 LassoBench benchmarks).** MORBO itself is externally
 competitive with the LassoBench paper's dedicated single-objective
 methods while also carrying a second objective.
 
-Plots: `comparison_seed0.png` (objective space + HV vs. evals) and
-`efficiency_seed0.png` (optimizer time vs. HV) in each experiment
-directory. Aggregate any multi-seed experiment with
-`python aggregate_seeds.py <experiment_name>`.
+Plots, three per experiment directory:
+- `comparison_aggregate.png` — **the headline view**: mean HV-vs-evals
+  curve per method over all available seeds with a ±1 SEM band (the
+  standard presentation in the MORBO/LassoBench papers). Regenerate with
+  `python plot_aggregate.py <experiment_name>` (`--band std` for per-run
+  spread instead of mean uncertainty).
+- `comparison_seed0.png` — single-seed objective-space scatter (per-TR
+  attribution) + HV trace; the right view for *how* a method searches.
+- `efficiency_seed0.png` — optimizer time vs. HV (§9).
+
+Numeric aggregation: `python aggregate_seeds.py <experiment_name>`.
+
+One nuance the 30-seed DNA aggregate plot surfaces that final-HV tables
+hide: the shaped variants **lead through mid-run** (evals ~300-600) before
+the isotropic baseline overtakes late — shape adaptation converges faster
+even where its final HV is slightly lower, so at a tighter budget the
+LassoBench conclusion would tilt the other way.
