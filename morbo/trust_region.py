@@ -502,7 +502,15 @@ class TrustRegion(ABC, Module):
                 else:
                     # If no sampler return the posterior mean.
                     pm = posterior.mean
-                    predictions.append(pm.squeeze(-2) if gp_flag else pm)
+                    # Undo the q-dim unsqueeze above when the posterior kept
+                    # it as a singleton. (This branch is only reachable with
+                    # `use_noisy_trbo=True`; the original code referenced an
+                    # undefined `gp_flag` here and would have raised
+                    # NameError the first time any noisy-TRBO run requested
+                    # posterior-mean predictions.)
+                    predictions.append(
+                        pm.squeeze(-2) if pm.ndim > 2 and pm.shape[-2] == 1 else pm
+                    )
                     continue
 
                 samples = samples.squeeze(-2)
@@ -572,7 +580,10 @@ class TrustRegion(ABC, Module):
                     )
                     self._reset_counters()
 
-                elif self.n_failures >= self.tr_hparams.failure_streak:
+                elif (
+                    self.tr_hparams.failure_streak is not None
+                    and self.n_failures >= self.tr_hparams.failure_streak
+                ):
                     # Shrink trust region
                     self.length.div_(2.0)
                     self._reset_counters()
