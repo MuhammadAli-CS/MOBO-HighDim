@@ -1,5 +1,47 @@
 # Trust-Region Shape Adaptation — Results (full study, multi-seed)
 
+## Executive summary (read this first)
+
+**Question:** MORBO's trust regions are isotropic hypercubes. Does adapting
+their *shape* (rotation + per-axis widths) to local data improve
+high-dimensional multi-objective BO — and when, and why?
+
+**Answer, in five findings:**
+
+1. **PCA-rotated trust regions win big and reproducibly** on problems with
+   low-dimensional effective structure: +66% hypervolume at d=100 on DTLZ2,
+   unanimous across all 5 seeds, generalizing across landscape types
+   (DTLZ3/5/7: +8 to +21%, all 5/5) — at zero extra compute (§1, §10e, §9).
+2. **The governing variable is effective dimension in the INPUT space,
+   relative to budget** — not nominal dimension (§7: nominal-d sweep at
+   fixed effective dim is a flat null; effective-dim sweep at fixed nominal
+   d is a clean 0.1%→10% dose-response), and not merely underlying model
+   sparsity (§10a: LassoBench, where all inputs matter weakly, shows no
+   benefit; §10b: no-op-padded Rover doesn't either — the effective
+   subspace's landscape must also be GP-tractable).
+3. **The naive approach actively hurts, and we know exactly why** (§1, §4):
+   per-dimension ARD rescaling (`ard_box`, original TuRBO's own technique)
+   applies d independent noisy constraints whose intersection collapses
+   combinatorially (measured directly: 1/200 points retained vs 41/200 for
+   PCA). No lengthscale prior fixes it — the failure is structural, though
+   it is landscape-dependent (§10e: wins on rugged-g DTLZ3/7).
+4. **CMA-ES-style persistent covariance is the most robust single geometry**:
+   the only method to break through at d=200 on a tight budget (§4), and
+   the only unanimous winner when the effective subspace is rotated (§10c).
+   **A per-region bandit over geometries (`mab_shape`) is the best default**:
+   top method at d=100 and d=200/2000ev, never far from the best fixed
+   shape, no hyperparameter knowledge needed (§6).
+5. **External validity:** MORBO with our extensions is competitive with the
+   LassoBench paper's dedicated single-objective HDBO methods (DNA
+   best-loss 0.304 vs their TuRBO's 0.292) while simultaneously optimizing
+   a second objective (§10a) — and the whole local-modeling premise beats
+   pure random search by +38% to +3800% (§8).
+
+Sections below give full tables, seeds, and diagnostics. Every number was
+independently re-verified against the raw `.pt` result files (2026-07-13).
+
+---
+
 Covers the whole study: the dimension sweep (`tr_shape_dtlz2_{20,50,100,150,200}d`,
 now 5 seeds each for 50/100/150), the extended-budget follow-up
 (`tr_shape_dtlz2_200d_2000ev`), the two real-problem checks (`tr_shape_rover`
@@ -380,15 +422,13 @@ document: shape adaptation's +64-72% wins are on top of an already-large
 base advantage MORBO has over random search, not the whole story by
 themselves.
 
-**QUEUED, not yet run:** the d=150/200 numbers above are at the standard
-600-eval budget, where nothing breaks through reliably regardless of
-method. `sobol` hasn't been run yet at the 2000-eval extended budget
-(`tr_shape_dtlz2_150d_2000ev` / `tr_shape_dtlz2_200d_2000ev`, §6's
-`mab_shape` extended-budget experiments) — that's the more interesting
-comparison, since that's exactly the regime where `mab_shape` and the PCA
-variants separate from each other. Does MORBO's advantage hold up once
-budget is no longer the bottleneck, or does random search close the gap
-given enough evals? `cluster/submit_sobol_extended_budget.sh`.
+**Extended budget resolves it completely: random search never closes the
+gap.** At 2000 evals — the budget where mab_shape and the PCA variants all
+break through to HV 29–34 (§6) — `sobol` remains at **exactly 0.00** at
+both d=150 and d=200. So MORBO's advantage over random search isn't a
+budget artifact the way the *within-MORBO* method differences were: given
+3.3× the budget, random search still can't dominate the reference point
+even once at these dimensions, while every GP-based method lands 29+.
 
 ## 9. Compute efficiency: hypervolume per unit of optimizer time
 
