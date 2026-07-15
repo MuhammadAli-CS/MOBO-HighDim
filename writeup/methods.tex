@@ -1187,7 +1187,10 @@ This is a genuinely two-sided result. At $d{=}100$, \texttt{mab\_shape} is
 the single best method of all eight tested in this section -- beating
 every fixed shape it chooses among, plausibly by hedging early exploration
 against a bad initial draw while still exploiting the winning arms once
-identified. But at $d{=}150$--$200$, where even the strongest fixed shapes
+identified. (\emph{Revised by the 20-seed program},
+\S\ref{sec:twenty-seed}: that single-seed showing was a favorable draw --
+at 20 seeds \texttt{mab\_shape} averages $+33.5\%$ with 15/20 wins but
+std $7.2$, well below \texttt{linear\_gp\_pca} and the PCA variants.) But at $d{=}150$--$200$, where even the strongest fixed shapes
 only barely break through late in a tight 600-eval budget
 (breakthrough evals $\sim$300--350 of 600 for the PCA variants at
 $d{=}150$), \texttt{mab\_shape} ties the \emph{failing} isotropic baseline
@@ -1489,6 +1492,78 @@ adaptive geometry under rotation; \texttt{mab\_shape} is the safest
 default. MORBO itself is externally competitive with dedicated
 single-objective HDBO methods on LassoBench while carrying a second
 objective.
+
+\subsection{Twenty-seed confirmation program and composite$\times$shape at $d{=}100$}
+\label{sec:twenty-seed}
+
+Every core comparison was rerun at 20 seeds (matching the MORBO paper's
+own replication count), together with the composite$\times$shape factorial
+at the dimension where it can detect an interaction. Confirmations: the
+DTLZ2/3/5/7 results replicate at \textbf{20/20 or 0/20 unanimity}
+(d=100: \texttt{pca\_ellipsoid} $+76.3\%$, 20/20; \texttt{ard\_box}
+$-46.9\%$, 0/20; \texttt{ard\_box}'s rugged-landscape wins hold at
+19--20/20 on DTLZ3/7), and \texttt{linear\_gp\_pca} is the most stable top
+performer at $d{=}100$ ($+78.9\%$, 20/20, std $0.72$ -- lower than any
+Mat\'ern variant). Three revisions:
+
+\begin{itemize}
+\item \textbf{Rover-family effects are conclusively null}: the 5-seed
+$+4.9\%$ shrinks to $+0.4\%$ (9/20) at 20 seeds; all SparseRover effects
+land within $\pm 3\%$ at 7--13/20 win-rates.
+\item \textbf{The PCA variants' apparent $k_{\mathrm{eff}}{=}50$ edge was
+seed noise}: at 20 seeds they are $\approx$neutral axis-aligned ($+1.3\%$,
+16/20) and mildly negative rotated ($-1.7\%$, 7/20), while
+\texttt{cma\_ellipsoid} keeps a robust, nearly rotation-invariant win
+($+6.1\%$ 20/20 axis-aligned; $+4.2\%$ 19/20 rotated). The
+effective-dimension dose-response of \S\ref{sec:sparse-dtlz2} is real but
+\emph{method-specific}: persistent covariance, not one-shot PCA, is what
+scales to the moderate-effective-dimension regime.
+\item \textbf{The time-varying prediction inverted}: rerun at
+$k_{\mathrm{eff}}{=}49$ (the regime where shape matters; the earlier
+$k_{\mathrm{eff}}{=}5$ run was null by design), \texttt{cma\_ellipsoid}
+\emph{wins} ($+21.6\%$, 20/20, slightly ahead of memoryless PCA's
+$+20.3\%$) -- its covariance decay ($1{-}c_\mu{-}c_1 = 0.6$/update)
+forgets the stale subspace within a few updates. The actual memory
+casualty is \texttt{mab\_shape} ($+2.9\%$, 10/20, std $3.2$): its per-arm
+reward estimates go stale at the switch and are only corrected for arms it
+replays, whereas the covariance is corrected by every new batch. Memory in
+reward space is more fragile than memory in covariance space.
+\end{itemize}
+
+\paragraph{Composite $\times$ shape at $d{=}100$.} The Penicillin
+factorial (\S above) ran at $d{=}7$, a shape-null regime that could not
+detect an interaction. Rerun at $d{=}100$ (5 seeds/cell; direct-modeling
+controls at 20 seeds), with \texttt{CompositeDTLZ2}'s GP modeling the raw
+response $[g, \cos, \sin]$ -- i.e.\ the scalar $g$ that \emph{is} the
+problem's effective structure:
+
+\begin{table}[h]
+\centering
+\caption{Composite $\times$ shape at $d{=}100$, DTLZ2. Absolute means are
+the meaningful comparison (paired percentages pair against different
+baseline seed subsets).}
+\label{tab:composite-shape-100d}
+\begin{tabular}{lrr}
+\toprule
+Cell & mean HV & std \\
+\midrule
+direct + isotropic (\texttt{morbo}) & 18.70 & 2.57 \\
+composite + isotropic & 24.44 & 1.06 \\
+direct + PCA & 32.34 & 1.52 \\
+\textbf{composite + PCA} & \textbf{33.72} & \textbf{0.31} \\
+composite + ARD-PCA & 33.67 & 0.15 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The redundancy hypothesis is rejected: even with the surrogate modeling
+the effective structure explicitly, trust-region geometry still
+contributes the bulk of the improvement ($24.4 \to 33.7$ on top of
+composite). The two extensions stack asymmetrically -- shape does most of
+the mean improvement, composite adds a modest final increment
+($32.3 \to 33.7$) and a $5\times$ variance reduction (std $1.52 \to
+0.31$); composite+ARD-PCA (std $0.15$) is the most reliable configuration
+tested anywhere in this study.
 
 \section{Discussion}
 

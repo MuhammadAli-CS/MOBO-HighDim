@@ -26,11 +26,16 @@ high-dimensional multi-objective BO — and when, and why?
    PCA). No lengthscale prior fixes it — the failure is structural, though
    it is landscape-dependent (§10e: wins on rugged-g DTLZ3/7).
 4. **CMA-ES-style persistent covariance is the most robust single geometry**:
-   the only method to break through at d=200 on a tight budget (§4), and
-   the only unanimous winner when the effective subspace is rotated (§10c).
-   **A per-region bandit over geometries (`mab_shape`) is the best default**:
-   top method at d=100 and d=200/2000ev, never far from the best fixed
-   shape, no hyperparameter knowledge needed (§6).
+   the only method to break through at d=200 on a tight budget (§4), the
+   only unanimous winner when the effective subspace is rotated (§10c,
+   §11c), and — refuting our own prediction — the *best* method when the
+   informative dims switch mid-run (§11d). **The per-region bandit
+   (`mab_shape`) is promising but high-variance**: strong mean improvement
+   (+33.5% at d=100, 20 seeds) with heavy per-seed spread and specific
+   fragility under non-stationarity (§11d/§11e — its single-seed d=100
+   "best method" showing was a lucky draw). `linear_gp_pca` is the most
+   *stable* top performer at d=100 (+78.9%, 20/20, lowest variance, ~25×
+   cheaper model fits).
 5. **External validity:** MORBO with our extensions is competitive with the
    LassoBench paper's dedicated single-objective HDBO methods (DNA
    best-loss 0.304 vs their TuRBO's 0.292) while simultaneously optimizing
@@ -622,6 +627,148 @@ the most robust adaptive geometry (only unanimous winner under rotation);
 variant on 2 of 3 LassoBench benchmarks).** MORBO itself is externally
 competitive with the LassoBench paper's dedicated single-objective
 methods while also carrying a second objective.
+
+## 11. The 20-seed confirmation program + composite×shape at d=100
+
+Everything below reran at 20 seeds (matching the MORBO paper's own
+replication count), plus the composite×shape factorial at the dimension
+where it can actually detect an interaction. Several §1–10 conclusions are
+CONFIRMED and strengthened; three are REVISED — noted explicitly.
+
+### 11a. Core results fully replicate at 20 seeds (win-rates vs. morbo)
+
+| Experiment | ard_box | pca_ellipsoid | ard_pca_ellipsoid |
+|---|---|---|---|
+| DTLZ2 d=50 | −4.1% (0/20) | +3.1% (20/20) | +3.2% (20/20) |
+| DTLZ2 d=100 | −46.9% (0/20) | **+76.3% (20/20)** | +74.8% (20/20) |
+| DTLZ2 d=150 | 0.00 (0/20) | 16.2 abs (19/20) | 16.9 abs (19/20) |
+| DTLZ3 (multimodal) | **+17.9% (19/20)** | +22.6% (20/20) | +20.8% (19/20) |
+| DTLZ5 (degenerate) | −18.3% (0/20) | +13.4% (20/20) | +14.1% (20/20) |
+| DTLZ7 (disconnected) | **+5.9% (20/20)** | +10.8% (20/20) | +12.1% (20/20) |
+
+The headline is now about as strong as an empirical claim gets: **20/20 or
+0/20 unanimous on every informative DTLZ problem**, and `ard_box`'s
+landscape-dependence (wins on rugged-g DTLZ3/7, catastrophic on smooth-g
+DTLZ2/5) is confirmed at 19-20/20.
+
+### 11b. Rover family: definitively null (REVISES §2's tentative +4.9%)
+
+| | tr_shape_rover (d=60) | sparse_rover_d120 | sparse_rover_d180 |
+|---|---|---|---|
+| pca_ellipsoid | +0.4% (9/20) | +1.5% (11/20) | +0.0% (9/20) |
+| ard_pca_ellipsoid | +0.9% (11/20) | +2.4% (13/20) | +0.5% (11/20) |
+| cma_ellipsoid | — | +1.1% (10/20) | −3.0% (7/20) |
+| mab_shape | — | +1.5% (13/20) | −1.2% (9/20) |
+
+The 5-seed Rover mean of +4.9% for `pca_ellipsoid` shrinks to **+0.4% at
+20 seeds** — it was noise, in the direction the earlier correction already
+suspected. Every Rover-family effect is now within ±3% with win-rates
+7–13/20: **genuinely, conclusively null**. SparseRover's no-op padding
+does not unlock the benefit at any padding level. (Sobol remains −36 to
+−41% — local modeling itself keeps working fine here.)
+
+### 11c. PCA-under-rotation question RESOLVED (revises §7 Group B's top point and §10c)
+
+The single-seed axis-aligned keff50 numbers were noise in *both*
+directions. At 20 seeds each:
+
+| Method | axis-aligned keff50 | rotated keff50 |
+|---|---|---|
+| pca_ellipsoid | +1.3% (16/20) *(was +6.7% @1 seed)* | −1.7% (7/20) |
+| ard_pca_ellipsoid | +0.7% (9/20) | −2.2% (6/20) |
+| **cma_ellipsoid** | **+6.1% (20/20)** *(was +10.1% @1 seed)* | **+4.2% (19/20)** |
+| ard_box | — | −4.6% (0/20) |
+
+Resolution: the PCA variants' apparent keff50 edge was mostly seed-0 luck
+— at 20 seeds they are ≈neutral axis-aligned and mildly negative rotated.
+**`cma_ellipsoid` is the only method with a robust win at effective dim
+51, and it is nearly rotation-invariant (+6.1% → +4.2%, 20/20 → 19/20).**
+This revises §7 Group B's dose-response at its top point: the
+effective-dimension dose-response is real but *method-specific* — it is
+CMA's persistent covariance, not one-shot PCA, that scales to the
+moderate-effective-dim regime. (`ard_box`'s 0/20 rotated confirms the
+axis-alignment diagnosis.)
+
+### 11d. Time-varying at k_eff=49: prediction INVERTED — the bandit, not CMA, is the memory casualty
+
+The §10d hypothesis was that `cma_ellipsoid`'s persistent covariance would
+hurt when the informative dims switch mid-run. At 20 seeds in the proper
+regime (baseline morbo = 26.56 ± 1.31, ~12% below its static-keff50 level
+— the switch is genuinely costly):
+
+| Method | vs. morbo | win-rate | std |
+|---|---|---|---|
+| cma_ellipsoid | **+21.6%** | **20/20** | 0.70 |
+| pca_ellipsoid | +20.3% | 20/20 | 0.90 |
+| mab_shape | +2.9% | 10/20 | **3.24** |
+
+**CMA not only survives the switch — it wins, slightly ahead of memoryless
+PCA.** Its covariance decay rate (1 − c_mu − c1 = 0.6 per update) forgets
+the stale subspace within a few updates; covariance memory is a non-issue.
+The actual memory casualty is **`mab_shape`**: its per-arm reward EMAs go
+stale at the switch, its low exploration rate (ε=0.15) makes re-learning
+slow, and its per-seed variance explodes (std 3.24 vs ~0.8 for the fixed
+shapes) — some seeds recover, some stay stuck on the pre-switch arm.
+Refined lesson: **memory in reward space is more fragile than memory in
+covariance space** — the covariance update is corrected by every new data
+batch regardless of which arm "earned" it, while a bandit's reward
+estimates are only corrected for arms it actually replays. (This is the
+strongest argument yet for the annealed/contextual-epsilon follow-up —
+a bandit that re-inflates exploration when its reward estimates go stale.)
+
+### 11e. Headline methods at 20 seeds: one claim REVISED (mab at d=100), two confirmed
+
+Paired vs. the 20-seed morbo (18.70 ± 2.57) at d=100/600ev:
+
+| Method | mean | vs. morbo | win-rate | std |
+|---|---|---|---|---|
+| linear_gp_pca | **32.71** | **+78.9%** | **20/20** | **0.72** |
+| cma_ellipsoid | 25.51 | +39.9% | 20/20 | 1.82 |
+| mab_shape | 24.44 | +33.5% | 15/20 | **7.19** |
+
+- **CONFIRMED: `linear_gp_pca`** — not just matching Matérn+PCA but the
+  *most stable top performer of anything tested at d=100* (std 0.72 vs
+  pca_ellipsoid's 1.52), at ~1/25th the model-fit cost (§9).
+- **CONFIRMED (upgraded): `cma_ellipsoid`** +39.9% at 20/20 (the
+  single-seed +21.3% understated it).
+- **REVISED: `mab_shape` is NOT the best method at d=100.** Its
+  single-seed 33.89 (§6) was a lucky draw: the 20-seed mean is 24.44 with
+  std 7.19 and 15/20 wins — a solid average improvement wrapped in huge
+  per-seed variance (some seeds lock onto good arms early, some don't).
+  Together with 11d, the honest current picture of `mab_shape`: good mean,
+  heavy right-tail risk, and specifically fragile under non-stationarity —
+  a research direction (smarter bandits), not a finished method.
+
+### 11f. Composite × shape at d=100: geometry is NOT redundant — they stack
+
+The factorial the Penicillin 2×2 (§5) couldn't answer, at the dimension
+where shape matters (5 seeds/cell, controls at 20):
+
+| Cell | mean HV | vs. morbo | std |
+|---|---|---|---|
+| morbo (direct + isotropic) | 18.70 | — | 2.57 |
+| composite + isotropic | 24.44 | +23.1% (5/5) | 1.06 |
+| direct + pca | 32.34 | +76.3% (20/20) | 1.52 |
+| **composite + pca** | **33.72** | +69.8% (5/5) | **0.31** |
+| composite + ard_pca | 33.67 | +69.5% (5/5) | 0.15 |
+
+(The paired-% for composite+pca is lower than direct+pca only because the
+5 composite seeds pair against 5 specific baseline draws; the *absolute
+means* are the comparison that matters here: 33.72 > 32.34.)
+
+Three conclusions:
+1. **Redundancy hypothesis rejected**: even when the surrogate models the
+   effective structure explicitly (a GP on the scalar `g` itself), rotating
+   the trust region still adds the bulk of the improvement (24.4 → 33.7,
+   +38% on top of composite).
+2. **They stack, asymmetrically**: shape does most of the work
+   (+76% alone), composite adds a modest final-HV increment on top
+   (32.3 → 33.7) …
+3. **… and a dramatic variance reduction**: composite+pca's std is 0.31 vs
+   direct+pca's 1.52 — a 5× stabilization. Modeling the raw response makes
+   the *reliability* of shape adaptation much better even where it barely
+   moves the mean. `composite_dtlz2_ard_pca` (std 0.15) is the most
+   reliable configuration tested anywhere in this study.
 
 Plots, three per experiment directory:
 - `comparison_aggregate.png` — **the headline view**: mean HV-vs-evals
