@@ -315,7 +315,18 @@ validation once LassoBench is done.
 The 20-seed program (RESULTS.md §11) resolved most open questions and
 created one sharply-motivated new method. Current ranked queue:
 
-1. **`mab_shape_ducb` — CODED, queued (`cluster/submit_mab_ducb.sh`, 45
+1. **`mab_shape_ducb` — DONE, results in (RESULTS.md §11g).** Verdict:
+   two wins, one structural lesson. At d=100 it largely fixes the variance
+   problem (24.44±7.19 at 15/20 → **31.41±3.50 at 20/20**, +69.8% — within
+   ~1 HV point of the best fixed arms while staying adaptive; **now the
+   recommended bandit default**). On the mid-run switch it triples
+   epsilon-greedy's improvement (+2.9% → +9.3%, 16/20) but recovers only
+   ~half the fixed shapes' +20-21%. At tight-budget d=200 it stays at 0.00:
+   arm-switching itself dilutes persistent-state arms (cma's covariance
+   only updates when its arm is played), a structural limit of the bandit
+   abstraction — next iteration: shared CMA state updated from every batch,
+   or commit-per-TR-lifetime designs. Original design notes:
+   (`cluster/submit_mab_ducb.sh`, 45
    jobs).** Discounted-UCB arm selection (`mab_policy="ducb"`,
    Garivier & Moulines 2011) replacing epsilon-greedy. Directly targets the
    two failure modes §11d/e *measured*: stale per-arm reward estimates

@@ -1571,8 +1571,8 @@ tested anywhere in this study.
 Ranked by how directly the results above motivate them:
 
 \begin{enumerate}
-\item \textbf{A non-stationarity-robust bandit (implemented, results
-pending).} \S\ref{sec:twenty-seed}'s time-varying experiment localized
+\item \textbf{A non-stationarity-robust bandit (implemented; results in).}
+\S\ref{sec:twenty-seed}'s time-varying experiment localized
 \texttt{mab\_shape}'s failure precisely: per-arm reward estimates are only
 corrected for arms the policy replays, so they go stale when the landscape
 shifts, and a fixed $\varepsilon$ additionally taxes tight budgets. Both
@@ -1582,11 +1582,21 @@ discounted count $N_a$, decay both by $\gamma$ at every decision, and
 select $\arg\max_a \big( S_a/N_a + c\sqrt{\log \sum_b N_b \,/\, N_a}
 \big)$. A stale arm's $N_a$ decays, so its bonus \emph{regrows} and it is
 automatically replayed after a shift; bonuses anneal as counts grow, so
-there is no permanent exploration tax. Implemented as
-\texttt{mab\_policy="ducb"} (unit-verified for exploitation, sustained
-exploration, and post-shift re-adaptation), queued on the three
-discriminating regimes (time-varying $k_{\mathrm{eff}}{=}49$; the
-high-variance $d{=}100$ setting; tight-budget $d{=}200$).
+there is no permanent exploration tax. Results
+(\texttt{mab\_policy="ducb"}, 20 seeds): at $d{=}100$ it largely fixes
+the variance problem -- $24.44 \pm 7.19$ (15/20) becomes
+$\mathbf{31.41 \pm 3.50}$ at a perfect 20/20 ($+69.8\%$), within one HV
+point of the best fixed arms while remaining adaptive; on the mid-run
+switch it triples epsilon-greedy's improvement ($+2.9\% \to +9.3\%$,
+16/20) though still recovering only about half the fixed shapes'
+$+20$--$21\%$; and at tight-budget $d{=}200$ it remains at $0.00$ like
+epsilon-greedy, exposing a structural limit of the bandit abstraction
+itself: \texttt{cma\_ellipsoid}'s covariance only updates on iterations
+its arm is selected, so any arm-switching policy gives the one
+winning-at-$d{=}200$ arm a fraction of its adaptation rate. Natural next
+iteration: share the CMA covariance update across all arms (update from
+every batch, consume per-arm), or commit to one arm per trust-region
+lifetime.
 \item \textbf{Contextual gating by measured input-space effective
 dimension.} The LassoBench/Rover results say shaping should be
 \emph{switched off} when the local data has no low-dimensional input

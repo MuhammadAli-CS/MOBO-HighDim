@@ -770,6 +770,53 @@ Three conclusions:
    moves the mean. `composite_dtlz2_ard_pca` (std 0.15) is the most
    reliable configuration tested anywhere in this study.
 
+### 11g. `mab_shape_ducb`: the discounted-UCB fix — two wins, one structural lesson
+
+`mab_policy="ducb"` (discounted UCB, Garivier & Moulines 2011: decayed
+per-arm reward sums/counts, exploration bonuses that regrow for stale
+arms and anneal as counts grow) was built to attack epsilon-greedy's two
+measured failure modes (§11d/e). Results on the three discriminating
+regimes:
+
+| Test | epsilon-greedy | **ducb** | best fixed shape |
+|---|---|---|---|
+| tv_keff49 (non-stationarity, 20 seeds) | +2.9% (10/20, std 3.24) | **+9.3% (16/20, std 2.28)** | cma +21.6% (20/20) |
+| methods_100d (variance, 20 seeds) | +33.5% (15/20, std 7.19) | **+69.8% (20/20, std 3.50)** | linear_gp_pca +78.9% (std 0.72) |
+| methods_200d/600ev (tight budget, 5 seeds) | 0.00 | **0.00 (5/5 seeds)** | cma 21.72 |
+
+**Win #1 — the variance problem is largely fixed** (the big one): at
+d=100, ducb turns epsilon-greedy's 24.44±7.19 (15/20) into
+**31.41±3.50 at a perfect 20/20** — more than doubling the paired
+improvement (+33.5% → +69.8%), halving the spread, and landing within
+~1 HV point of the best fixed arms (pca 32.34, linear_gp_pca 32.71)
+*while remaining fully adaptive*. The guaranteed round-robin init plus
+annealing bonuses eliminate the "some seeds never lock on" tail that
+made epsilon-greedy unreliable. **This is now the recommended bandit
+default.**
+
+**Win #2 — non-stationarity, partially**: on the mid-run dimension
+switch, ducb triples epsilon-greedy's improvement (+2.9% → +9.3%) and
+lifts the win-rate from a coin flip to 16/20 — the regrowing-bonus
+mechanism demonstrably re-explores after the shift. But it recovers only
+about half of what the fixed shapes get (+20-21%): re-learning still
+costs real budget that a fixed good arm never pays.
+
+**The structural lesson — tight budgets stay unsolved, and the reason
+matters**: at d=200/600ev, ducb scores exactly 0.00 on all 5 seeds, same
+as epsilon-greedy, while pure `cma_ellipsoid` alone breaks through
+(21.72). Annealed exploration wasn't the missing piece. The real issue is
+that **arm-switching itself dilutes persistent-state arms**:
+`cma_ellipsoid`'s covariance only updates on iterations when its arm is
+selected, so a bandit playing it ~1/5 of the time gives it ~1/5 the
+adaptation rate — and at d=200 the breakthrough window is narrow enough
+that only full-rate CMA makes it in time. The bandit's arms are not
+independent slot machines; one of them gets *better the more it's
+played*, which violates the bandit abstraction precisely in the regime
+where that arm is the only winner. Candidate fixes for a next iteration:
+update the CMA covariance from every batch regardless of which arm is
+active (shared state, per-arm consumption), or restarted-bandit designs
+that commit to one arm per trust-region lifetime.
+
 Plots, three per experiment directory:
 - `comparison_aggregate.png` — **the headline view**: mean HV-vs-evals
   curve per method over all available seeds with a ±1 SEM band (the
