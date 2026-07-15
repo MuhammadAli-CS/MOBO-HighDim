@@ -1565,6 +1565,48 @@ the mean improvement, composite adds a modest final increment
 0.31$); composite+ARD-PCA (std $0.15$) is the most reliable configuration
 tested anywhere in this study.
 
+\subsection{Future work}
+\label{sec:tr-shape-future}
+
+Ranked by how directly the results above motivate them:
+
+\begin{enumerate}
+\item \textbf{A non-stationarity-robust bandit (implemented, results
+pending).} \S\ref{sec:twenty-seed}'s time-varying experiment localized
+\texttt{mab\_shape}'s failure precisely: per-arm reward estimates are only
+corrected for arms the policy replays, so they go stale when the landscape
+shifts, and a fixed $\varepsilon$ additionally taxes tight budgets. Both
+are textbook symptoms with a textbook fix -- \emph{discounted UCB}
+\citep{garivier2011ducb}: per arm, keep a discounted reward sum $S_a$ and
+discounted count $N_a$, decay both by $\gamma$ at every decision, and
+select $\arg\max_a \big( S_a/N_a + c\sqrt{\log \sum_b N_b \,/\, N_a}
+\big)$. A stale arm's $N_a$ decays, so its bonus \emph{regrows} and it is
+automatically replayed after a shift; bonuses anneal as counts grow, so
+there is no permanent exploration tax. Implemented as
+\texttt{mab\_policy="ducb"} (unit-verified for exploitation, sustained
+exploration, and post-shift re-adaptation), queued on the three
+discriminating regimes (time-varying $k_{\mathrm{eff}}{=}49$; the
+high-variance $d{=}100$ setting; tight-budget $d{=}200$).
+\item \textbf{Contextual gating by measured input-space effective
+dimension.} The LassoBench/Rover results say shaping should be
+\emph{switched off} when the local data has no low-dimensional input
+structure; the top-$k$ eigenvalue mass of the trust region's local
+covariance (already computed by the PCA arms) is a direct online estimate
+of exactly that quantity, usable either as a contextual-bandit feature or
+as a hard gate.
+\item \textbf{Observation noise.} All results above are noiseless; the
+plumbing exists (\texttt{use\_noisy\_trbo}, injected noise, and the
+LassoBench noisy variants whose published TuRBO/CMA-ES numbers give an
+external anchor). The variants' predicted noise-sensitivity ordering
+(PCA least exposed -- input locations are exact; ARD-based most exposed --
+lengthscales estimated from noisy $Y$) is a falsifiable prediction.
+\item \textbf{Remaining benchmarks and mechanisms:} MOPTA08 /
+Human-Powered Aircraft / PMO as further real problems; a composite Rover
+(checkpointed trajectory costs, Penicillin-style); and an
+objective-aware rotation (both PCA and CMA are variance-driven -- neither
+sees which directions matter to the \emph{objectives}).
+\end{enumerate}
+
 \section{Discussion}
 
 The three extensions from Sections~\ref{sec:composite}--\ref{sec:botier}
@@ -1639,6 +1681,11 @@ D. Ngo, B. Ha, T. Chan, B. Nguyen, and M. Zhang.
 N. Doumont, et al.
 \newblock We Still Don't Understand High-Dimensional Bayesian Optimization.
 \newblock \emph{International Conference on Artificial Intelligence and Statistics (AISTATS)}, 2026.
+
+\bibitem{garivier2011ducb}
+A. Garivier and E. Moulines.
+\newblock On Upper-Confidence Bound Policies for Switching Bandit Problems.
+\newblock \emph{Algorithmic Learning Theory (ALT)}, 2011.
 
 \bibitem{sehic2022lassobench}
 K. \v{S}ehi\'c, A. Gramfort, J. Salmon, and L. Nardi.

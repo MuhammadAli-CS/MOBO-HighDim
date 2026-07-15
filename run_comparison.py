@@ -217,6 +217,15 @@ LABEL_OVERRIDES = {
         "evalfn": "CompositeDTLZ2",
         "tr_shape": "ard_pca_ellipsoid",
     },
+    # Discounted-UCB bandit over shapes: same arms and reward as mab_shape,
+    # different selection policy. Directly motivated by the 20-seed program
+    # (RESULTS.md sec 11d/e): epsilon-greedy's two measured failure modes are
+    # stale arm estimates under non-stationarity (tv_keff49: +2.9%, 10/20,
+    # std 3.2 while both fixed shapes hit 20/20) and a fixed exploration tax
+    # at tight budgets. D-UCB's decayed counts make unexplored arms' bonuses
+    # regrow (auto re-exploration after a shift) and its bonuses anneal as
+    # counts grow (no permanent tax).
+    "mab_shape_ducb": {"tr_shape": "mab_shape", "mab_policy": "ducb"},
 }
 
 if __name__ == "__main__":

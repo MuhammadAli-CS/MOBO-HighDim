@@ -87,6 +87,7 @@ supported_labels = [
     "sobol",
     "composite_dtlz2_pca",
     "composite_dtlz2_ard_pca",
+    "mab_shape_ducb",
 ]
 
 BASE_SEED = 12346
@@ -147,6 +148,9 @@ def run_one_replication(
     mab_epsilon: float = TurboHParams.mab_epsilon,
     mab_reward_ema_alpha: float = TurboHParams.mab_reward_ema_alpha,
     mab_arms: tuple = TurboHParams.mab_arms,
+    mab_policy: str = TurboHParams.mab_policy,
+    mab_ducb_gamma: float = TurboHParams.mab_ducb_gamma,
+    mab_ducb_c: float = TurboHParams.mab_ducb_c,
     n_curve_points: int = 8,
     n_penicillin_checkpoints: int = 10,
     sparse_dtlz2_k_eff: int = 5,
@@ -514,6 +518,9 @@ def run_one_replication(
         mab_epsilon=mab_epsilon,
         mab_reward_ema_alpha=mab_reward_ema_alpha,
         mab_arms=tuple(mab_arms),
+        mab_policy=mab_policy,
+        mab_ducb_gamma=mab_ducb_gamma,
+        mab_ducb_c=mab_ducb_c,
     )
 
     trbo_state = TRBOState(

@@ -309,3 +309,42 @@ Lower priority: Thompson-sampling or Hedge/EXP3 variants of `mab_shape`
 portfolio-BO in the literature review), and the Human-Powered
 Aircraft/PMO/MOPTA08-MO benchmark candidates as further real-world
 validation once LassoBench is done.
+
+## Next phase (post-20-seed program, 2026-07-15)
+
+The 20-seed program (RESULTS.md §11) resolved most open questions and
+created one sharply-motivated new method. Current ranked queue:
+
+1. **`mab_shape_ducb` — CODED, queued (`cluster/submit_mab_ducb.sh`, 45
+   jobs).** Discounted-UCB arm selection (`mab_policy="ducb"`,
+   Garivier & Moulines 2011) replacing epsilon-greedy. Directly targets the
+   two failure modes §11d/e *measured*: stale per-arm reward estimates
+   under non-stationarity (tv_keff49: epsilon-greedy +2.9% at 10/20 while
+   both fixed shapes hit +20% at 20/20 — arm estimates are only corrected
+   for arms replayed) and the fixed exploration tax at tight budgets.
+   D-UCB decays all arms' counts every decision, so a stale arm's bonus
+   REGROWS (auto re-exploration) and bonuses anneal as counts grow (no
+   permanent tax). Unit-verified for exploit / sustained-explore /
+   post-shift re-adaptation; end-to-end smoke-tested. Queued on the three
+   discriminating regimes: tv_keff49 (20 seeds), methods_100d (20 seeds,
+   the variance test), methods_200d (5 seeds, the tight-budget test).
+2. **Contextual gating by measured input-space effective dimension** — the
+   LassoBench/Rover results say shaping should switch OFF when local data
+   has no low-dim input structure; top-k eigenvalue mass (already computed
+   by the PCA arms) is the online estimate. Natural next bandit upgrade
+   after ducb results land.
+3. **Noise experiments** — plumbing exists and is now unblocked (the
+   gp_flag fix); LassoBench's noisy variants give published external
+   anchors (TuRBO 0.30/CMA-ES 0.36 on noisy synt_simple). Falsifiable
+   prediction to test: PCA least noise-exposed (input locations exact),
+   ARD-based most exposed (lengthscales from noisy Y).
+4. **Remaining benchmarks/mechanisms**: MOPTA08 / HPA / PMO; composite
+   Rover (checkpointed trajectory costs); objective-aware rotation.
+
+Resolved and closed by §11: Rover-family (conclusively null), the
+PCA-under-rotation question (seed noise; cma is the robust winner), the
+cma-memory-liability hypothesis (inverted — cma WINS under switching;
+reward-space memory is the fragile kind), mab_shape's d=100 standing
+(lucky seed; high-variance method pending better policies), and the
+composite×shape interaction at high d (they stack; composite adds 5×
+variance reduction on top of shape).

@@ -237,6 +237,25 @@ git commit && git push                          # or scp results back
 
 ## Open threads / natural next steps
 
+**20-seed confirmation program: DONE, results in `RESULTS.md` §11** —
+core results confirmed at 20/20-or-0/20 unanimity; three revisions (Rover
+conclusively null; PCA's keff50 edge was seed noise, cma is the robust
+rotation-invariant winner; mab_shape's d=100 "best" was a lucky seed —
++33.5% mean with std 7.2); one inverted prediction (under mid-run
+dimension switching, cma WINS and the epsilon-greedy bandit is the memory
+casualty — reward-space memory is more fragile than covariance-space
+memory); composite×shape at d=100 shows they STACK (geometry not
+redundant; composite adds a 5× variance reduction on top of shape).
+
+**QUEUED next: `mab_shape_ducb`** (`mab_policy="ducb"`, discounted-UCB arm
+selection, Garivier & Moulines 2011) — coded, unit-verified
+(exploit/keep-exploring/re-adapt), smoke-tested; targets exactly the two
+measured epsilon-greedy failure modes. `cluster/submit_mab_ducb.sh`
+(45 jobs: tv_keff49 ×20, methods_100d ×20, methods_200d ×5). See
+`FURTHER_DIRECTIONS.md` "Next phase" for the full ranked queue
+(contextual gating by measured input-space effective dim, noise
+experiments, remaining benchmarks).
+
 **Benchmark battery: DONE, results in `RESULTS.md` §10.** Key outcomes —
 two honest prediction failures that sharpened the headline claim:
 LassoBench-MO (30 seeds, their paper's protocol) shows MORBO externally

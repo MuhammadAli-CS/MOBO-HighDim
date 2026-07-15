@@ -154,6 +154,16 @@ class TurboHParams:
             lengthscales to grow like sqrt(d) both regularizes the ratios ard_box
             consumes and removes the ceiling.
         mab_epsilon, mab_reward_ema_alpha, mab_arms: see tr_shape="mab_shape" above.
+        mab_policy: arm-selection policy for mab_shape. "epsilon" (default,
+            the original epsilon-greedy over per-arm reward EMAs) or "ducb"
+            (discounted UCB: decayed reward sums/counts with an exploration
+            bonus that REGROWS for arms not recently pulled -- targets the
+            two measured epsilon-greedy failure modes: stale arm estimates
+            under non-stationarity, and the fixed exploration tax at tight
+            budgets; see _select_mab_arm).
+        mab_ducb_gamma: (ducb only) per-decision discount on all arms'
+            reward sums and counts. 1.0 = undiscounted (stationary) UCB1.
+        mab_ducb_c: (ducb only) exploration-bonus coefficient.
 
         tr_shape="mab_shape": per-trust-region multi-armed bandit over `mab_arms`
             (default: the 5 shapes above, including "isotropic" itself as an arm).
@@ -231,6 +241,9 @@ class TurboHParams:
     use_dim_scaled_ls_prior: bool = False
     mab_epsilon: float = 0.15
     mab_reward_ema_alpha: float = 0.3
+    mab_policy: str = "epsilon"
+    mab_ducb_gamma: float = 0.95
+    mab_ducb_c: float = 1.0
     mab_arms: tuple = (
         "isotropic",
         "ard_box",
@@ -265,6 +278,14 @@ class TurboHParams:
             raise ValueError("mab_epsilon must be in [0,1].")
         if not (0.0 < self.mab_reward_ema_alpha <= 1.0):
             raise ValueError("mab_reward_ema_alpha must be in (0,1].")
+        if self.mab_policy not in ("epsilon", "ducb"):
+            raise ValueError(
+                f"mab_policy must be 'epsilon' or 'ducb', got {self.mab_policy!r}."
+            )
+        if not (0.0 < self.mab_ducb_gamma <= 1.0):
+            raise ValueError("mab_ducb_gamma must be in (0,1].")
+        if self.mab_ducb_c < 0.0:
+            raise ValueError("mab_ducb_c must be >= 0.")
         if self.tr_shape == "mab_shape" and len(self.mab_arms) < 2:
             raise ValueError("mab_arms must contain at least 2 arms.")
 
@@ -386,6 +407,17 @@ class TrustRegion(ABC, Module):
         )
         self.register_buffer(
             "mab_last_arm", torch.tensor(-1, device=bounds.device, dtype=torch.int64)
+        )
+        # ducb-policy-only state: discounted reward sums and discounted pull
+        # counts (both decayed by mab_ducb_gamma at every decision step; see
+        # _select_mab_arm's docstring). Never read unless mab_policy="ducb".
+        self.register_buffer(
+            "mab_ducb_rewards",
+            torch.zeros(n_mab_arms, device=bounds.device, dtype=bounds.dtype),
+        )
+        self.register_buffer(
+            "mab_ducb_counts",
+            torch.zeros(n_mab_arms, device=bounds.device, dtype=bounds.dtype),
         )
         self.register_buffer(
             "n_successes", torch.tensor(0, device=bounds.device, dtype=torch.int64)
@@ -818,27 +850,63 @@ class TrustRegion(ABC, Module):
             )
 
     def _select_mab_arm(self) -> int:
-        r"""Credit the previous arm's reward, then epsilon-greedily pick the next.
+        r"""Credit the previous arm's reward, then pick the next per `mab_policy`.
 
         Reward is binary: 1.0 if this TR's success streak was just
         incremented (`self.n_successes > 0`), else 0.0 -- reuses the streak
         counter TuRBO already maintains for its own length-doubling logic,
-        rather than adding a separate hypervolume-history buffer. Folded into
-        a per-arm exponential moving average (`mab_reward_ema_alpha`).
+        rather than adding a separate hypervolume-history buffer.
+
+        Policies:
+        - "epsilon": per-arm EMA of the reward (`mab_reward_ema_alpha`),
+          epsilon-greedy selection (`mab_epsilon`). The original policy.
+        - "ducb": discounted UCB (Garivier & Moulines 2011 style). Keeps a
+          discounted reward sum and pull count per arm, BOTH multiplied by
+          `mab_ducb_gamma` at every decision, and selects
+          argmax( S_a/N_a + c*sqrt(log(sum N)/N_a) ). Directly targets the
+          two measured failure modes of epsilon-greedy (RESULTS.md sec 11d/e):
+          (1) non-stationarity -- a stale arm's discounted count decays, so
+          its exploration bonus REGROWS and it gets automatically replayed
+          after the landscape shifts (epsilon-greedy's reward EMA is only
+          ever corrected for arms it happens to replay); (2) the tight-budget
+          exploration tax -- UCB bonuses anneal as counts grow instead of
+          forcing a fixed epsilon fraction of exploration forever.
         """
-        if self.mab_last_arm.item() >= 0:
-            reward = 1.0 if self.n_successes.item() > 0 else 0.0
-            i = self.mab_last_arm.item()
-            alpha = self.tr_hparams.mab_reward_ema_alpha
-            self.mab_arm_values[i] = (
-                1 - alpha
-            ) * self.mab_arm_values[i] + alpha * reward
-            self.mab_arm_pulls[i] += 1
+        reward = 1.0 if self.n_successes.item() > 0 else 0.0
+        last = self.mab_last_arm.item()
         n_arms = len(self.tr_hparams.mab_arms)
-        if torch.rand(()).item() < self.tr_hparams.mab_epsilon:
-            arm = torch.randint(0, n_arms, ()).item()
-        else:
-            arm = self.mab_arm_values.argmax().item()
+        if self.tr_hparams.mab_policy == "ducb":
+            g = self.tr_hparams.mab_ducb_gamma
+            self.mab_ducb_counts.mul_(g)
+            self.mab_ducb_rewards.mul_(g)
+            if last >= 0:
+                self.mab_ducb_counts[last] += 1.0
+                self.mab_ducb_rewards[last] += reward
+                self.mab_arm_pulls[last] += 1
+            never_pulled = (self.mab_arm_pulls == 0).nonzero().view(-1)
+            if never_pulled.numel() > 0:
+                # Round-robin initialization: play every arm once first.
+                arm = int(never_pulled[0])
+            else:
+                eps = 1e-9
+                counts = self.mab_ducb_counts.clamp_min(eps)
+                mean = self.mab_ducb_rewards / counts
+                total = self.mab_ducb_counts.sum().clamp_min(1.0)
+                bonus = self.tr_hparams.mab_ducb_c * torch.sqrt(
+                    torch.log(total) / counts
+                )
+                arm = int((mean + bonus).argmax())
+        else:  # "epsilon"
+            if last >= 0:
+                alpha = self.tr_hparams.mab_reward_ema_alpha
+                self.mab_arm_values[last] = (
+                    1 - alpha
+                ) * self.mab_arm_values[last] + alpha * reward
+                self.mab_arm_pulls[last] += 1
+            if torch.rand(()).item() < self.tr_hparams.mab_epsilon:
+                arm = torch.randint(0, n_arms, ()).item()
+            else:
+                arm = self.mab_arm_values.argmax().item()
         self.mab_last_arm = torch.tensor(
             arm, device=self.mab_last_arm.device, dtype=self.mab_last_arm.dtype
         )

@@ -173,6 +173,20 @@ def check_sparse_dtlz2() -> None:
     print("OK: SparseDTLZ2 BO loop with k_eff=2 ran to completion.")
 
 
+def check_mab_ducb() -> None:
+    print("=== mab_shape_ducb (discounted-UCB bandit over shapes) ===")
+    out = run_and_capture_kw("mab_shape_ducb", tr_shape="mab_shape", mab_policy="ducb")
+    assert "axis_lengths:" in out, "mab_shape_ducb: shape update never fired"
+    # D-UCB round-robins all arms first, so with 5 arms (incl. rotated ones)
+    # a non-identity R must appear early in any run.
+    r_lines = [l for l in out.splitlines() if l.startswith("R is identity:")]
+    assert any("False" in l for l in r_lines), (
+        "mab_shape_ducb: R was identity all run -- round-robin arm init "
+        "should have visited a rotated arm."
+    )
+    print("OK: D-UCB bandit ran end-to-end and visited rotated arms.")
+
+
 def check_sobol() -> None:
     print("=== sobol (pure random-search baseline) ===")
     outputs = []
@@ -275,6 +289,7 @@ if __name__ == "__main__":
     check_linear_kernel()
     check_dim_prior()
     check_mab_shape()
+    check_mab_ducb()
     check_sparse_dtlz2()
     check_sobol()
     check_rotated_sparse_dtlz2()
