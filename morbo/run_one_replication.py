@@ -88,6 +88,7 @@ supported_labels = [
     "composite_dtlz2_pca",
     "composite_dtlz2_ard_pca",
     "mab_shape_ducb",
+    "mab_shape_ducb_shared",
 ]
 
 BASE_SEED = 12346
@@ -151,6 +152,7 @@ def run_one_replication(
     mab_policy: str = TurboHParams.mab_policy,
     mab_ducb_gamma: float = TurboHParams.mab_ducb_gamma,
     mab_ducb_c: float = TurboHParams.mab_ducb_c,
+    mab_shared_cma: bool = TurboHParams.mab_shared_cma,
     n_curve_points: int = 8,
     n_penicillin_checkpoints: int = 10,
     sparse_dtlz2_k_eff: int = 5,
@@ -521,6 +523,7 @@ def run_one_replication(
         mab_policy=mab_policy,
         mab_ducb_gamma=mab_ducb_gamma,
         mab_ducb_c=mab_ducb_c,
+        mab_shared_cma=mab_shared_cma,
     )
 
     trbo_state = TRBOState(

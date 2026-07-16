@@ -226,6 +226,16 @@ LABEL_OVERRIDES = {
     # regrow (auto re-exploration after a shift) and its bonuses anneal as
     # counts grow (no permanent tax).
     "mab_shape_ducb": {"tr_shape": "mab_shape", "mab_policy": "ducb"},
+    # Shared-CMA-state D-UCB bandit: the CMA covariance advances at EVERY
+    # shape update regardless of which arm is played; the cma arm merely
+    # consumes it. Targets the structural limit measured at d=200/600ev
+    # (RESULTS.md sec 11g): arm-switching starves persistent-state arms of
+    # their adaptation rate, and at d=200 only full-rate CMA breaks through.
+    "mab_shape_ducb_shared": {
+        "tr_shape": "mab_shape",
+        "mab_policy": "ducb",
+        "mab_shared_cma": True,
+    },
 }
 
 if __name__ == "__main__":

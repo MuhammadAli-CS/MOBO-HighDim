@@ -164,6 +164,16 @@ class TurboHParams:
         mab_ducb_gamma: (ducb only) per-decision discount on all arms'
             reward sums and counts. 1.0 = undiscounted (stationary) UCB1.
         mab_ducb_c: (ducb only) exploration-bonus coefficient.
+        mab_shared_cma: (mab_shape only) if True, the CMA covariance state
+            updates at EVERY shape update regardless of which arm the
+            bandit selected -- the "cma_ellipsoid" arm merely consumes the
+            shared state. Directly targets the structural limit measured at
+            d=200/600ev (RESULTS.md sec 11g): cma's covariance normally
+            only updates on iterations its arm is played, so any
+            arm-switching policy gives it a fraction of its adaptation
+            rate -- and at d=200 only full-rate CMA breaks through. With
+            sharing, the bandit can explore other arms without starving
+            the one arm whose quality depends on being kept up to date.
 
         tr_shape="mab_shape": per-trust-region multi-armed bandit over `mab_arms`
             (default: the 5 shapes above, including "isotropic" itself as an arm).
@@ -244,6 +254,7 @@ class TurboHParams:
     mab_policy: str = "epsilon"
     mab_ducb_gamma: float = 0.95
     mab_ducb_c: float = 1.0
+    mab_shared_cma: bool = False
     mab_arms: tuple = (
         "isotropic",
         "ard_box",
@@ -930,6 +941,26 @@ class TrustRegion(ABC, Module):
             if shape == "mab_shape":
                 arm_idx = self._select_mab_arm()
                 shape = self.tr_hparams.mab_arms[arm_idx]
+                if self.tr_hparams.mab_shared_cma and "cma_ellipsoid" in self.tr_hparams.mab_arms:
+                    # Shared-state variant (see TurboHParams docstring):
+                    # advance the CMA covariance every update so the cma
+                    # arm never starves while other arms are being played.
+                    # `_compute_shape_for_mode("cma_ellipsoid")` performs the
+                    # state update as a side effect; when cma IS the chosen
+                    # arm, use its output directly (don't update twice).
+                    cma_R, cma_axis_lengths = self._compute_shape_for_mode(
+                        "cma_ellipsoid"
+                    )
+                    if shape == "cma_ellipsoid":
+                        R, axis_lengths = cma_R, cma_axis_lengths
+                    else:
+                        R, axis_lengths = self._compute_shape_for_mode(shape)
+                    axis_lengths = axis_lengths.clamp(
+                        self.tr_hparams.length_min, self.tr_hparams.length_max
+                    )
+                    self.R = R.detach()
+                    self.axis_lengths = axis_lengths.detach()
+                    return
             R, axis_lengths = self._compute_shape_for_mode(shape)
             axis_lengths = axis_lengths.clamp(
                 self.tr_hparams.length_min, self.tr_hparams.length_max
