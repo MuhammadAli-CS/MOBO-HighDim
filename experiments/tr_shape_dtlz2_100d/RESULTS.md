@@ -29,13 +29,20 @@ high-dimensional multi-objective BO — and when, and why?
    the only method to break through at d=200 on a tight budget (§4), the
    only unanimous winner when the effective subspace is rotated (§10c,
    §11c), and — refuting our own prediction — the *best* method when the
-   informative dims switch mid-run (§11d). **The per-region bandit
-   (`mab_shape`) is promising but high-variance**: strong mean improvement
-   (+33.5% at d=100, 20 seeds) with heavy per-seed spread and specific
-   fragility under non-stationarity (§11d/§11e — its single-seed d=100
-   "best method" showing was a lucky draw). `linear_gp_pca` is the most
-   *stable* top performer at d=100 (+78.9%, 20/20, lowest variance, ~25×
-   cheaper model fits).
+   informative dims switch mid-run (§11d). **The per-region bandit, fixed
+   in two iterations, is now competitive with the best fixed shape**:
+   plain epsilon-greedy `mab_shape` was high-variance (+33.5% at d=100,
+   std 7.2, a lucky single-seed "best method" showing — §11d/e); switching
+   to discounted-UCB cut the variance sharply (std → 3.5, +69.8%, 20/20 —
+   §11g); sharing the CMA covariance across all arms closed the gap
+   entirely (std → 1.9, +75.7%, statistically tied with the best fixed
+   Matérn arm — §11h). The one regime that stays unsolved (d=200/tight
+   budget) is now understood precisely: with staleness eliminated, the
+   remaining blocker is that the reward signal itself carries zero
+   information there until something breaks through — a diagnosis, not
+   just a failure. `linear_gp_pca` remains the most *stable* top performer
+   overall at d=100 (+78.9%, 20/20, lowest variance, ~25× cheaper model
+   fits).
 5. **External validity:** MORBO with our extensions is competitive with the
    LassoBench paper's dedicated single-objective HDBO methods (DNA
    best-loss 0.304 vs their TuRBO's 0.292) while simultaneously optimizing
@@ -816,6 +823,47 @@ where that arm is the only winner. Candidate fixes for a next iteration:
 update the CMA covariance from every batch regardless of which arm is
 active (shared state, per-arm consumption), or restarted-bandit designs
 that commit to one arm per trust-region lifetime.
+
+### 11h. `mab_shape_ducb_shared`: shared CMA state — best bandit yet at d=100; tight budgets diagnosed as information-theoretic, not fixable
+
+The shared-state variant (§11g's proposed fix: the CMA covariance advances
+at *every* shape update regardless of which arm is played; the cma arm
+merely consumes it) on the same three tests:
+
+| Test | plain ducb | **ducb_shared** | reference |
+|---|---|---|---|
+| methods_100d (20 seeds) | 31.41±3.50, 20/20, +69.8% | **32.32±1.88, 20/20, +75.7%** | pca 32.34±1.52; linear_gp_pca 32.71±0.72 |
+| tv_keff49 (20 seeds) | +9.3% (16/20) | +9.5% (14/20) | fixed shapes +20-21% |
+| d=200/600ev (5 seeds) | 0.00 all seeds | 0.00, 0.00, 0.00, 0.00, **0.23** | pure cma 21.72 |
+
+**d=100: a strict further improvement, closing the loop on the variance
+problem.** Sharing nearly halves the spread again (3.50 → 1.88) and lifts
+the mean to 32.32 — *statistically indistinguishable from `pca_ellipsoid`
+(32.34), the best fixed Matérn arm*. The adaptive bandit now matches the
+best fixed shape at d=100 without knowing it in advance.
+**`mab_shape_ducb_shared` is the final recommended bandit configuration.**
+
+**tv: neutral, as expected** — the tv bottleneck is reward re-learning
+after the switch, not CMA staleness, so sharing neither helps nor hurts.
+
+**d=200: still fails (one seed scrapes 0.23 vs pure cma's 21.72), and
+this deepens the diagnosis from "fixable" to "information-theoretic."**
+Sharing eliminated the state-staleness explanation — the covariance was
+kept fully current and the bandit *still* couldn't break through. The
+remaining mechanism is about the reward signal itself: at d=200/600ev,
+**every arm returns reward 0 until something breaks through** (the reward
+is success-streak increments, and nothing succeeds early at this scale).
+A bandit that learns from success rewards receives literally zero signal
+distinguishing cma from the other arms during exactly the window when it
+would need to commit to cma to make the breakthrough happen. No policy
+tweak fixes a zero-information reward stream — the options are commitment
+(just run `cma_ellipsoid` when you know the budget is tight relative to
+dimension) or a *different reward* with early signal (e.g. per-arm GP
+predictive likelihood or candidate-pool concentration, which differ
+between arms before any HV success materializes). This cleanly bounds
+what shape-portfolio methods can do: **adaptivity is free when reward
+signal exists (d=100: now ties the best fixed arm), and impossible when
+it doesn't (d=200/600ev: commit or change the signal).**
 
 Plots, three per experiment directory:
 - `comparison_aggregate.png` — **the headline view**: mean HV-vs-evals

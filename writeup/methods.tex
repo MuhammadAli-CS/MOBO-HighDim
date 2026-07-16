@@ -1593,10 +1593,23 @@ $+20$--$21\%$; and at tight-budget $d{=}200$ it remains at $0.00$ like
 epsilon-greedy, exposing a structural limit of the bandit abstraction
 itself: \texttt{cma\_ellipsoid}'s covariance only updates on iterations
 its arm is selected, so any arm-switching policy gives the one
-winning-at-$d{=}200$ arm a fraction of its adaptation rate. Natural next
-iteration: share the CMA covariance update across all arms (update from
-every batch, consume per-arm), or commit to one arm per trust-region
-lifetime.
+winning-at-$d{=}200$ arm a fraction of its adaptation rate. The
+shared-state follow-up (\texttt{mab\_shared\_cma}: advance the CMA
+covariance at every update regardless of the active arm) tested this
+directly, with a clean split verdict: at $d{=}100$ it is a strict further
+improvement ($32.32 \pm 1.88$, 20/20, $+75.7\%$ -- statistically
+indistinguishable from the best fixed Mat\'ern arm, closing the bandit
+variance problem entirely), but $d{=}200$ still fails (4/5 seeds at
+exactly 0), which \emph{deepens} the diagnosis: with staleness eliminated,
+the remaining cause is the reward signal itself -- at $d{=}200$/600ev
+every arm returns reward 0 until something breaks through, so a
+success-reward bandit receives zero information distinguishing arms during
+exactly the window when committing to CMA would matter. No selection
+policy fixes a zero-information reward stream; the options are commitment
+(run \texttt{cma\_ellipsoid} outright when budget is tight relative to
+dimension) or a reward with early signal (e.g.\ per-arm GP predictive
+likelihood). Adaptivity is free when reward signal exists, and impossible
+when it does not.
 \item \textbf{Contextual gating by measured input-space effective
 dimension.} The LassoBench/Rover results say shaping should be
 \emph{switched off} when the local data has no low-dimensional input

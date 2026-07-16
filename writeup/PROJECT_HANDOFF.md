@@ -247,13 +247,21 @@ casualty — reward-space memory is more fragile than covariance-space
 memory); composite×shape at d=100 shows they STACK (geometry not
 redundant; composite adds a 5× variance reduction on top of shape).
 
-**QUEUED next: `mab_shape_ducb`** (`mab_policy="ducb"`, discounted-UCB arm
-selection, Garivier & Moulines 2011) — coded, unit-verified
-(exploit/keep-exploring/re-adapt), smoke-tested; targets exactly the two
-measured epsilon-greedy failure modes. `cluster/submit_mab_ducb.sh`
-(45 jobs: tv_keff49 ×20, methods_100d ×20, methods_200d ×5). See
-`FURTHER_DIRECTIONS.md` "Next phase" for the full ranked queue
-(contextual gating by measured input-space effective dim, noise
+**Bandit line: CLOSED, results in `RESULTS.md` §11g–h.** Two iterations
+on `mab_shape` fixed it: `mab_shape_ducb` (discounted-UCB arm selection,
+Garivier & Moulines 2011) cut epsilon-greedy's d=100 variance from std 7.2
+to std 3.5 (+69.8%, 20/20); `mab_shape_ducb_shared` (CMA covariance
+advances at every update regardless of active arm) closed the gap
+entirely — 32.32±1.88, 20/20, statistically tied with the best fixed
+Matérn arm. **`mab_shape_ducb_shared` is the final recommended bandit
+configuration.** The one regime that stays unsolved, d=200/tight budget,
+is now understood precisely rather than just observed: with staleness
+eliminated, the remaining blocker is that the reward signal (success
+increments) carries zero information there until something breaks
+through — not fixable by any selection policy; the honest options are
+commitment (run `cma_ellipsoid` outright) or a differently-informative
+reward. See `FURTHER_DIRECTIONS.md` "Next phase" for the full ranked
+queue (contextual gating by measured input-space effective dim, noise
 experiments, remaining benchmarks).
 
 **Benchmark battery: DONE, results in `RESULTS.md` §10.** Key outcomes —

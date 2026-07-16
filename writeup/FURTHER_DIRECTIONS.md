@@ -339,16 +339,24 @@ created one sharply-motivated new method. Current ranked queue:
    post-shift re-adaptation; end-to-end smoke-tested. Queued on the three
    discriminating regimes: tv_keff49 (20 seeds), methods_100d (20 seeds,
    the variance test), methods_200d (5 seeds, the tight-budget test).
-1b. **`mab_shape_ducb_shared` — CODED, queued (`cluster/submit_mab_shared.sh`,
-   45 jobs).** The next iteration §11g's structural lesson demands: the CMA
-   covariance advances at EVERY shape update regardless of which arm is
-   played (the cma arm merely consumes shared state), so arm-switching no
-   longer starves the one arm whose quality depends on being kept current.
-   Unit-verified with a positive test (cma_C advances under non-cma arms
-   when shared) AND a control (stays frozen when unshared); end-to-end
-   smoke-tested. THE test is d=200/600ev (can the bandit now recover part
-   of cma's 21.72?); methods_100d and tv_keff49 rerun as regression checks
-   against plain ducb.
+1b. **`mab_shape_ducb_shared` — DONE, results in (RESULTS.md §11h). Closes
+   the bandit line.** The CMA covariance now advances at EVERY shape
+   update regardless of which arm is played (the cma arm merely consumes
+   shared state). Split verdict: at d=100 it's a strict further
+   improvement — 32.32±1.88 at 20/20 (+75.7%), statistically tied with the
+   best fixed Matérn arm (pca_ellipsoid 32.34±1.52) — **the adaptive
+   bandit now matches the best fixed shape without knowing it in
+   advance; this is the final recommended bandit configuration.**
+   d=200/600ev still fails (4/5 seeds at exactly 0), but this *deepens*
+   rather than reopens the diagnosis: with staleness eliminated, the
+   remaining blocker is the reward signal itself — every arm returns 0
+   reward until something breaks through, so a success-reward bandit has
+   zero information to act on during exactly the window that matters. No
+   selection policy fixes a zero-information reward stream; the options
+   are commitment (run cma_ellipsoid outright when budget is tight
+   relative to dimension) or a reward with early signal (e.g. per-arm GP
+   predictive likelihood). tv_keff49 unchanged as expected (+9.5% vs
+   +9.3%, neutral — that bottleneck was never CMA staleness).
 
 2. **Contextual gating by measured input-space effective dimension** — the
    LassoBench/Rover results say shaping should switch OFF when local data
