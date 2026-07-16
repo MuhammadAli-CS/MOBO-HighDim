@@ -387,6 +387,21 @@ created one sharply-motivated new method. Current ranked queue:
    within-study comparison point to LABCAT's own reported finding (their
    PCA-aligned region wins on Rosenbrock, struggles on highly multimodal
    Levy) — see `LITERATURE_REVIEW.md`'s LABCAT entry.
+6. **`labcat_style` — CODED, unit-tested, smoke-tested, queued
+   (`cluster/submit_labcat_style.sh`, 210 jobs: 42 experiments × 5 seeds
+   across the full tr_shape study; RESULTS.md §13).** Closes
+   the remaining completeness gap from item 5: item 5 tests LABCAT's own
+   *benchmark family* against our shape variants; this implements LABCAT's
+   own *construction* directly as `tr_shape="labcat_style"`
+   (`compute_labcat_style_shape` in `morbo/utils.py`) — fitness-weighted
+   PCA computed genuinely in lengthscale-whitened coordinates, rotation
+   kept directly rather than reweighted afterward, the opposite order from
+   `ard_pca_ellipsoid`. Run against `tr_shape_dtlz2_100d` (core comparison)
+   and `bbob_rosenbrock_rosenbrock` (LABCAT's own reported win condition).
+   Multi-objective weighting substitution (mean per-objective min-max rank
+   in place of LABCAT's single-scalar `1-y'`) is a disclosed, necessary
+   adaptation, not a hidden simplification — see `writeup/methods.tex`
+   §7.1's `labcat_style` subsection for the full mechanism.
 
 Resolved and closed by §11: Rover-family (conclusively null), the
 PCA-under-rotation question (seed noise; cma is the robust winner), the

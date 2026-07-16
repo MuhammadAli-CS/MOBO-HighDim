@@ -236,6 +236,15 @@ LABEL_OVERRIDES = {
         "mab_policy": "ducb",
         "mab_shared_cma": True,
     },
+    # LABCAT-style shape (Visser et al. 2023): fitness-weighted PCA computed
+    # genuinely IN lengthscale-whitened coordinates, rotation kept directly
+    # (not undone) and composed with the whitening scale -- the opposite
+    # construction from ard_pca_ellipsoid, which computes a lengthscale-blind
+    # PCA rotation first and only reweights axis WIDTHS afterward. See
+    # compute_labcat_style_shape's docstring (morbo/utils.py) for the exact
+    # procedure and the multi-objective weighting adaptation (LABCAT is
+    # single-objective; we substitute mean per-objective min-max rank).
+    "labcat_style": {"tr_shape": "labcat_style"},
 }
 
 if __name__ == "__main__":

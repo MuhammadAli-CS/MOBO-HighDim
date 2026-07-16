@@ -32,6 +32,7 @@ from botorch.utils.transforms import normalize
 from morbo.utils import (
     compute_ard_box_shape,
     compute_ard_pca_ellipsoid_shape,
+    compute_labcat_style_shape,
     compute_cma_ellipsoid_shape,
     compute_pca_ellipsoid_shape,
     extract_ard_lengthscale,
@@ -130,7 +131,17 @@ class TurboHParams:
             movement, temporally smoothed across iterations -- unlike the one-shot
             PCA variants, the covariance is a persistent per-TR state that adapts to
             *success*, not just to where data happens to lie; cf. Wang et al. 2026,
-            AS-SMEA). Only "isotropic" is supported together with `use_kronecker_gp`.
+            AS-SMEA). "labcat_style": fitness-weighted PCA computed genuinely IN
+            lengthscale-whitened coordinates (Visser et al. 2023, LABCAT) -- the
+            opposite construction/order from "ard_pca_ellipsoid": there, the PCA
+            rotation is computed first (lengthscale-blind) and lengthscales only
+            reweight axis widths afterward; here, the local data is whitened by
+            lengthscale FIRST, a fitness-weighted covariance is computed in that
+            whitened space, and its eigenvectors are kept directly as the rotation
+            -- both lengthscale and (a multi-objective adaptation of) fitness shape
+            the rotation itself, not just the widths. See
+            `compute_labcat_style_shape` (morbo/utils.py) for the exact procedure.
+            Only "isotropic" is supported together with `use_kronecker_gp`.
         cma_c_mu: (cma_ellipsoid only) learning rate for the rank-mu covariance
             update from elite points. Higher adapts faster but is noisier.
         cma_c1: (cma_ellipsoid only) learning rate for the rank-one evolution-path
@@ -269,6 +280,7 @@ class TurboHParams:
         "pca_ellipsoid",
         "ard_pca_ellipsoid",
         "cma_ellipsoid",
+        "labcat_style",
         "mab_shape",
     }
 
@@ -808,7 +820,7 @@ class TrustRegion(ABC, Module):
                 torch.eye(self.dim, device=self.length.device, dtype=self.length.dtype),
                 self.length.expand(self.dim).clone(),
             )
-        needs_ard = shape in ("ard_box", "ard_pca_ellipsoid")
+        needs_ard = shape in ("ard_box", "ard_pca_ellipsoid", "labcat_style")
         lengthscale = (
             extract_ard_lengthscale(self.model, self.dim) if needs_ard else None
         )
@@ -851,10 +863,19 @@ class TrustRegion(ABC, Module):
             self.cma_path = path_new.detach()
             self.cma_prev_center = self.X_center_normalized.detach().clone()
             return R, axis_lengths
-        else:  # "ard_pca_ellipsoid"
+        elif shape == "ard_pca_ellipsoid":
             return compute_ard_pca_ellipsoid_shape(
                 X=normalize(self.X, bounds=self.bounds),
                 X_center=self.X_center_normalized,
+                lengthscale=lengthscale,
+                length=self.length,
+                dim=self.dim,
+            )
+        else:  # "labcat_style"
+            return compute_labcat_style_shape(
+                X=normalize(self.X, bounds=self.bounds),
+                X_center=self.X_center_normalized,
+                Y_obj=self.objective(self.Y),
                 lengthscale=lengthscale,
                 length=self.length,
                 dim=self.dim,

@@ -502,18 +502,36 @@ effective-dimension finding beyond our own synthetic `SparseDTLZ2`.
 ### Directly overlapping prior art (must cite / differentiate from)
 
 **LABCAT** — Visser, van Daalen & Schoeman, arXiv:2311.11328 (2023, rev. 2024).
-Rotates the trust region to align with weighted principal components of
-local data *and* rescales axes by GP ARD lengthscales — essentially the
-union of our `pca_ellipsoid` and `ard_box` ideas, single-objective only,
-tested on COCO/BBOB. No effective-vs-nominal-dimension analysis, no MO
-extension, no bandit-over-shapes. **This is the closest single prior-art
-match to our work and needs an explicit differentiation paragraph in
-`methods.tex`** (done — see `methods.tex`'s "Relation to prior work"
-paragraph): our contribution is (a) the MORBO/multi-objective setting,
+Rotates the trust region (also an $L_\infty$ box, matching our own scoping
+decision) to align with a *fitness-weighted* PCA of local data computed
+*genuinely inside* a coordinate frame first whitened by GP ARD
+lengthscales — i.e. lengthscale and fitness both shape the rotation
+directly, verified by pulling the paper's exact Eq. 11-14 (length-scale
+rescaling) and Eq. 24/31/36 (fitness-weighted PCA in the rescaled space,
+composed with — not undone against — the whitening). This is **not**
+simply "the union of our `pca_ellipsoid` and `ard_box` ideas" (an earlier,
+imprecise characterization in this file, corrected here): our
+`ard_pca_ellipsoid` computes an *unweighted* PCA rotation first,
+lengthscale-blind, and only reweights that fixed rotation's axis *widths*
+by lengthscale afterward — deliberately, because doing the reverse (undo
+lengthscale-whitening on the resulting *covariance matrix* before
+eigendecomposing) is a proven mathematical no-op,
+$D(D^{-1}\Sigma D^{-1})D = \Sigma$ for any diagonal $D$. LABCAT's
+construction does not undo the whitening before eigendecomposing, so it
+avoids that degeneracy and is a genuinely different, non-degenerate
+geometry from either of our own PCA variants. LABCAT is single-objective
+only, tested on COCO/BBOB. No effective-vs-nominal-dimension analysis, no
+MO extension, no bandit-over-shapes. **This is the closest single
+prior-art match to our work and needs an explicit differentiation
+paragraph in `methods.tex`** (done — see `methods.tex`'s "Relation to
+prior work" paragraph, now updated to reflect the precise mechanism
+above): our contribution is (a) the MORBO/multi-objective setting,
 (b) the effective-dimension-vs-budget governing-variable result backed by
 `SparseDTLZ2`, (c) `cma_ellipsoid` as a persistent-covariance alternative
-with a distinct low-data regime where it wins, and (d) `mab_shape` as a
-portfolio mechanism over shape families, none of which LABCAT has.
+with a distinct low-data regime where it wins, (d) `mab_shape` as a
+portfolio mechanism over shape families, and (e) a direct empirical
+comparison against LABCAT's own construction (below), none of which
+LABCAT has.
 **DONE (queued for cluster, RESULTS.md §12):** we now also run directly on
 a BBOB-style benchmark (`morbo/problems/bbob_style.py`, faithful-in-spirit
 reimplementations, not the official `cocoex` — see that file's docstring
@@ -524,6 +542,20 @@ LABCAT's paper reports its PCA-aligned region winning on Rosenbrock
 (see this file's LAGO section above, which cites the same LABCAT
 comparison) — our `bbob_rosenbrock_rosenbrock` and `bbob_rastrigin_rastrigin`
 pairs test exactly this contrast for our own PCA/CMA/bandit variants.
+**DONE (queued for cluster, RESULTS.md §13):** for completeness, we also
+implemented LABCAT's own construction directly as `tr_shape="labcat_style"`
+(`compute_labcat_style_shape` in `morbo/utils.py`, unit-tested and
+smoke-tested) — the actual whiten-then-fitness-weighted-PCA ordering
+described above, not merely characterized in prose — and run across the
+full tr_shape study (42 experiments × 5 seeds = 210 jobs via
+`cluster/submit_labcat_style.sh`, everywhere other shape variants already
+have baselines), headlined by `tr_shape_dtlz2_100d` (smooth, no
+ill-conditioning) and `bbob_rosenbrock_rosenbrock` (LABCAT's own reported
+win condition). Since LABCAT's
+fitness-weighting presupposes a single scalar to rank by, our
+multi-objective substitution (mean per-objective min-max rank across the
+local data) is a disclosed, necessary adaptation, not a hidden
+simplification.
 
 **CMA-BO / CMA-TuRBO / CMA-BAxUS** — Ngo, Ha, Chan, Nguyen & Zhang, TMLR 2024,
 arXiv:2402.03104. Uses CMA-ES as a *meta-algorithm* estimating a
@@ -654,12 +686,15 @@ problem?" Candidates, ranked by how directly they'd answer that:
    epsilon-greedy's variance/non-stationarity failures with discounted UCB
    rather than going contextual; this remains the next upgrade.
 3. **DONE.** Add an explicit LABCAT/CMA-BO differentiation paragraph to
-   `methods.tex` (in place), plus **DONE**: a BBOB-style benchmark battery
-   giving a direct within-study comparison point to LABCAT's own reported
-   Rosenbrock/multimodal results (`RESULTS.md` §12, queued for cluster).
-   Still missing: a Hvarfner-style global vanilla-BO baseline (no trust
-   region at all) and an AdaScale-TuRBO follow-up on the `ard_box` fix
-   question.
+   `methods.tex` (in place, now corrected to the precise verified
+   mechanism), plus **DONE**: a BBOB-style benchmark battery giving a
+   direct within-study comparison point to LABCAT's own reported
+   Rosenbrock/multimodal results (`RESULTS.md` §12, queued for cluster),
+   plus **DONE**: a direct implementation of LABCAT's own construction as
+   `tr_shape="labcat_style"` (`RESULTS.md` §13, queued for cluster) —
+   completeness, not just differentiation. Still missing: a Hvarfner-style
+   global vanilla-BO baseline (no trust region at all) and an
+   AdaScale-TuRBO follow-up on the `ard_box` fix question.
 
 ---
 

@@ -453,6 +453,82 @@ def compute_ard_pca_ellipsoid_shape(
     return R, axis_lengths
 
 
+def compute_labcat_style_shape(
+    X: Tensor,
+    X_center: Tensor,
+    Y_obj: Tensor,
+    lengthscale: Tensor,
+    length: Tensor,
+    dim: int,
+    eig_floor: float = 1e-8,
+) -> Tuple[Tensor, Tensor]:
+    r"""LABCAT-style shape (Visser et al. 2023): fitness-weighted PCA computed
+    genuinely in lengthscale-whitened coordinates, composed (not undone) with
+    the whitening scale -- the opposite construction/order from
+    `compute_ard_pca_ellipsoid_shape` (see that function's docstring for the
+    no-op this avoids).
+
+    Procedure, following the paper directly: (1) whiten the TR's local data
+    by the ARD lengthscale (`X' = (X - X_center) / lengthscale`, LABCAT's
+    "length-scale-based rescaling", their Eq. 11-14); (2) compute a
+    fitness-weighted covariance of `X'` -- points with better (here: higher,
+    since we maximize) objective values get more weight, LABCAT's Eq. 36;
+    (3) eigendecompose *that* covariance and keep its eigenvectors directly
+    as the rotation `R` -- lengthscale and fitness both shape the rotation,
+    unlike our own `ard_pca_ellipsoid`. Axis widths are the same
+    lengthscale-proportional widths as `compute_ard_box_shape` (LABCAT draws
+    an isotropic box in the fully-transformed, whitened-then-rotated frame,
+    which is equivalent to a box whose original-native per-axis widths --
+    before rotation -- are proportional to the lengthscale; rotating those
+    widths by `R` afterward gives the final rotated-box representation our
+    sampling/containment machinery expects).
+
+    Multi-objective adaptation note: LABCAT is single-objective and weights
+    by `1 - y'` (normalized loss, lower loss = more weight). We have no
+    single scalar to rank by, so we weight by the mean of each point's
+    per-objective values, independently min-max normalized across the local
+    data (higher = better, since we maximize) -- the natural multi-objective
+    analogue of LABCAT's weighting, not a literal reimplementation.
+
+    Falls back to the isotropic shape if there are fewer than `dim + 1`
+    local points (weighted PCA is underdetermined otherwise).
+
+    Args:
+        X, X_center, length, dim, eig_floor: as in `compute_pca_ellipsoid_shape`.
+        Y_obj: `n x m`-dim tensor, `self.objective(self.Y)` for the same
+            local points as `X` (row-aligned), i.e. already-selected
+            objective values (not raw model outputs).
+        lengthscale: a `dim`-dim tensor of (already output-aggregated) ARD
+            lengthscales, e.g. from `extract_ard_lengthscale`.
+
+    Returns:
+        R: `d x d` orthonormal rotation (eigenvectors of the fitness-weighted
+            covariance of the whitened local data).
+        axis_lengths: `d`-dim tensor, geometric-mean-normalized so
+            `axis_lengths.prod() ** (1/d) == length`.
+    """
+    if X.shape[0] < dim + 1:
+        return (
+            torch.eye(dim, device=length.device, dtype=length.dtype),
+            length.expand(dim).clone(),
+        )
+    Xw = (X - X_center) / lengthscale
+    y_min = Y_obj.min(dim=0).values
+    y_max = Y_obj.max(dim=0).values
+    y_range = (y_max - y_min).clamp_min(1e-9)
+    y_norm = (Y_obj - y_min) / y_range  # n x m, higher = better, in [0, 1]
+    w = y_norm.mean(dim=-1).clamp_min(1e-6)  # n, avoid a zero-weight point
+    w_sum = w.sum()
+    cov = (Xw * w.unsqueeze(-1)).t() @ Xw / w_sum
+    cov = 0.5 * (cov + cov.t())  # symmetrize against floating-point drift
+    eigvals, eigvecs = torch.linalg.eigh(cov)
+    R = eigvecs
+    log_ls = lengthscale.log()
+    weights = (log_ls - log_ls.mean()).exp()  # same as compute_ard_box_shape
+    axis_lengths = length * weights
+    return R, axis_lengths
+
+
 def compute_cma_ellipsoid_shape(
     elites: Tensor,
     X_center: Tensor,

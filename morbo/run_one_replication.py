@@ -90,6 +90,7 @@ supported_labels = [
     "composite_dtlz2_ard_pca",
     "mab_shape_ducb",
     "mab_shape_ducb_shared",
+    "labcat_style",
 ]
 
 BASE_SEED = 12346

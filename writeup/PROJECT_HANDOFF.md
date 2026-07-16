@@ -248,6 +248,34 @@ internally comparable only, not directly comparable to published
 COCO/LABCAT tables. Coded, unit-tested (shapes, finiteness, `k_eff`
 no-op-masking, optimum-location sanity), end-to-end BO-loop smoke-tested.
 
+**QUEUED: `labcat_style`, `RESULTS.md` §13** (`cluster/submit_labcat_style.sh`,
+210 jobs: 42 experiments × 5 seeds) — completes the LABCAT comparison: §12
+tests LABCAT's own benchmark family against our shape variants; this
+implements LABCAT's own *construction* directly as
+`tr_shape="labcat_style"` (`compute_labcat_style_shape` in
+`morbo/utils.py`) — fitness-weighted PCA computed genuinely in
+lengthscale-whitened coordinates, rotation kept directly rather than
+reweighted afterward, the opposite order from `ard_pca_ellipsoid` (which
+computes an unweighted PCA rotation first and only reweights axis widths
+by lengthscale afterward — deliberately, since the reverse ordering is a
+proven no-op, see `methods.tex` §7.1). Run across the full tr_shape study
+— every experiment that already has other shape-variant baselines to
+compare against (DTLZ2 dimension sweep, other DTLZ landscapes,
+`tr_shape_methods_*`, Rover, Penicillin, SparseDTLZ2/RotatedSparseDTLZ2/
+TimeVarying, SparseRover, LassoBench, all 8 BBOB pairs — see
+`cluster/submit_labcat_style.sh`'s group comments for the exact list).
+The two headline comparisons remain `tr_shape_dtlz2_100d` (smooth, no
+ill-conditioning — expect it to land close to `ard_pca_ellipsoid`) and
+`bbob_rosenbrock_rosenbrock` (LABCAT's own reported win condition — the
+sharpest test of whether fitness-weighting the rotation matters).
+Multi-objective weighting
+substitution (mean per-objective min-max rank in place of LABCAT's
+single-scalar `1-y'`) is disclosed in `methods.tex`'s `labcat_style`
+subsection. Coded, unit-tested (uniform weights + uniform lengthscale
+reduces exactly to plain PCA; varying either changes the rotation;
+isotropic fallback and geometric-mean normalization both verified),
+smoke-tested end-to-end.
+
 **20-seed confirmation program: DONE, results in `RESULTS.md` §11** —
 core results confirmed at 20/20-or-0/20 unanimity; three revisions (Rover
 conclusively null; PCA's keff50 edge was seed noise, cma is the robust

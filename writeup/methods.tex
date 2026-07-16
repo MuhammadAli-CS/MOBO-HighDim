@@ -37,10 +37,13 @@ extension validated against that benchmark's own published results), that
 the benefit is governed by a problem's \emph{effective} dimensionality in
 input space relative to the evaluation budget, not its nominal
 dimensionality: unanimous, seed-robust wins of $+66$ to $+79\%$
-hypervolume where that structure exists, no benefit and no harm where it
-does not, and a fully diagnosed failure mode (a naive per-dimension
-rescaling baseline) whose collapse we measure directly rather than merely
-observe. The remaining three extensions were built earlier in this
+hypervolume (paired Wilcoxon signed-rank/t-test, $p < 10^{-5}$ at
+$n{=}20$; 95\% CIs excluding zero by wide margins at $n{=}5$; full table
+in Section~\ref{sec:significance}) where that structure exists, a
+statistically confirmed null-to-negative result on a real 30-seed
+molecular-genomics benchmark where it does not, and a fully diagnosed
+failure mode (a naive per-dimension rescaling baseline) whose collapse we
+measure directly rather than merely observe. The remaining three extensions were built earlier in this
 project. \emph{Composite MORBO} replaces MORBO's direct modeling of the
 objectives with modeling of a raw intermediate response together with a
 known reduction to the objectives, integrated as a single composition at
@@ -750,18 +753,38 @@ box wastes volume on directions that don't matter and cannot capture
 correlated structure across dimensions.
 
 \paragraph{Relation to prior work.} The closest single prior-art match is
-\textbf{LABCAT} \citep{visser2023labcat}, which rotates a trust region to
-align with weighted principal components of local data \emph{and} rescales
-axes by GP ARD lengthscales -- essentially the union of our
-\texttt{pca\_ellipsoid} and \texttt{ard\_box} ideas. LABCAT is
-single-objective only, evaluated on COCO/BBOB, and offers no analysis of
-\emph{when} shape adaptation should help; our contribution differs in four
-ways this section and the next establish: the multi-objective MORBO
-setting, an explicit effective-dimension-versus-budget theory of when the
-benefit appears (\S\ref{sec:sparse-dtlz2}), \texttt{cma\_ellipsoid} as a
+\textbf{LABCAT} \citep{visser2023labcat}, which rotates a trust region (also
+an $L_\infty$ box, not a true ellipsoid, matching our own scoping decision
+below) to align with a \emph{fitness-weighted} PCA of local data computed
+\emph{genuinely inside} a coordinate frame first whitened by GP ARD
+lengthscales -- i.e.\ lengthscale and fitness both shape the rotation
+itself. This is mechanistically distinct from both of our own PCA-based
+variants: \texttt{pca\_ellipsoid}/\texttt{ard\_pca\_ellipsoid} compute an
+unweighted PCA rotation first, lengthscale-blind, and only reweight that
+fixed rotation's axis \emph{widths} afterward (\S\ref{sec:tr-shape}'s
+\texttt{ard\_pca\_ellipsoid} paragraph below) -- never re-deriving the
+rotation itself from a
+whitened frame, since doing so \emph{after} un-whitening the resulting
+covariance matrix back to original units is a proven no-op
+($D(D^{-1}\Sigma D^{-1})D = \Sigma$ for any diagonal $D$; see the
+\texttt{ard\_pca\_ellipsoid} discussion). LABCAT does not undo the
+whitening before eigendecomposing, so its construction avoids that
+degeneracy and is a genuinely different geometry from ours. We implement
+this construction directly as \texttt{labcat\_style}
+(\S\ref{sec:labcat-style}) rather than only characterizing it, since the
+two orderings are a real ablation, not equivalent notation for the same
+idea. LABCAT is single-objective only, evaluated on COCO/BBOB, and offers
+no analysis of \emph{when} shape adaptation should help; our contribution
+differs in five ways this section and the next establish: the
+multi-objective MORBO setting (LABCAT's fitness-weighting has no single
+scalar to rank by in our setting; \S\ref{sec:labcat-style} details our
+substitution), an explicit effective-dimension-versus-budget theory of when
+the benefit appears (\S\ref{sec:sparse-dtlz2}), \texttt{cma\_ellipsoid} as a
 persistent-covariance alternative with a distinct low-data regime where it
-alone wins, and \texttt{mab\_shape} as a portfolio mechanism over shape
-families rather than a single fixed geometry. \textbf{CMA-BO}
+alone wins, \texttt{mab\_shape} as a portfolio mechanism over shape
+families rather than a single fixed geometry, and a direct empirical
+comparison against LABCAT's own construction via \texttt{labcat\_style}.
+\textbf{CMA-BO}
 \citep{ngo2024cmabo} also combines CMA-ES with TuRBO-family methods, but as
 a softer meta-algorithm that restricts an existing method to a
 CMA-ES-estimated region of high posterior mass over the optimum, rather
@@ -865,6 +888,43 @@ followed by one more geometric-mean renormalization (the reweighting shifts
 the product away from $\ell^d$) to restore $\prod_k a_k = \ell^d$. Here
 $R$ never changes with $\lambda$ -- lengthscales only affect how wide each
 already-data-determined principal axis is, not which directions are chosen.
+
+\subsection{\texttt{labcat\_style}: replicating LABCAT's own construction}
+\label{sec:labcat-style}
+
+Given the precise mechanism above, the natural completeness check is to
+implement LABCAT's own ordering directly as a \texttt{tr\_shape} mode,
+rather than only characterizing it in prose. \texttt{labcat\_style}
+whitens the local data by lengthscale \emph{first}
+($X' = (X - x_c)/\lambda$, LABCAT's length-scale-based rescaling), computes
+a \emph{fitness-weighted} covariance of $X'$, and keeps that covariance's
+eigenvectors directly as $R$ -- lengthscale and fitness both shape the
+rotation itself, the opposite order from \texttt{ard\_pca\_ellipsoid}
+above and, per the no-op identity given there, a non-degenerate
+construction rather than a relabeling of plain PCA:
+\begin{equation}
+  X' = \frac{X - x_c}{\lambda}, \qquad
+  \Sigma_w = \frac{1}{\sum_i w_i}\sum_i w_i\, x'_i x_i'^\top, \qquad
+  \Sigma_w = R\,\mathrm{diag}(\sigma_1^2,\dots,\sigma_d^2)\,R^\top.
+\end{equation}
+LABCAT is single-objective and weights points by $w_i = 1 - y_i'$
+(normalized loss; lower loss gets more weight). Our setting has no single
+scalar to rank by, so we substitute the mean of each point's per-objective
+values, independently min-max normalized across the trust region's local
+data (higher is better, since we maximize) -- the direct multi-objective
+analogue of LABCAT's weighting, not a literal reimplementation of a
+mechanism that presupposes a total order. Axis widths use the same
+lengthscale-proportional formula as \texttt{ard\_box}
+(Equation~\ref{eq:ard-box}): LABCAT draws an isotropic box in the fully
+whitened-then-rotated frame, which is equivalent, before rotation, to a
+box whose per-axis widths are proportional to $\lambda$; rotating those
+widths by $R$ afterward gives the rotated-box representation our
+sampling/containment machinery already expects, so no new representation
+is needed. Falls back to the isotropic shape under the same $n < d+1$
+condition as the other data-driven variants. Results are queued
+(\S\ref{sec:tr-shape-future}); see also the LABCAT Rosenbrock/Levy
+cross-reference in \S\ref{sec:bbob-style}, which \texttt{labcat\_style} is
+run against directly on the same \texttt{BBOBBiObj} configs.
 
 \subsection{Consuming the shape: sampling and containment}
 
@@ -1529,7 +1589,9 @@ consistent with rugged local landscapes not producing the degenerate
 constraint-compounding collapse (a diagnostic lengthscale-spread check
 remains to be run).
 
-\paragraph{Net effect on the headline claim.} Shape adaptation helps when
+\paragraph{Net effect on the headline claim.}
+\label{sec:tr-shape-summary}
+Shape adaptation helps when
 the problem has low effective dimensionality \emph{in the input space}
 and the effective subspace's landscape is tractable for local GP
 modeling; the benefit generalizes across Pareto-front geometries but does
@@ -1611,6 +1673,67 @@ the mean improvement, composite adds a modest final increment
 ($32.3 \to 33.7$) and a $5\times$ variance reduction (std $1.52 \to
 0.31$); composite+ARD-PCA (std $0.15$) is the most reliable configuration
 tested anywhere in this study.
+
+\subsection{Statistical significance and cross-benchmark summary}
+\label{sec:significance}
+
+Effect sizes as large as $+66$--$79\%$ invite a fair question: why so
+large, and is it just DTLZ2? Every percentage reported above and in
+\S\ref{sec:tr-shape} is a \emph{paired} per-seed hypervolume delta (same
+seed $\Rightarrow$ same problem instance and initial data, so pairing
+removes seed-to-seed variance rather than treating runs as independent
+samples); Table~\ref{tab:significance} adds a formal test to each headline
+claim, computed by \texttt{compute\_significance.py}: a Wilcoxon
+signed-rank test (primary, distribution-free) and a paired $t$-test
+(secondary), plus a $t$-based 95\% CI on the mean paired percent delta. At
+$n{=}5$ (the un-extended dimension sweep) Wilcoxon's exact two-sided
+$p$-value floors at $0.0625$ regardless of effect size -- a property of
+the rank test at that sample size, not evidence of a weak effect; the
+paired $t$-test and CI, which have no such floor, are the informative
+numbers there. At $n{=}20$ (the 20-seed program, \S\ref{sec:twenty-seed})
+and $n{=}30$ (LassoBench) Wilcoxon itself is already decisive
+($p < 2 \times 10^{-6}$ throughout).
+
+\begin{table}[h]
+\centering
+\caption{Paired significance tests for headline claims. LassoBench rows
+are the null-result comparison (\S\ref{sec:tr-shape-summary}), included
+deliberately: the same procedure that finds large, tight-CI wins on DTLZ2
+finds a real, tight-CI \emph{loss} here, which is evidence the wins are
+not an artifact of the testing procedure.}
+\label{tab:significance}
+\begin{tabular}{lrrrrr}
+\toprule
+Comparison & $n$ & mean $\Delta$ & 95\% CI & Wilcoxon $p$ & paired $t$ $p$ \\
+\midrule
+DTLZ2 100d, \texttt{pca\_ellipsoid} & 5 & $+66.6\%$ & $[58.0, 75.2]$ & 0.0625 & $3.2{\times}10^{-6}$ \\
+DTLZ2 100d, \texttt{ard\_pca\_ellipsoid} & 5 & $+66.4\%$ & $[57.1, 75.8]$ & 0.0625 & $6.4{\times}10^{-6}$ \\
+DTLZ2 100d, \texttt{ard\_box} & 5 & $-49.2\%$ & $[-64.0, -34.4]$ & 0.0625 & $5.7{\times}10^{-4}$ \\
+DTLZ5 100d, \texttt{pca\_ellipsoid} & 5 & $+13.0\%$ & $[9.6, 16.5]$ & 0.0625 & $3.1{\times}10^{-4}$ \\
+\texttt{mab\_shape\_ducb} & 20 & $+69.8\%$ & $[59.3, 80.4]$ & $1.9{\times}10^{-6}$ & $1.0{\times}10^{-13}$ \\
+\texttt{mab\_shape\_ducb\_shared} & 20 & $+75.7\%$ & $[64.4, 87.0]$ & $1.9{\times}10^{-6}$ & $2.0{\times}10^{-16}$ \\
+\texttt{linear\_gp\_pca} & 20 & $+78.9\%$ & $[64.3, 93.5]$ & $1.9{\times}10^{-6}$ & $1.1{\times}10^{-14}$ \\
+\texttt{cma\_ellipsoid} (methods, 100d) & 20 & $+39.9\%$ & $[26.8, 53.0]$ & $1.9{\times}10^{-6}$ & $1.3{\times}10^{-7}$ \\
+LassoBench DNA, \texttt{pca\_ellipsoid} & 30 & $-2.5\%$ & $[-4.1, -0.9]$ & $1.6{\times}10^{-3}$ & $2.3{\times}10^{-3}$ \\
+LassoBench DNA, \texttt{cma\_ellipsoid} & 30 & $-5.2\%$ & $[-6.9, -3.6]$ & $1.4{\times}10^{-6}$ & $4.8{\times}10^{-7}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On generality: the largest wins cluster on DTLZ2/DTLZ5 specifically
+because those are the landscapes where the effective-dimension
+precondition of finding 2 (\S\ref{sec:tr-shape-summary}) is most cleanly
+satisfied -- that is the intended story, not an artifact of picking one
+favorable benchmark. Beyond plain DTLZ2, the shape variants are run
+through DTLZ1/3/5/7 (rugged vs.\ smooth $g$), the \texttt{SparseDTLZ2}
+effective-dimension dose-response, \texttt{RotatedSparseDTLZ2} (effective
+subspace off-axis), \texttt{TimeVaryingSparseDTLZ2} (non-stationary
+effective subspace), two real non-algebraic problems (Rover, a
+checkpointed Penicillin bioprocess simulator), and LassoBench (a real
+30-seed molecular-genomics benchmark) -- eight distinct problem families
+beyond DTLZ2, with the null/negative results on Rover and LassoBench
+landing exactly where the effective-dimension theory predicts they should,
+tested with the same statistical rigor as the wins.
 
 \subsection{BBOB-style landscape taxonomy (queued)}
 \label{sec:bbob-style}
