@@ -735,12 +735,22 @@ productive direction, not competing implementations of the same idea.
 
 \subsection{Three geometries, one scoping decision}
 
-We implement three alternatives, selected via a new \texttt{tr\_shape}
-hyperparameter (\texttt{"isotropic"} by default, reproducing existing
-behavior exactly), each replacing only the trust region's \emph{shape} state
--- a rotation $R \in \mathbb{R}^{d \times d}$ (orthonormal columns) and a
-per-axis width vector $a \in \mathbb{R}^d$ -- recomputed once per trust
-region per BO iteration, immediately after that iteration's model refit.
+We implement three alternatives in this subsection --
+\texttt{ard\_box}, \texttt{pca\_ellipsoid}, and \texttt{ard\_pca\_ellipsoid}
+-- as the base case; two further geometries
+(\texttt{cma\_ellipsoid}, a persistent-covariance alternative to
+one-shot PCA, \S\ref{sec:tr-shape}'s later subsection on new shape
+mechanisms) and a portfolio mechanism that selects among all of the above
+per trust region rather than fixing one globally
+(\texttt{mab\_shape}, with two arm-selection policies developed across
+\S\ref{sec:twenty-seed} and its results) are introduced later in this
+section once the base geometries and their failure modes are established.
+All are selected via the same \texttt{tr\_shape} hyperparameter
+(\texttt{"isotropic"} by default, reproducing existing behavior exactly),
+each replacing only the trust region's \emph{shape} state -- a rotation
+$R \in \mathbb{R}^{d \times d}$ (orthonormal columns) and a per-axis width
+vector $a \in \mathbb{R}^d$ -- recomputed once per trust region per BO
+iteration, immediately after that iteration's model refit.
 Critically, \textbf{GP fitting itself is left completely unchanged}: the
 input transform `\texttt{Normalize(bounds=get\_bounds())}` used to fit the
 local model still normalizes against the isotropic bounding box regardless
