@@ -121,8 +121,9 @@ python aggregate_seeds.py tr_shape_dtlz2_100d   # mean ± std per method
 
 ## 4d. Bandit-guided shape selection and the effective-dimension sweep
 
-Two more follow-ups, coded and smoke-tested locally, not yet run on the
-cluster (see `writeup/FURTHER_DIRECTIONS.md` for full motivation):
+**Status: complete, results in `experiments/tr_shape_dtlz2_100d/RESULTS.md`
+§6-7.** Commands kept here for reproduction (see
+`writeup/FURTHER_DIRECTIONS.md` for full motivation):
 
 ```
 bash cluster/submit_mab_shape.sh       # mab_shape @ d=100/150/200 + Rover
@@ -146,8 +147,9 @@ nominal `d` at fixed effective dim, and effective dim at fixed nominal `d`.
 
 ## 4e. New benchmark battery: real problems + mechanism-probing synthetics
 
-Three new submission scripts (all coded and locally smoke-tested; see the
-problem files' docstrings in `morbo/problems/` for full rationale):
+**Status: complete, results in `experiments/tr_shape_dtlz2_100d/RESULTS.md`
+§10.** Commands kept here for reproduction (see the problem files'
+docstrings in `morbo/problems/` for full rationale):
 
 ```
 bash cluster/submit_real_benchmarks.sh              # stage 1: LassoBench synt_medium (30 seeds!) + SparseRover (240 jobs)
@@ -173,6 +175,58 @@ budgets: 1000 evals for synt_medium/DNA, 5000 for synt_high), so our
 best-validation-loss curves are directly comparable against their
 published TuRBO/CMA-ES/Sparse-HO numbers, not just internally against our
 own baseline. Mind the queue: stage 1 alone is 240 jobs.
+
+## 4f. Twenty-seed confirmation program + composite×shape at $d{=}100$
+
+**Status: complete, results in `experiments/tr_shape_dtlz2_100d/RESULTS.md`
+§11.** Every core comparison rerun at 20 seeds (matching the MORBO paper's
+own replication count), plus the composite×shape factorial rerun at
+$d{=}100$ (where shape adaptation actually has an effect for it to
+interact with -- the original Penicillin 2×2 ran at $d{=}7$, a shape-null
+regime):
+
+```
+bash cluster/submit_followups.sh    # 48 jobs: resolves specific open questions from the main sweep
+bash cluster/submit_20seed.sh       # stage A: conclusion-changing reruns (~435 jobs)
+bash cluster/submit_20seed.sh paper # stage B: protocol-matching reruns (~450 jobs)
+bash cluster/submit_composite_shape_100d.sh  # 15 jobs: composite x shape at d=100
+```
+
+Three single-seed headline claims did **not** survive 20 seeds and were
+corrected in the writeup (not silently overwritten -- see RESULTS.md §11
+for what changed and why): the Rover-family "+4.9%" shrank to a
+conclusively null "+0.4%"; `pca_ellipsoid`'s apparent edge under a rotated
+effective subspace was mostly seed noise (`cma_ellipsoid` is the real,
+robust winner there); and `mab_shape`'s single-seed "best method at
+$d{=}100$" showing was a lucky draw (20-seed mean +33.5% with std 7.2,
+not the best method) -- which directly motivated §4g below.
+
+## 4g. Fixing `mab_shape`'s variance and non-stationarity failures
+
+**Status: complete, results in `experiments/tr_shape_dtlz2_100d/RESULTS.md`
+§11g-h.** Two iterations, each fixing a measured failure of the last:
+
+```
+bash cluster/submit_mab_ducb.sh     # 45 jobs: discounted-UCB arm selection
+bash cluster/submit_mab_shared.sh   # 45 jobs: + shared CMA covariance state
+```
+
+`mab_shape_ducb` (`mab_policy="ducb"`) replaces epsilon-greedy with
+discounted UCB (Garivier & Moulines 2011): decayed per-arm reward
+sums/counts whose exploration bonus regrows for stale arms and anneals as
+counts grow, targeting the two failure modes §4f's 20-seed program
+measured (stale reward estimates under non-stationarity; a fixed
+exploration tax at tight budgets). `mab_shape_ducb_shared`
+(`mab_shared_cma=True`) additionally advances the CMA covariance at every
+shape update regardless of which arm is played, so arm-switching no longer
+starves `cma_ellipsoid`'s state of updates. Net result: the final
+configuration (`mab_shape_ducb_shared`) is statistically tied with the
+best fixed shape at $d{=}100$ (closing the variance problem entirely,
++75.7\% at 20/20), and the one regime that still fails (tight-budget
+$d{=}200$) is now understood as information-theoretic rather than
+design-fixable -- every arm's reward is zero until a breakthrough that
+never comes, so no selection policy has anything to act on. See
+RESULTS.md §11h for the full diagnosis.
 
 ## 5. LLM-dependent parts (Parts 2 and 3)
 

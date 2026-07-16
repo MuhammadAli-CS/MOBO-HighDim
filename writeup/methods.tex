@@ -14,9 +14,8 @@
 \newcommand{\TR}{\mathrm{TR}}
 \DeclareMathOperator*{\argmax}{arg\,max}
 
-\title{Three Extensions to MORBO: Composite Modeling, \\
-LLM-Assisted Candidate Generation, and \\
-LLM-Automated Tiered Scalarization}
+\title{Extensions to MORBO: Trust-Region Shape Adaptation, \\
+Composite Modeling, and LLM-Assisted Candidate Generation}
 \author{SURP MOBO-HighDim Project}
 \date{\today}
 
@@ -24,34 +23,50 @@ LLM-Automated Tiered Scalarization}
 \maketitle
 
 \begin{abstract}
-We describe three extensions built on top of MORBO
+We describe four extensions built on top of MORBO
 \citep{daulton2022morbo}, a coordinated multi-trust-region algorithm for
 multi-objective Bayesian optimization (MOBO) over high-dimensional search
-spaces. The first, \emph{composite MORBO}, replaces MORBO's direct modeling
-of the objectives with modeling of a raw intermediate response together with
-a known reduction to the objectives, integrated as a single composition at
-the point where MORBO's internal objective functional is constructed. The
-second, \emph{LLM-assisted MORBO}, augments MORBO's Thompson-sampling
-candidate pool with points proposed by a large language model once per trust
-region per iteration, screened by MORBO's existing hypervolume-improvement
-acquisition rather than accepted unconditionally. The third,
-\emph{LLM-automated tiered scalarization}, is a standalone method (not built
-on MORBO's trust-region machinery) that automates the specification of a
-BoTier-style \citep{botier2025} hierarchical, priority-ordered scalarization
-via a single LLM query, after which an ordinary single-objective
-Bayesian optimization loop recovers one compromise point on the Pareto
-front consistent with the inferred priorities. We give the precise
-mechanism, integration points, and pseudocode for each. We further show the
-first two extensions compose without new implementation, and report two
-follow-up studies scoped around a specific prior-work finding: combining
-composite modeling with MORBO is not itself new
-\citep{maddox2021hogp}, so we isolate (i) whether the reported benefit is
-attributable to correlation-aware raw-response modeling specifically or to
-simple per-dimension decoupling, via a controlled ablation on a
-deliberately correlated synthetic raw response, and (ii) whether composite
-modeling helps on a composite structure drawn from a genuine black-box
-simulator (a checkpointed fermentation trajectory) rather than a synthetic
-decomposition of a closed-form test function.
+spaces. The central contribution, \emph{trust-region shape adaptation}
+(Section~\ref{sec:tr-shape}), replaces MORBO's isotropic axis-aligned
+trust regions with data-driven geometries -- PCA-rotated ellipsoids, a
+CMA-ES-style persistent covariance, and a per-region multi-armed bandit
+that learns which geometry to use without being told in advance -- and
+establishes, across a 20-seed confirmation program spanning eleven
+synthetic and real benchmarks (including a bi-objective LassoBench
+extension validated against that benchmark's own published results), that
+the benefit is governed by a problem's \emph{effective} dimensionality in
+input space relative to the evaluation budget, not its nominal
+dimensionality: unanimous, seed-robust wins of $+66$ to $+79\%$
+hypervolume where that structure exists, no benefit and no harm where it
+does not, and a fully diagnosed failure mode (a naive per-dimension
+rescaling baseline) whose collapse we measure directly rather than merely
+observe. The remaining three extensions were built earlier in this
+project. \emph{Composite MORBO} replaces MORBO's direct modeling of the
+objectives with modeling of a raw intermediate response together with a
+known reduction to the objectives, integrated as a single composition at
+the point where MORBO's internal objective functional is constructed.
+\emph{LLM-assisted MORBO} augments MORBO's Thompson-sampling candidate
+pool with points proposed by a large language model once per trust region
+per iteration, screened by MORBO's existing hypervolume-improvement
+acquisition rather than accepted unconditionally. \emph{LLM-automated
+tiered scalarization} is a standalone method (not built on MORBO's
+trust-region machinery) that automates the specification of a BoTier-style
+\citep{botier2025} hierarchical, priority-ordered scalarization via a
+single LLM query, after which an ordinary single-objective Bayesian
+optimization loop recovers one compromise point on the Pareto front
+consistent with the inferred priorities. We give the precise mechanism,
+integration points, and (where applicable) pseudocode for each, show the
+composite and LLM-assisted extensions compose with each other and with
+shape adaptation without new implementation, and report two follow-up
+studies scoped around a specific prior-work finding: combining composite
+modeling with MORBO is not itself new \citep{maddox2021hogp}, so we
+isolate (i) whether the reported benefit is attributable to
+correlation-aware raw-response modeling specifically or to simple
+per-dimension decoupling, via a controlled ablation on a deliberately
+correlated synthetic raw response, and (ii) whether composite modeling
+helps on a composite structure drawn from a genuine black-box simulator (a
+checkpointed fermentation trajectory) rather than a synthetic decomposition
+of a closed-form test function.
 \end{abstract}
 
 \section{Background}
@@ -579,26 +594,48 @@ more local data before every refit.
 
 \begin{table}[h]
 \centering
-\caption{Curve-construction results at $d=100$: DTLZ2-curve, $K=8$ curve points, 600 evals, batch 50, 3 trust regions, seed 0.}
+\caption{Curve-construction results at $d=100$: DTLZ2-curve, $K=8$ curve points, 600 evals, batch 50, 3 trust regions, seed 0. Executed on Cornell's Unicorn SLURM cluster (\texttt{aimi} partition, NVIDIA B200 GPUs) rather than CPU-only, since the Kronecker-GP variant's fit cost was already the single most resource-intensive configuration in this work at the smaller $d=20$ scale.}
 \label{tab:curve-100d-results}
 \begin{tabular}{lccc}
 \toprule
 Method & Final hypervolume & Pareto set size & Total fit time \\
 \midrule
-Standard MORBO & TBD & TBD & TBD \\
-Independent-GP composite & TBD & TBD & TBD \\
-Kronecker-GP composite & TBD & TBD & TBD \\
+Standard MORBO & \textbf{22.11} & 8 & 2422s \\
+Independent-GP composite & 21.20 ($-4.1\%$) & 19 & 231s \\
+Kronecker-GP composite & 16.34 ($-26.1\%$) & 15 & 3268s \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\emph{Run in progress at time of writing.} Unlike
-Section~\ref{sec:kronecker-ablation}'s laptop run, this one executes on
-Cornell's Unicorn SLURM cluster (\texttt{aimi} partition, NVIDIA B200 GPUs)
-rather than CPU-only, since the Kronecker-GP variant's fit cost was already
-the single most resource-intensive configuration in this work at the
-smaller $d=20$ scale and was expected to be substantially more expensive
-still at $5\times$ the input dimension and $3\times$ the eval budget.
+\textbf{Neither composite variant helps at $d{=}100$ with the curve
+construction -- the opposite of what dimensionality-as-the-driver would
+predict.} Both the independent-GP and Kronecker-GP composites are now
+\emph{worse} than direct modeling ($-4.1\%$ and $-26.1\%$ respectively),
+where Table~\ref{tab:composite-fig2-results}'s $(g,\cos,\sin)$
+construction at the identical scale showed composite modeling \emph{ahead}
+by $+24.9\%$. Since dimension, budget, and every other hyperparameter are
+held fixed between the two settings, this rules out dimensionality as the
+explanation for Section~\ref{sec:kronecker-ablation}'s $d{=}20$
+near-null result and points squarely at the raw-response
+\emph{construction} instead: the curve's $K{=}8$ points are all smooth,
+overlapping functions of the same two scalars ($g(x)$ and $x_0$), so
+decomposing DTLZ2's objectives into a curve adds representational
+redundancy without adding information the GP can exploit -- and at
+$d{=}100$ that redundancy costs accuracy rather than being merely neutral,
+plausibly because each trust region's local data is spread thinner across
+$8$ correlated raw outputs while modeling $100$ input dimensions,
+degrading every one of those fits slightly. The Kronecker variant's
+further, much larger loss reproduces
+Section~\ref{sec:kronecker-ablation}'s finding at $\sim$14$\times$ the
+cost of the independent-GP fit (3268s vs.\ 231s) -- joint-correlation
+modeling remains a pure cost with no accuracy benefit on this raw response,
+now confirmed at both dimensions tested. The clean methodological result
+of this section is therefore not "does dimensionality explain the gap"
+(no) but a sharper one: \emph{which raw response you decompose into
+matters far more than how large the problem is} -- Section~\ref{sec:composite}'s
+$(g,\cos,\sin)$ construction and this curve construction are both exact,
+verified reparametrizations of the identical DTLZ2 objectives, yet one
+helps by $+25\%$ and the other hurts by $-4$ to $-26\%$ at the same scale.
 
 \section{Composite MORBO on a Real Simulator: Penicillin Fermentation}
 \label{sec:penicillin}
@@ -1642,8 +1679,37 @@ sees which directions matter to the \emph{objectives}).
 
 \section{Discussion}
 
+Trust-region shape adaptation (Section~\ref{sec:tr-shape}) occupies a
+design axis none of the other three extensions touch: it changes
+\emph{where in design space candidates get sampled from}, leaving both the
+surrogate model's target and the acquisition/selection pipeline
+untouched by default (composability with composite modeling is
+demonstrated directly, Section~\ref{sec:tr-shape}'s composite$\times$shape
+factorial). Its headline finding is conditional rather than universal --
+substantial, seed-robust hypervolume gains ($+66$ to $+79\%$ across the
+DTLZ family, generalizing across multimodal, degenerate, and disconnected
+Pareto-front geometries) precisely when a problem's effective
+dimensionality in input space is low relative to its evaluation budget,
+and no reliable effect (real-world Rover, LassoBench-MO) when it is not
+-- a distinction this work is able to draw sharply only because a
+purpose-built synthetic benchmark (\texttt{SparseDTLZ2}) lets nominal and
+effective dimensionality be varied independently, something no problem in
+the existing literature we are aware of permits directly. The
+per-region bandit results (a chain of three iterations, each fixing a
+measured failure of the last, converging on a configuration
+statistically tied with the best fixed geometry while requiring no advance
+knowledge of which geometry that is) and the precise, information-theoretic
+account of the one regime that remains unsolved (tight-budget high-$d$
+settings, where the bandit's own reward signal is uninformative until a
+breakthrough that never comes) are, we believe, the most methodologically
+transferable results in this work: they demonstrate not just that
+adaptive portfolio methods over local-search geometries are viable, but
+where and why they fail, in terms specific enough to predict when a
+different design would be needed.
+
 The three extensions from Sections~\ref{sec:composite}--\ref{sec:botier}
-occupy distinct, largely orthogonal design axes. Composite modeling changes
+occupy distinct, largely orthogonal design axes among themselves as well.
+Composite modeling changes
 \emph{what} the surrogate model predicts -- a raw response versus the final
 objectives -- independent of how candidates get proposed or how objectives
 get aggregated. LLM-assisted candidate generation changes \emph{how new

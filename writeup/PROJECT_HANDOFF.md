@@ -264,22 +264,24 @@ reward. See `FURTHER_DIRECTIONS.md` "Next phase" for the full ranked
 queue (contextual gating by measured input-space effective dim, noise
 experiments, remaining benchmarks).
 
-**Benchmark battery: DONE, results in `RESULTS.md` §10.** Key outcomes —
-two honest prediction failures that sharpened the headline claim:
-LassoBench-MO (30 seeds, their paper's protocol) shows MORBO externally
-competitive with their dedicated single-objective methods (DNA 0.304 vs.
-their TuRBO 0.292) but **no shape-adaptation benefit** — LassoBench's
-effective dim is coefficient sparsity, not input no-ops; SparseRover's
-no-op padding also failed to unlock the benefit. Refined claim: shape
-adaptation needs low effective dimensionality *in the input space* AND a
-GP-tractable effective-subspace landscape. RotatedSparseDTLZ2 confirmed
-ard_box degrades under rotation and crowned **cma_ellipsoid as the only
-rotation-robust winner (5/5)** while unexpectedly demoting pca_ellipsoid
-(needs a multi-seed axis-aligned rerun to interpret). DTLZ3/5/7 show
-strong generalization (PCA variants 5/5 everywhere informative, +8-21%)
-with ard_box's failure revealed as landscape-dependent (wins on rugged-g
-DTLZ3/7). TimeVaryingSparseDTLZ2 was a null-by-design-flaw (wrong k_eff)
-— rerun at k_eff=50 pending.
+**Benchmark battery: DONE, results in `RESULTS.md` §10 (single-seed) —
+superseded/confirmed by the 20-seed program in §11, see above.** At
+single-seed §10 vintage: two honest prediction failures sharpened the
+headline claim — LassoBench-MO (30 seeds, their paper's protocol) shows
+MORBO externally competitive with their dedicated single-objective methods
+(DNA 0.304 vs. their TuRBO 0.292) but **no shape-adaptation benefit**
+(effective dim there is coefficient sparsity, not input no-ops);
+SparseRover's no-op padding also failed to unlock the benefit — both
+findings held up at 20 seeds (§11b). §10's two open loose ends were both
+closed by §11: RotatedSparseDTLZ2's "pca_ellipsoid demoted, needs a
+multi-seed rerun to interpret" was resolved in §11c (seed noise;
+`cma_ellipsoid` is the real, robust rotation-invariant winner), and
+TimeVaryingSparseDTLZ2's k_eff=5 null-by-design-flaw was rerun at k_eff=49
+in §11d (the max value allowing disjoint masks at d=100) — not the k_eff=50
+originally guessed, but the same regime. DTLZ3/5/7 generalization
+(PCA variants 5/5 everywhere informative, +8-21%; ard_box's failure
+revealed as landscape-dependent, winning on rugged-g DTLZ3/7) was
+confirmed at 19-20/20 in §11a.
 
 Everything originally proposed in `FURTHER_DIRECTIONS.md` (multi-seed
 sweep, composite×shape, CMA/linear-kernel/dim-prior, `mab_shape`,

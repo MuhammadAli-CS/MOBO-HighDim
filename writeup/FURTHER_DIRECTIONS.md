@@ -375,6 +375,9 @@ Resolved and closed by §11: Rover-family (conclusively null), the
 PCA-under-rotation question (seed noise; cma is the robust winner), the
 cma-memory-liability hypothesis (inverted — cma WINS under switching;
 reward-space memory is the fragile kind), mab_shape's d=100 standing
-(lucky seed; high-variance method pending better policies), and the
-composite×shape interaction at high d (they stack; composite adds 5×
-variance reduction on top of shape).
+(lucky seed; **now fully resolved by §11g-h**: `mab_shape_ducb_shared`
+matches the best fixed shape at d=100, +75.7% at 20/20; the one remaining
+failure regime, tight-budget d=200, is diagnosed as an uninformative
+reward stream, not a fixable policy defect), and the composite×shape
+interaction at high d (they stack; composite adds 5× variance reduction
+on top of shape).
