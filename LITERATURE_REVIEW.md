@@ -508,11 +508,22 @@ union of our `pca_ellipsoid` and `ard_box` ideas, single-objective only,
 tested on COCO/BBOB. No effective-vs-nominal-dimension analysis, no MO
 extension, no bandit-over-shapes. **This is the closest single prior-art
 match to our work and needs an explicit differentiation paragraph in
-`methods.tex`**: our contribution is (a) the MORBO/multi-objective setting,
+`methods.tex`** (done — see `methods.tex`'s "Relation to prior work"
+paragraph): our contribution is (a) the MORBO/multi-objective setting,
 (b) the effective-dimension-vs-budget governing-variable result backed by
 `SparseDTLZ2`, (c) `cma_ellipsoid` as a persistent-covariance alternative
 with a distinct low-data regime where it wins, and (d) `mab_shape` as a
 portfolio mechanism over shape families, none of which LABCAT has.
+**DONE (queued for cluster, RESULTS.md §12):** we now also run directly on
+a BBOB-style benchmark (`morbo/problems/bbob_style.py`, faithful-in-spirit
+reimplementations, not the official `cocoex` — see that file's docstring
+for the exactness caveat), which gives a within-study comparison point to
+LABCAT's own reported results, not just a differentiation paragraph:
+LABCAT's paper reports its PCA-aligned region winning on Rosenbrock
+(ill-conditioned) but struggling on highly multimodal functions like Levy
+(see this file's LAGO section above, which cites the same LABCAT
+comparison) — our `bbob_rosenbrock_rosenbrock` and `bbob_rastrigin_rastrigin`
+pairs test exactly this contrast for our own PCA/CMA/bandit variants.
 
 **CMA-BO / CMA-TuRBO / CMA-BAxUS** — Ngo, Ha, Chan, Nguyen & Zhang, TMLR 2024,
 arXiv:2402.03104. Uses CMA-ES as a *meta-algorithm* estimating a
@@ -629,17 +640,26 @@ problem?" Candidates, ranked by how directly they'd answer that:
    benchmarks, cheap to run at scale (no live simulator), good for a
    large-batch high-nominal-dim study once the above are validated.
 
-### Ranked recommendations (from this pass)
+### Ranked recommendations (from this pass) — status
 
-1. Validate the effective-dimension finding on a real problem — LassoBench
-   (made bi-objective) or the HPA family are the best bridges available.
+1. **DONE.** Validate the effective-dimension finding on a real problem —
+   built and run: LassoBench made bi-objective (`RESULTS.md` §10a, 30
+   seeds, MORBO externally competitive with published TuRBO/CMA-ES
+   numbers). HPA/PMO/MOPTA08 remain as further real-problem candidates,
+   not yet built.
 2. Upgrade `mab_shape` to a contextual bandit using an online effective-dim
    estimate (top-k PCA eigenvalue mass ratio) as context — cheap (the PCA
    computation already exists), and turns an empirical finding into a
-   mechanism.
-3. Add an explicit LABCAT/CMA-BO differentiation paragraph to `methods.tex`,
-   plus a Hvarfner-style global vanilla-BO baseline (no trust region at
-   all) and an AdaScale-TuRBO follow-up on the `ard_box` fix question.
+   mechanism. **Not yet built** — the bandit line so far (§11d-h) fixed
+   epsilon-greedy's variance/non-stationarity failures with discounted UCB
+   rather than going contextual; this remains the next upgrade.
+3. **DONE.** Add an explicit LABCAT/CMA-BO differentiation paragraph to
+   `methods.tex` (in place), plus **DONE**: a BBOB-style benchmark battery
+   giving a direct within-study comparison point to LABCAT's own reported
+   Rosenbrock/multimodal results (`RESULTS.md` §12, queued for cluster).
+   Still missing: a Hvarfner-style global vanilla-BO baseline (no trust
+   region at all) and an AdaScale-TuRBO follow-up on the `ard_box` fix
+   question.
 
 ---
 

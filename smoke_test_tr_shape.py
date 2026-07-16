@@ -263,6 +263,18 @@ def check_sparse_rover() -> None:
     print("OK: SparseRover BO loop ran to completion.")
 
 
+def check_bbob_biobj() -> None:
+    print("=== BBOBBiObj (BBOB-style landscape taxonomy) ===")
+    _tiny_bo_loop(
+        "BBOBBiObj",
+        10,
+        bbob_f1="rastrigin",
+        bbob_f2="peaks",
+        max_reference_point=[-100000.0, -50.0],
+    )
+    print("OK: BBOBBiObj BO loop ran to completion.")
+
+
 def check_lasso_bench_mo() -> None:
     print("=== LassoBenchMO (conditional -- skipped if LassoBench not installed) ===")
     try:
@@ -295,5 +307,6 @@ if __name__ == "__main__":
     check_rotated_sparse_dtlz2()
     check_tv_sparse_dtlz2()
     check_sparse_rover()
+    check_bbob_biobj()
     check_lasso_bench_mo()
     print("\nAll smoke tests passed.")

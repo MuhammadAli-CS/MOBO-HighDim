@@ -865,6 +865,72 @@ what shape-portfolio methods can do: **adaptivity is free when reward
 signal exists (d=100: now ties the best fixed arm), and impossible when
 it doesn't (d=200/600ev: commit or change the signal).**
 
+## 12. BBOB-style landscape taxonomy — QUEUED, not yet run
+
+Motivated by two gaps: (1) LABCAT (Visser et al. 2023/24, our closest
+prior art) was evaluated on COCO/BBOB, a benchmark family we had never
+touched; (2) the `ard_box` landscape-dependence finding (§10e/11a: wins on
+rugged-`g` DTLZ3/7, fails on smooth-`g` DTLZ2/5) rests on only 4
+hand-picked functions, where BBOB's own 24-function taxonomy is organized
+into 5 curated landscape categories specifically for characterizing a
+method *by category*, not by function name.
+
+**Honesty note, load-bearing for how to read any results here**:
+`morbo/problems/bbob_style.py` implements **faithful-in-spirit
+reimplementations** of representative BBOB functions (the same `T_osz`,
+`T_asy`, and `Λ^alpha` ill-conditioning transforms, in the same
+qualitative composition, verified against the published technical report
+formulas), **not** the official `cocoex` package — we could not verify
+bit-exactness against the reference C implementation. Two consequences:
+(a) hypervolume numbers here are internally comparable across our own
+methods, but **not** directly comparable to externally published
+COCO/LABCAT hypervolume tables; (b) the weak-global-structure
+representative (`peaks`) is a custom multi-Gaussian-peak function in the
+spirit of BBOB's Gallagher functions, not a literal reimplementation of
+Gallagher's more involved peak-placement algorithm. What *is* preserved:
+the qualitative landscape taxonomy, a random rotation applied the way BBOB
+applies one to most of its functions, and the real `bbob-biobj`
+construction method (literally pair two base functions' outputs; Tušar et
+al. 2016).
+
+Five base landscape representatives, one per BBOB category — `sphere`
+(separable, smooth), `rosenbrock` (moderate conditioning, curved
+non-separable valley), `ellipsoidal` (high conditioning, unimodal,
+rotated), `rastrigin` (multimodal with adequate global structure),
+`peaks` (multimodal with weak global structure) — combined into 8
+experiments (`cluster/submit_bbob_style.sh`, 160 jobs, 5 seeds, 4 core
+methods):
+
+**Group A (landscape taxonomy, d=100, all dims informative):**
+`bbob_sphere_sphere` (trivial control), `bbob_ellipsoidal_ellipsoidal`
+(rotated unimodal — closest analog to `RotatedSparseDTLZ2`),
+`bbob_rosenbrock_rosenbrock` (curved valley),
+`bbob_rastrigin_rastrigin` (structured multimodal — DTLZ3/7 analog),
+`bbob_peaks_peaks` (weak-structure multimodal — Rover/Gallagher analog),
+`bbob_sphere_peaks` (a genuinely mixed bi-objective landscape: one smooth
+objective, one deceptive one — no DTLZ variant in this study tests this,
+since DTLZ's objectives always share one `g`).
+
+**Group B (effective-dimension dose-response on a non-algebraic
+landscape):** `bbob_rastrigin_rastrigin_keff{20,80}` — does §7's
+`SparseDTLZ2` dose-response (0.1%→10% as effective dimension grows)
+generalize beyond DTLZ2's smooth closed-form `g` to a genuinely multimodal
+landscape?
+
+Predictions, stated in advance: `ellipsoidal_ellipsoidal` should replicate
+`RotatedSparseDTLZ2`'s pattern (`cma_ellipsoid` most robust,
+`ard_box`-style axis-alignment penalized by the built-in rotation, no
+axis-aligned arm included here since none of the 4 core methods tested is
+purely axis-aligned besides the excluded `ard_box`); `rastrigin_rastrigin`
+should look like DTLZ3/7 (PCA variants win, structured multimodality is
+navigable); `peaks_peaks` should look like Rover/LassoBench (near-null,
+every direction genuinely matters and the landscape is deceptive rather
+than merely rugged); `sphere_peaks` is the least predictable and most
+interesting — a single shared trust-region must handle two different
+landscape characters simultaneously, which nothing else in this study
+tests.
+
+
 Plots, three per experiment directory:
 - `comparison_aggregate.png` — **the headline view**: mean HV-vs-evals
   curve per method over all available seeds with a ±1 SEM band (the

@@ -237,6 +237,17 @@ git commit && git push                          # or scp results back
 
 ## Open threads / natural next steps
 
+**QUEUED: BBOB-style landscape taxonomy, `RESULTS.md` §12**
+(`cluster/submit_bbob_style.sh`, 160 jobs) — tests the `ard_box`
+landscape-dependence finding (rugged-`g` DTLZ3/7 wins, smooth-`g` DTLZ2/5
+fails) against BBOB's own 5-category taxonomy, and gives a within-study
+comparison point to LABCAT (closest prior art, evaluated on COCO/BBOB).
+**Read `morbo/problems/bbob_style.py`'s docstring before citing numbers**:
+faithful-in-spirit reimplementations, not the official `cocoex` package —
+internally comparable only, not directly comparable to published
+COCO/LABCAT tables. Coded, unit-tested (shapes, finiteness, `k_eff`
+no-op-masking, optimum-location sanity), end-to-end BO-loop smoke-tested.
+
 **20-seed confirmation program: DONE, results in `RESULTS.md` §11** —
 core results confirmed at 20/20-or-0/20 unanimity; three revisions (Rover
 conclusively null; PCA's keff50 edge was seed noise, cma is the robust

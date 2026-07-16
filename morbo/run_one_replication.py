@@ -60,6 +60,7 @@ from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
 from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
 from morbo.problems.sparse_rover import get_sparse_rover_fn
 from morbo.problems.lasso_bench_mo import get_lasso_bench_mo_fn
+from morbo.problems.bbob_style import get_bbob_biobj_fn
 from morbo.benchmark_function import (
     BenchmarkFunction,
 )
@@ -159,6 +160,9 @@ def run_one_replication(
     lasso_bench_name: str = "synt_medium",
     sparse_rover_base_dim: int = 60,
     tv_switch_frac: float = 0.5,
+    bbob_f1: str = "sphere",
+    bbob_f2: str = "sphere",
+    bbob_k_eff: Optional[int] = None,
     dtype: torch.device = torch.double,
     device: Optional[torch.device] = None,
     save_callback: Optional[Callable[[Tensor], None]] = None,
@@ -338,6 +342,17 @@ def run_one_replication(
                 f"config dim={dim} does not match LassoBench "
                 f"'{lasso_bench_name}' n_features={bench_dim}."
             )
+        bounds = bounds.to(**tkwargs)
+        num_outputs = num_objectives
+    elif evalfn == "BBOBBiObj":
+        f, bounds = get_bbob_biobj_fn(
+            dim=dim,
+            f1_name=bbob_f1,
+            f2_name=bbob_f2,
+            k_eff=bbob_k_eff,
+            dtype=dtype,
+            device=device,
+        )
         bounds = bounds.to(**tkwargs)
         num_outputs = num_objectives
     elif evalfn == "Penicillin":

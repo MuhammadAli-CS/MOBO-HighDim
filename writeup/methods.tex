@@ -1612,6 +1612,52 @@ the mean improvement, composite adds a modest final increment
 0.31$); composite+ARD-PCA (std $0.15$) is the most reliable configuration
 tested anywhere in this study.
 
+\subsection{BBOB-style landscape taxonomy (queued)}
+\label{sec:bbob-style}
+
+Two gaps motivate a further benchmark: LABCAT \citep{visser2023labcat},
+this work's closest prior art, was evaluated on COCO/BBOB
+\citep{hansen2021coco}, a family we had not touched; and the
+\texttt{ard\_box} landscape-dependence finding
+(\S\ref{sec:tr-shape}, \S\ref{sec:twenty-seed}: wins on rugged-$g$
+DTLZ3/7, fails on smooth-$g$ DTLZ2/5) rests on only four hand-picked
+functions, where BBOB's own 24-function taxonomy is organized into five
+curated landscape categories precisely so a method's behavior can be
+characterized \emph{by category}. \textbf{A load-bearing honesty note}:
+\texttt{morbo/problems/bbob\_style.py} implements faithful-in-spirit
+reimplementations of representative BBOB functions -- the same $T_{osz}$,
+$T_{asy}$, and $\Lambda^{\alpha}$ ill-conditioning transforms, in the same
+qualitative composition, checked against the published formulas -- not the
+official \texttt{cocoex} package, which we could not verify bit-exactness
+against. Results here are therefore internally comparable across our own
+methods but \emph{not} directly comparable to externally published
+COCO/LABCAT hypervolume tables; the weak-global-structure representative
+(\texttt{peaks}) is an explicitly custom multi-Gaussian-peak function in
+the spirit of BBOB's Gallagher functions, not a reimplementation of them.
+What is preserved is the qualitative taxonomy, a random rotation applied
+the way BBOB applies one to most of its own functions, and the actual
+\texttt{bbob-biobj} construction method (literally pairing two base
+functions' outputs; \citealp{tusar2016bbobbiobj}).
+
+Five base representatives, one per category -- \texttt{sphere}
+(separable), \texttt{rosenbrock} (moderate conditioning, curved valley),
+\texttt{ellipsoidal} (high conditioning, unimodal, rotated),
+\texttt{rastrigin} (multimodal, adequate global structure), \texttt{peaks}
+(multimodal, weak global structure) -- combine into six taxonomy pairs at
+$d{=}100$ (including \texttt{sphere\_peaks}, a genuinely mixed
+bi-objective landscape no DTLZ variant tests, since DTLZ's objectives
+always share one $g$) plus a two-point effective-dimension dose-response
+on \texttt{rastrigin\_rastrigin} ($k_{\mathrm{eff}} \in \{20, 80\}$,
+testing whether \S\ref{sec:sparse-dtlz2}'s dose-response generalizes
+beyond DTLZ2's smooth closed-form $g$). Predictions stated in advance:
+\texttt{ellipsoidal\_ellipsoidal} should replicate
+\texttt{RotatedSparseDTLZ2}'s pattern (\texttt{cma\_ellipsoid} most
+robust); \texttt{rastrigin\_rastrigin} should resemble DTLZ3/7 (PCA
+variants win); \texttt{peaks\_peaks} should resemble Rover/LassoBench
+(near-null, genuinely deceptive rather than merely rugged);
+\texttt{sphere\_peaks} is the least predictable, requiring a single shared
+trust region to handle two different landscape characters at once.
+
 \subsection{Future work}
 \label{sec:tr-shape-future}
 
@@ -1770,6 +1816,16 @@ Y. Wang, et al.
 E. Visser, C. van Daalen, and J. Schoeman.
 \newblock LABCAT: Locally adaptive Bayesian optimization using principal-component-aligned trust regions.
 \newblock \emph{arXiv:2311.11328}, 2023.
+
+\bibitem{hansen2021coco}
+N. Hansen, A. Auger, R. Ros, O. Mersmann, T. Tu\v{s}ar, and D. Brockhoff.
+\newblock COCO: A platform for comparing continuous optimizers in a black-box setting.
+\newblock \emph{Optimization Methods and Software}, 36:114--144, 2021.
+
+\bibitem{tusar2016bbobbiobj}
+T. Tu\v{s}ar, D. Brockhoff, N. Hansen, and A. Auger.
+\newblock COCO: The bi-objective black box optimization benchmarking (bbob-biobj) test suite.
+\newblock \emph{arXiv:1604.00359}, 2016.
 
 \bibitem{ngo2024cmabo}
 D. Ngo, B. Ha, T. Chan, B. Nguyen, and M. Zhang.

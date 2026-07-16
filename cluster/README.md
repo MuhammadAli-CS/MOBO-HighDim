@@ -228,6 +228,26 @@ design-fixable -- every arm's reward is zero until a breakthrough that
 never comes, so no selection policy has anything to act on. See
 RESULTS.md §11h for the full diagnosis.
 
+## 4h. BBOB-style landscape taxonomy
+
+**Status: coded, smoke-tested, QUEUED -- not yet run.**
+
+```
+bash cluster/submit_bbob_style.sh   # 160 jobs: 8 experiments x 5 seeds x 4 methods
+```
+
+Tests whether the `ard_box` landscape-dependence finding (wins on rugged-$g$
+DTLZ3/7, fails on smooth-$g$ DTLZ2/5 -- RESULTS.md §10e/11a, from only 4
+hand-picked functions) generalizes to BBOB's own 5-category landscape
+taxonomy, and gives a within-study comparison point to LABCAT (our closest
+prior art, evaluated on COCO/BBOB). **Read
+`morbo/problems/bbob_style.py`'s docstring before citing any numbers from
+this batch**: these are faithful-in-spirit reimplementations of
+representative BBOB functions, not the official `cocoex` package -- results
+are internally comparable across our own methods, not directly comparable
+to published COCO/LABCAT hypervolume tables. See RESULTS.md §12 for the
+full experiment list and stated predictions.
+
 ## 5. LLM-dependent parts (Parts 2 and 3)
 
 ```

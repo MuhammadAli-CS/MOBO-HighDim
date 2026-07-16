@@ -370,6 +370,23 @@ created one sharply-motivated new method. Current ranked queue:
    ARD-based most exposed (lengthscales from noisy Y).
 4. **Remaining benchmarks/mechanisms**: MOPTA08 / HPA / PMO; composite
    Rover (checkpointed trajectory costs); objective-aware rotation.
+5. **BBOB-style landscape taxonomy — CODED, queued
+   (`cluster/submit_bbob_style.sh`, 160 jobs; RESULTS.md §12).** Two
+   motivations: LABCAT (our closest prior art) was evaluated on COCO/BBOB,
+   a family we hadn't touched; the `ard_box` landscape-dependence finding
+   rests on only 4 DTLZ variants, where BBOB's own taxonomy is organized
+   into 5 curated categories specifically for this kind of characterization.
+   `morbo/problems/bbob_style.py` implements faithful-in-spirit BBOB
+   representatives (5 categories: sphere/rosenbrock/ellipsoidal/rastrigin/
+   peaks) — **not** the official `cocoex` package, so results are internal
+   comparisons only, not directly comparable to published COCO/LABCAT
+   numbers (full honesty caveat in the module docstring). 6 taxonomy pairs
+   at d=100 plus a 2-point effective-dimension dose-response on
+   `rastrigin_rastrigin` (does §7's SparseDTLZ2 dose-response generalize
+   beyond DTLZ2's smooth `g`?). `rosenbrock_rosenbrock` gives a direct
+   within-study comparison point to LABCAT's own reported finding (their
+   PCA-aligned region wins on Rosenbrock, struggles on highly multimodal
+   Levy) — see `LITERATURE_REVIEW.md`'s LABCAT entry.
 
 Resolved and closed by §11: Rover-family (conclusively null), the
 PCA-under-rotation question (seed noise; cma is the robust winner), the
