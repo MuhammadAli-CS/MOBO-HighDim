@@ -289,20 +289,29 @@ generalizes back to LABCAT's own setting -- see RESULTS.md §13 and
 `writeup/methods.tex`'s `labcat_style` subsection for full numbers, the
 exact mechanism, and honest scoping.
 
-## 4j. Two targeted budget extensions (600 -> 2000 evals)
+## 4j. Five targeted budget extensions (600 -> 2000 evals)
 
 **Status: coded, QUEUED -- not yet run.**
 
 ```
-bash cluster/submit_bbob_rastrigin_keff20_2000ev.sh   # 25 jobs: 5 methods x 5 seeds
-bash cluster/submit_150d_2000ev_paired.sh              # 12 jobs: 3 methods x 4 new seeds
+bash cluster/submit_bbob_rastrigin_keff20_2000ev.sh      # 25 jobs: 5 methods x 5 seeds
+bash cluster/submit_150d_2000ev_paired.sh                 # 12 jobs: 3 methods x 4 new seeds
+bash cluster/submit_200d_2000ev_paired.sh                 # 16 jobs: 4 methods x 4 new seeds
+bash cluster/submit_tr_shape_methods_200d_2000ev.sh       # 45 jobs: 9 methods x 5 seeds
+bash cluster/submit_dtlz1_100d_2000ev.sh                  # 25 jobs: 5 methods x 5 seeds
 ```
 
-Not a blanket budget increase across the study -- 600 evals is the
-standard budget everywhere else and stays that way. These two are
-targeted follow-ups on specific 600-eval results that left an open
-question about whether 600 evals was simply insufficient budget, the same
-rationale as the existing `tr_shape_dtlz2_{150,200}d_2000ev` extensions:
+**Deliberately not a blanket budget increase across the study.** The
+original MORBO paper (Daulton et al., UAI 2022) ran DTLZ2/3/5/7 and Rover
+at 2000 evals, batch 50 -- confirmed directly from this repo's own initial
+commit (`be9c062`, before any of our changes), which still has Meta's own
+reference `experiments/*/config.json` files. Our whole study instead
+standardized on 600 evals. Rather than mechanically re-running everything
+at 2000 to "match the paper" (~1,400+ jobs across every experiment, most
+of which already show clean, statistically significant, non-budget-limited
+separation at 600), these five extensions target only the specific results
+where 600 evals left a genuine open question -- is the current number a
+real effect/null, or an artifact of insufficient budget:
 
 - **`bbob_rastrigin_rastrigin_keff20_2000ev`**: the k_eff=20 Group B point
   (RESULTS.md §12) was a flat null at 600 evals for every shape variant.
@@ -313,10 +322,25 @@ rationale as the existing `tr_shape_dtlz2_{150,200}d_2000ev` extensions:
   is striking -- `labcat_style`'s well-documented d=150/600-eval collapse
   (RESULTS.md §13) fully recovers at 2000 evals, landing close to
   `ard_pca_ellipsoid`. But the other three labels only have seed 0 here,
-  so there's no paired multi-seed comparison yet. This fills that in to
-  confirm whether the d=150 failure was budget-starvation (affecting
-  everyone) rather than a fundamental flaw specific to `labcat_style`'s
-  construction.
+  so there's no paired multi-seed comparison yet.
+- **`tr_shape_dtlz2_200d_2000ev` (seeds 1-4 for `morbo`/`pca_ellipsoid`/
+  `ard_pca_ellipsoid`/`ard_box`)**: same gap as d=150 -- `labcat_style`
+  already has 5 seeds here, the other four labels only have seed 0.
+- **`tr_shape_methods_dtlz2_200d_2000ev`** (new experiment, mirrors the
+  existing `_2000ev` naming convention): the mab-bandit line's one
+  unsolved regime (RESULTS.md §11h) is diagnosed as information-theoretic
+  at d=200/600 evals -- `mab_shape_ducb_shared` scores exactly 0.00 on
+  4/5 seeds because "the reward signal itself carries zero information
+  until something breaks through." The base d=200 dimension-sweep point
+  already showed a similar collapse partially resolve at 2000 evals; this
+  tests whether the same is true for the bandit/cma methods specifically,
+  or whether the diagnosis holds even with 3.3x the budget.
+- **`tr_shape_dtlz1_100d_2000ev`** (new experiment): DTLZ1 is a flat null
+  for every method at 600 evals ("uninformative... in 600 evals" --
+  methods.tex §7.1). Unlike DTLZ2/3/5/7, DTLZ1 isn't one of the original
+  MORBO paper's own benchmarks, so this isn't a budget-matching
+  correction -- just direct verification of an assumption currently stated
+  as fact rather than tested at a longer horizon.
 
 ## 5. LLM-dependent parts (Parts 2 and 3)
 
