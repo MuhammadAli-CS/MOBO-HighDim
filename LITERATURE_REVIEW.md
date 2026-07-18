@@ -532,30 +532,52 @@ with a distinct low-data regime where it wins, (d) `mab_shape` as a
 portfolio mechanism over shape families, and (e) a direct empirical
 comparison against LABCAT's own construction (below), none of which
 LABCAT has.
-**DONE (queued for cluster, RESULTS.md §12):** we now also run directly on
-a BBOB-style benchmark (`morbo/problems/bbob_style.py`, faithful-in-spirit
+**DONE (results in, RESULTS.md §12):** we now also run directly on a
+BBOB-style benchmark (`morbo/problems/bbob_style.py`, faithful-in-spirit
 reimplementations, not the official `cocoex` — see that file's docstring
 for the exactness caveat), which gives a within-study comparison point to
-LABCAT's own reported results, not just a differentiation paragraph:
-LABCAT's paper reports its PCA-aligned region winning on Rosenbrock
-(ill-conditioned) but struggling on highly multimodal functions like Levy
-(see this file's LAGO section above, which cites the same LABCAT
-comparison) — our `bbob_rosenbrock_rosenbrock` and `bbob_rastrigin_rastrigin`
-pairs test exactly this contrast for our own PCA/CMA/bandit variants.
-**DONE (queued for cluster, RESULTS.md §13):** for completeness, we also
+LABCAT's own reported results, not just a differentiation paragraph.
+Results (all 8 experiments × 4 methods × 5 seeds landed): the effect is
+real and statistically significant nearly everywhere but an order of
+magnitude smaller than DTLZ2's (1–9% vs. +66.6%) — `cma_ellipsoid` is the
+most consistently robust geometry (confirms the rotation-robustness
+prediction on `ellipsoidal_ellipsoidal` exactly), but two predictions
+failed informatively: `peaks_peaks` was *not* near-null like Rover/
+LassoBench (all variants win +3.4–4.0%, 5/5), and the `rastrigin_rastrigin`
+`k_eff` dose-response did not reproduce `SparseDTLZ2`'s clean monotone
+curve (near-zero at `k_eff=20`, only `cma_ellipsoid` barely significant at
+`k_eff=80`). `bbob_rosenbrock_rosenbrock` shows small, roughly equal gains
+across all three shape variants (+1.9–2.0%) — no PCA-specific edge over
+CMA/ARD-PCA on Rosenbrock in our results, unlike the sharp PCA-specific
+win LABCAT's own paper reports; full analysis and numbers in
+`writeup/methods.tex` §7.6 and `RESULTS.md` §12.
+**DONE, results in (RESULTS.md §13):** for completeness, we also
 implemented LABCAT's own construction directly as `tr_shape="labcat_style"`
 (`compute_labcat_style_shape` in `morbo/utils.py`, unit-tested and
 smoke-tested) — the actual whiten-then-fitness-weighted-PCA ordering
-described above, not merely characterized in prose — and run across the
-full tr_shape study (42 experiments × 5 seeds = 210 jobs via
-`cluster/submit_labcat_style.sh`, everywhere other shape variants already
-have baselines), headlined by `tr_shape_dtlz2_100d` (smooth, no
-ill-conditioning) and `bbob_rosenbrock_rosenbrock` (LABCAT's own reported
-win condition). Since LABCAT's
-fitness-weighting presupposes a single scalar to rank by, our
-multi-objective substitution (mean per-objective min-max rank across the
-local data) is a disclosed, necessary adaptation, not a hidden
-simplification.
+described above, not merely characterized in prose — and ran it across the
+full tr_shape study (42 experiments × 5 seeds = 210 jobs, all landed).
+**Result: our own ordering wins the direct comparison.** `labcat_style`
+consistently loses to `pca_ellipsoid`/`ard_pca_ellipsoid` wherever a real
+shape-adaptation signal exists — including on `bbob_rosenbrock_rosenbrock`,
+the exact landscape LABCAT's own paper reports its construction winning on
+(our reimplementation loses tightly/significantly to all three of our
+shape variants there, and isn't even distinguishable from plain isotropic
+`morbo`). At `tr_shape_dtlz2_100d` it still beats isotropic `morbo`
+decisively (+47.2%) but loses to `pca_ellipsoid` (−11.4%, 95% CI excluding
+zero). Sharpest single result: a collapse to exactly 0 hypervolume in 3/5
+seeds at d=150, the same failure signature as isotropic `morbo`, while
+both our PCA variants stay healthy in every seed — suggesting
+whiten-then-PCA is more fragile at high d than PCA-first-then-reweight.
+Two disclosed confounds temper generalizing this back to LABCAT's own
+single-objective setting: our multi-objective weighting substitution
+(mean per-objective min-max rank, since LABCAT's `1-y'` presupposes a
+single scalar to rank by) may be a weaker signal than LABCAT's own, and
+LABCAT was tuned/evaluated in a lower-dimensional single-objective regime.
+What the ablation does establish cleanly: our design choice is the
+empirically more robust construction in this study's multi-objective,
+high-dimensional regime, not merely the one that avoids the degenerate
+no-op.
 
 **CMA-BO / CMA-TuRBO / CMA-BAxUS** — Ngo, Ha, Chan, Nguyen & Zhang, TMLR 2024,
 arXiv:2402.03104. Uses CMA-ES as a *meta-algorithm* estimating a
@@ -687,14 +709,18 @@ problem?" Candidates, ranked by how directly they'd answer that:
    rather than going contextual; this remains the next upgrade.
 3. **DONE.** Add an explicit LABCAT/CMA-BO differentiation paragraph to
    `methods.tex` (in place, now corrected to the precise verified
-   mechanism), plus **DONE**: a BBOB-style benchmark battery giving a
-   direct within-study comparison point to LABCAT's own reported
-   Rosenbrock/multimodal results (`RESULTS.md` §12, queued for cluster),
-   plus **DONE**: a direct implementation of LABCAT's own construction as
-   `tr_shape="labcat_style"` (`RESULTS.md` §13, queued for cluster) —
-   completeness, not just differentiation. Still missing: a Hvarfner-style
-   global vanilla-BO baseline (no trust region at all) and an
-   AdaScale-TuRBO follow-up on the `ard_box` fix question.
+   mechanism), plus **DONE, results in**: a BBOB-style benchmark battery
+   giving a direct within-study comparison point to LABCAT's own reported
+   Rosenbrock/multimodal results (`RESULTS.md` §12) — real but
+   order-of-magnitude-smaller effects than DTLZ2, `cma_ellipsoid` most
+   robust, two of four stated predictions refuted informatively, no
+   PCA-specific Rosenbrock edge in our results (contra LABCAT's own
+   report), plus **DONE, results in**: a direct implementation of LABCAT's
+   own construction as `tr_shape="labcat_style"` (`RESULTS.md` §13, 42
+   experiments) — our own ordering wins the direct comparison empirically,
+   including on Rosenbrock. Still missing: a
+   Hvarfner-style global vanilla-BO baseline (no trust region at all) and
+   an AdaScale-TuRBO follow-up on the `ard_box` fix question.
 
 ---
 

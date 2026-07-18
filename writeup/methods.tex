@@ -8,6 +8,12 @@
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{enumitem}
+\usepackage{graphicx}
+% Figures live in writeup/figures/ (flat, Overleaf-friendly copies of
+% experiments/<name>/comparison_aggregate.png). Regenerate the source
+% PNGs with `python plot_aggregate.py <experiment_name>`, then re-copy
+% into writeup/figures/ under the same names used below.
+\graphicspath{{figures/}}
 
 \newcommand{\Reals}{\mathbb{R}}
 \newcommand{\X}{\mathcal{X}}
@@ -33,17 +39,24 @@ CMA-ES-style persistent covariance, and a per-region multi-armed bandit
 that learns which geometry to use without being told in advance -- and
 establishes, across a 20-seed confirmation program spanning eleven
 synthetic and real benchmarks (including a bi-objective LassoBench
-extension validated against that benchmark's own published results), that
-the benefit is governed by a problem's \emph{effective} dimensionality in
-input space relative to the evaluation budget, not its nominal
-dimensionality: unanimous, seed-robust wins of $+66$ to $+79\%$
-hypervolume (paired Wilcoxon signed-rank/t-test, $p < 10^{-5}$ at
-$n{=}20$; 95\% CIs excluding zero by wide margins at $n{=}5$; full table
-in Section~\ref{sec:significance}) where that structure exists, a
-statistically confirmed null-to-negative result on a real 30-seed
-molecular-genomics benchmark where it does not, and a fully diagnosed
-failure mode (a naive per-dimension rescaling baseline) whose collapse we
-measure directly rather than merely observe. The remaining three extensions were built earlier in this
+extension validated against that benchmark's own published results) plus
+an 8-experiment BBOB-style landscape-taxonomy battery
+(Section~\ref{sec:bbob-style}), that the benefit is governed by a
+problem's \emph{effective} dimensionality in input space relative to the
+evaluation budget, not its nominal dimensionality: unanimous, seed-robust
+wins of $+66$ to $+79\%$ hypervolume (paired Wilcoxon signed-rank/t-test,
+$p < 10^{-5}$ at $n{=}20$; 95\% CIs excluding zero by wide margins at
+$n{=}5$; full table in Section~\ref{sec:significance}) where that
+structure exists, a statistically confirmed null-to-negative result on a
+real 30-seed molecular-genomics benchmark where it does not, and a fully
+diagnosed failure mode (a naive per-dimension rescaling baseline) whose
+collapse we measure directly rather than merely observe. A 42-experiment
+completeness ablation directly implementing LABCAT's own
+fitness-weighted, lengthscale-whitened construction
+(Section~\ref{sec:labcat-style}) shows our own PCA-first ordering wins the
+comparison empirically, not merely by avoiding the degenerate no-op that
+motivated it, including on the ill-conditioned landscape LABCAT's own
+paper reports its construction winning on. The remaining three extensions were built earlier in this
 project. \emph{Composite MORBO} replaces MORBO's direct modeling of the
 objectives with modeling of a raw intermediate response together with a
 known reduction to the objectives, integrated as a single composition at
@@ -783,8 +796,9 @@ the benefit appears (\S\ref{sec:sparse-dtlz2}), \texttt{cma\_ellipsoid} as a
 persistent-covariance alternative with a distinct low-data regime where it
 alone wins, \texttt{mab\_shape} as a portfolio mechanism over shape
 families rather than a single fixed geometry, and a direct empirical
-comparison against LABCAT's own construction via \texttt{labcat\_style}.
-\textbf{CMA-BO}
+comparison against LABCAT's own construction via \texttt{labcat\_style}
+(\S\ref{sec:labcat-style}'s results: our own ordering wins the comparison
+empirically, not just by avoiding the no-op above). \textbf{CMA-BO}
 \citep{ngo2024cmabo} also combines CMA-ES with TuRBO-family methods, but as
 a softer meta-algorithm that restricts an existing method to a
 CMA-ES-estimated region of high posterior mass over the optimum, rather
@@ -921,10 +935,75 @@ box whose per-axis widths are proportional to $\lambda$; rotating those
 widths by $R$ afterward gives the rotated-box representation our
 sampling/containment machinery already expects, so no new representation
 is needed. Falls back to the isotropic shape under the same $n < d+1$
-condition as the other data-driven variants. Results are queued
-(\S\ref{sec:tr-shape-future}); see also the LABCAT Rosenbrock/Levy
-cross-reference in \S\ref{sec:bbob-style}, which \texttt{labcat\_style} is
-run against directly on the same \texttt{BBOBBiObj} configs.
+condition as the other data-driven variants.
+
+\paragraph{Results.} Run across 42 experiments spanning the full
+tr\_shape study (5 seeds each, 210 jobs). \textbf{Both stated predictions
+were wrong, in the same direction: \texttt{labcat\_style} consistently
+loses to our own \texttt{pca\_ellipsoid}/\texttt{ard\_pca\_ellipsoid}
+wherever a real shape-adaptation signal exists, including on Rosenbrock --
+the exact landscape LABCAT's own paper reports its construction winning
+on.} On \texttt{tr\_shape\_dtlz2\_100d} it still beats isotropic
+\texttt{morbo} decisively ($+47.2\%$, 95\% CI $[33.1,61.4]$, 5/5 -- it is
+genuinely doing shape adaptation, not degenerating to a no-op) but loses
+to \texttt{pca\_ellipsoid} with a CI cleanly excluding zero ($-11.4\%$,
+$[-22.4,-0.5]$). On \texttt{bbob\_rosenbrock\_rosenbrock} -- the sharpest
+test of whether fitness-weighting the rotation helps -- it loses tightly
+and significantly to all three of our own shape variants ($-1.6$ to
+$-1.7\%$, CIs all excluding zero), and its edge over plain isotropic
+\texttt{morbo} is not itself statistically distinguishable from zero (CI
+$[-0.7,+1.1]$).
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{bbob_rosenbrock_aggregate.png}
+\caption{Mean hypervolume vs.\ evaluations,
+\texttt{bbob\_rosenbrock\_rosenbrock} -- LABCAT's own reported win
+condition. \texttt{ard\_pca\_ellipsoid}, \texttt{pca\_ellipsoid}, and
+\texttt{cma\_ellipsoid} separate early and stay ahead;
+\texttt{labcat\_style} instead tracks isotropic \texttt{morbo} closely for
+most of the run.}
+\label{fig:bbob-rosenbrock}
+\end{figure}
+
+The sharpest single result is a failure mode at
+$d{=}150$: raw final hypervolumes collapse to exactly $0.0$ in 3 of 5
+seeds (\texttt{morbo}'s own well-documented failure signature there),
+while both our PCA variants maintain a healthy $\approx 20$--$29$ in every
+seed -- whitening by a noisy per-dimension lengthscale estimate
+\emph{before} eigendecomposing appears to make the resulting rotation
+itself more fragile as $d$ grows than \texttt{ard\_pca\_ellipsoid}'s
+"PCA first, reweight fixed axes afterward" ordering. Aggregated across all
+42 experiments, \texttt{labcat\_style} loses wherever a real signal
+exists (the DTLZ2 sweep, DTLZ3/5/7, the informative non-stationary regime,
+all 8 BBOB pairs) and roughly ties our methods where nothing helps anyone
+(LassoBench, SparseRover, the near-null effective-dimension regimes) --
+consistent with, not contradicting, the effective-dimension theory
+(\S\ref{sec:tr-shape-summary}). One exception favors \texttt{labcat\_style}:
+it beats \texttt{cma\_ellipsoid} on \texttt{tr\_shape\_methods\_dtlz2\_100d}
+by $+19.5\%$, though the $n{=}5$ CI still touches zero. Two confounds
+temper how far this generalizes to LABCAT's own single-objective setting:
+our multi-objective weighting substitution may be a genuinely weaker
+signal than LABCAT's own single-scalar ranking, and LABCAT's construction
+was tuned and evaluated in a lower-dimensional single-objective regime,
+so the $d{=}150$ collapse may reflect a scaling limit specific to this
+study's regime rather than a flaw in LABCAT as originally scoped. What the
+ablation \emph{does} establish cleanly: our own ordering choice is the
+empirically more robust construction in the multi-objective,
+high-dimensional regime this study targets, not merely the one that
+avoids the degenerate no-op. Full numbers and per-experiment breakdown:
+RESULTS.md \S13.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{dtlz2_150d_labcat_collapse.png}
+\caption{Mean hypervolume vs.\ evaluations, $d{=}150$ DTLZ2. Both PCA
+variants break through cleanly; \texttt{labcat\_style} tracks isotropic
+\texttt{morbo} near zero through most of the budget and only barely
+separates late, with a SEM band wide enough to include zero for most of
+the run -- the collapse described above, visualized.}
+\label{fig:dtlz2-150d-labcat-collapse}
+\end{figure}
 
 \subsection{Consuming the shape: sampling and containment}
 
@@ -982,6 +1061,21 @@ $d$ & \texttt{morbo} (mean$\pm$std) & \texttt{ard\_box} & \texttt{pca\_ellipsoid
 the isotropic baseline is $\approx 0$ at this $d$ for 4/5 seeds, so no ratio
 is defined for most seeds.
 \end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{dtlz2_100d_aggregate.png}
+\caption{Mean hypervolume vs.\ evaluations, $d{=}100$ DTLZ2, $\pm 1$ SEM
+band ($n$ per curve in the legend). The two PCA variants
+(\texttt{pca\_ellipsoid}, \texttt{ard\_pca\_ellipsoid}) and their composite
+counterparts (\S\ref{sec:composite}) separate cleanly and early from
+isotropic \texttt{morbo}; \texttt{ard\_box} trails even the isotropic
+baseline (\S\ref{sec:tr-shape}'s constraint-compounding diagnosis).
+\texttt{labcat\_style} (\S\ref{sec:labcat-style}) lands between the two
+groups -- clearly better than isotropic, clearly behind our own PCA
+variants.}
+\label{fig:dtlz2-100d-aggregate}
+\end{figure}
 
 \subsection{Results: a curse-of-dimensionality effect, diagnosed directly, and confirmed unanimous across seeds}
 
@@ -1710,11 +1804,13 @@ DTLZ2 100d, \texttt{pca\_ellipsoid} & 5 & $+66.6\%$ & $[58.0, 75.2]$ & 0.0625 & 
 DTLZ2 100d, \texttt{ard\_pca\_ellipsoid} & 5 & $+66.4\%$ & $[57.1, 75.8]$ & 0.0625 & $6.4{\times}10^{-6}$ \\
 DTLZ2 100d, \texttt{ard\_box} & 5 & $-49.2\%$ & $[-64.0, -34.4]$ & 0.0625 & $5.7{\times}10^{-4}$ \\
 DTLZ5 100d, \texttt{pca\_ellipsoid} & 5 & $+13.0\%$ & $[9.6, 16.5]$ & 0.0625 & $3.1{\times}10^{-4}$ \\
+DTLZ5 100d, \texttt{ard\_box} & 5 & $-21.3\%$ & $[-26.0, -16.6]$ & 0.0625 & $3.2{\times}10^{-4}$ \\
 \texttt{mab\_shape\_ducb} & 20 & $+69.8\%$ & $[59.3, 80.4]$ & $1.9{\times}10^{-6}$ & $1.0{\times}10^{-13}$ \\
 \texttt{mab\_shape\_ducb\_shared} & 20 & $+75.7\%$ & $[64.4, 87.0]$ & $1.9{\times}10^{-6}$ & $2.0{\times}10^{-16}$ \\
 \texttt{linear\_gp\_pca} & 20 & $+78.9\%$ & $[64.3, 93.5]$ & $1.9{\times}10^{-6}$ & $1.1{\times}10^{-14}$ \\
 \texttt{cma\_ellipsoid} (methods, 100d) & 20 & $+39.9\%$ & $[26.8, 53.0]$ & $1.9{\times}10^{-6}$ & $1.3{\times}10^{-7}$ \\
 LassoBench DNA, \texttt{pca\_ellipsoid} & 30 & $-2.5\%$ & $[-4.1, -0.9]$ & $1.6{\times}10^{-3}$ & $2.3{\times}10^{-3}$ \\
+LassoBench DNA, \texttt{ard\_pca\_ellipsoid} & 30 & $-2.2\%$ & $[-3.9, -0.4]$ & $1.1{\times}10^{-2}$ & $1.3{\times}10^{-2}$ \\
 LassoBench DNA, \texttt{cma\_ellipsoid} & 30 & $-5.2\%$ & $[-6.9, -3.6]$ & $1.4{\times}10^{-6}$ & $4.8{\times}10^{-7}$ \\
 \bottomrule
 \end{tabular}
@@ -1733,9 +1829,14 @@ checkpointed Penicillin bioprocess simulator), and LassoBench (a real
 30-seed molecular-genomics benchmark) -- eight distinct problem families
 beyond DTLZ2, with the null/negative results on Rover and LassoBench
 landing exactly where the effective-dimension theory predicts they should,
-tested with the same statistical rigor as the wins.
+tested with the same statistical rigor as the wins. Two further batteries
+extend this validation beyond what a single table can summarize: the
+BBOB-style landscape taxonomy below (\S\ref{sec:bbob-style}, 8
+experiments on non-algebraic landscapes) and the \texttt{labcat\_style}
+completeness ablation (\S\ref{sec:labcat-style}, 42 experiments across
+this entire study).
 
-\subsection{BBOB-style landscape taxonomy (queued)}
+\subsection{BBOB-style landscape taxonomy}
 \label{sec:bbob-style}
 
 Two gaps motivate a further benchmark: LABCAT \citep{visser2023labcat},
@@ -1780,6 +1881,60 @@ variants win); \texttt{peaks\_peaks} should resemble Rover/LassoBench
 (near-null, genuinely deceptive rather than merely rugged);
 \texttt{sphere\_peaks} is the least predictable, requiring a single shared
 trust region to handle two different landscape characters at once.
+
+\paragraph{Results.} All 8 experiments $\times$ 4 methods $\times$ 5 seeds
+landed. \textbf{Headline finding: the effect is real and statistically
+significant almost everywhere, but an order of magnitude smaller than
+DTLZ2's} ($1$--$9\%$ here vs.\ $+66.6\%$ there, paired $t$-test/Wilcoxon,
+full numbers in \texttt{RESULTS.md} \S12) -- and two of the four
+predictions above were wrong, informatively. \texttt{cma\_ellipsoid}
+remains the single most robust geometry (best point estimate, tightest
+zero-excluding CI, in 5 of the 6 taxonomy pairs), confirming the
+\texttt{ellipsoidal\_ellipsoidal} prediction exactly: only
+\texttt{cma\_ellipsoid} clears a zero-excluding 95\% CI at 5/5 there
+($+1.6\%$), one-shot PCA is marginal. The \texttt{rastrigin\_rastrigin}
+prediction is right in direction, wrong in magnitude: PCA variants win
+unanimously but at $\approx 1\%$, not DTLZ3/7's $+8$ to $+21\%$. The
+\texttt{peaks\_peaks} prediction is \textbf{refuted}: all three variants
+win cleanly ($+3.4$ to $+4.0\%$, 5/5, CIs excluding zero) rather than
+replicating Rover/LassoBench's near-null pattern -- suggesting it is
+landscape \emph{difficulty} (a real simulator with genuine input
+interactions), not the taxonomy label "weak global structure," that
+predicts near-null results. Most striking: \texttt{sphere\_sphere}, the
+predicted-trivial control, shows the \emph{largest} relative gain of the
+six pairs ($+6.9$ to $+8.9\%$) despite having no engineered
+low-effective-dimension structure at all -- every one of its 100 inputs
+is equally informative, unlike DTLZ2's $g(x_M)$ construction. This points
+to a second contributor beyond the effective-dimension theory
+(\S\ref{sec:tr-shape-summary}): PCA on a trust region's local data
+reflects not only which dimensions matter but the optimizer's own
+convergence trajectory, which elongates toward the optimum on any smooth
+unimodal landscape -- a real, smaller-magnitude, more universal benefit
+that DTLZ2's dominant effective-dimension signal was too large to isolate.
+Group B's dose-response does \emph{not} reproduce
+\S\ref{sec:sparse-dtlz2}'s clean monotone curve: at $k_{\mathrm{eff}}{=}20$
+every variant is statistically indistinguishable from zero, and at
+$k_{\mathrm{eff}}{=}80$ only \texttt{cma\_ellipsoid} reaches significance,
+barely ($+0.3\%$). This is a genuine non-replication rather than a
+magnitude weakening: Rastrigin's own multimodality appears to add enough
+noise to local covariance/lengthscale estimation that shape adaptation
+cannot cleanly detect an informative subspace even when one exists by
+construction -- echoing \S\ref{sec:sparse-dtlz2}'s Rover finding that
+effective dimension is necessary but not sufficient. The standard
+honesty caveat above still governs every number in this paragraph.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{bbob_sphere_sphere_aggregate.png}
+\caption{Mean hypervolume vs.\ evaluations, \texttt{bbob\_sphere\_sphere}
+-- the predicted-trivial control that instead showed the largest relative
+gain of the six taxonomy pairs. \texttt{ard\_pca\_ellipsoid},
+\texttt{pca\_ellipsoid}, and \texttt{cma\_ellipsoid} separate cleanly from
+isotropic \texttt{morbo} despite sphere having no engineered
+low-effective-dimension structure; \texttt{labcat\_style} tracks
+\texttt{morbo} almost exactly throughout.}
+\label{fig:bbob-sphere-sphere}
+\end{figure}
 
 \subsection{Future work}
 \label{sec:tr-shape-future}
@@ -1875,6 +2030,25 @@ transferable results in this work: they demonstrate not just that
 adaptive portfolio methods over local-search geometries are viable, but
 where and why they fail, in terms specific enough to predict when a
 different design would be needed.
+
+Two further results sharpen rather than complicate this picture. The
+BBOB-style landscape taxonomy (Section~\ref{sec:bbob-style}) confirms the
+effective-dimension theory holds beyond DTLZ2's engineered $g(x_M)$
+construction, but at an order-of-magnitude-smaller effect size ($1$--$9\%$
+versus $+66.6\%$) -- evidence that the theory's largest effect sizes are
+specific to problems with an explicit, extreme low-dimensional
+construction, not a general property of "effective dimension exists,"
+and that a second, smaller, more universal contributor (trust-region
+rotation tracking the optimizer's own convergence trajectory, visible even
+on the fully-informative \texttt{sphere} control) is also at work. The
+direct implementation of LABCAT's own construction as \texttt{labcat\_style}
+(Section~\ref{sec:labcat-style}) answers the completeness question a
+differentiation paragraph alone cannot: our own ordering choice --
+PCA first on raw data, reweight fixed axis widths by lengthscale
+afterward -- beats LABCAT's own whiten-then-fitness-weighted-PCA ordering
+empirically, including on the ill-conditioned landscape LABCAT's own paper
+reports its construction winning on, and does so not merely by avoiding
+the degenerate no-op that motivated the design choice in the first place.
 
 The three extensions from Sections~\ref{sec:composite}--\ref{sec:botier}
 occupy distinct, largely orthogonal design axes among themselves as well.

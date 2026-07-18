@@ -157,10 +157,13 @@ Why this matters for us, honestly:
 ## 3. Other directions, ranked by value/effort
 
 **High value, low effort:**
-- **Multi-seed the whole sweep.** Everything so far is seed 0. The
-  headline numbers (+64–72% at high d) are large enough to likely survive,
-  but the small-d and Rover effects (±3–10%) are within plausible
-  single-seed noise. 5 seeds turns "suggestive" into "publishable."
+- **Multi-seed the whole sweep — DONE.** (See the Implementation status
+  table above.) Core results confirmed at 5-seed unanimity, headline
+  claims further confirmed at 20-seed unanimity (`RESULTS.md` §11), with
+  the current headline range +66–79% hypervolume. The small-d and Rover
+  effects that were plausible single-seed noise were re-tested directly
+  and mostly did shrink toward null at more seeds (`RESULTS.md` §11's
+  "three revisions").
 - **The `cma_ellipsoid` variant** (Sec. 1 above) — highest-value new method,
   and reuses all the rotated-box plumbing we already built.
 
@@ -315,30 +318,28 @@ validation once LassoBench is done.
 The 20-seed program (RESULTS.md §11) resolved most open questions and
 created one sharply-motivated new method. Current ranked queue:
 
-1. **`mab_shape_ducb` — DONE, results in (RESULTS.md §11g).** Verdict:
-   two wins, one structural lesson. At d=100 it largely fixes the variance
-   problem (24.44±7.19 at 15/20 → **31.41±3.50 at 20/20**, +69.8% — within
-   ~1 HV point of the best fixed arms while staying adaptive; **now the
-   recommended bandit default**). On the mid-run switch it triples
-   epsilon-greedy's improvement (+2.9% → +9.3%, 16/20) but recovers only
-   ~half the fixed shapes' +20-21%. At tight-budget d=200 it stays at 0.00:
-   arm-switching itself dilutes persistent-state arms (cma's covariance
-   only updates when its arm is played), a structural limit of the bandit
-   abstraction — next iteration: shared CMA state updated from every batch,
-   or commit-per-TR-lifetime designs. Original design notes:
-   (`cluster/submit_mab_ducb.sh`, 45
-   jobs).** Discounted-UCB arm selection (`mab_policy="ducb"`,
-   Garivier & Moulines 2011) replacing epsilon-greedy. Directly targets the
-   two failure modes §11d/e *measured*: stale per-arm reward estimates
-   under non-stationarity (tv_keff49: epsilon-greedy +2.9% at 10/20 while
-   both fixed shapes hit +20% at 20/20 — arm estimates are only corrected
-   for arms replayed) and the fixed exploration tax at tight budgets.
-   D-UCB decays all arms' counts every decision, so a stale arm's bonus
-   REGROWS (auto re-exploration) and bonuses anneal as counts grow (no
-   permanent tax). Unit-verified for exploit / sustained-explore /
-   post-shift re-adaptation; end-to-end smoke-tested. Queued on the three
-   discriminating regimes: tv_keff49 (20 seeds), methods_100d (20 seeds,
-   the variance test), methods_200d (5 seeds, the tight-budget test).
+1. **`mab_shape_ducb` — DONE, results in (RESULTS.md §11g,
+   `cluster/submit_mab_ducb.sh`, 45 jobs).** Discounted-UCB arm selection
+   (`mab_policy="ducb"`, Garivier & Moulines 2011) replacing epsilon-greedy.
+   Directly targets the two failure modes §11d/e *measured*: stale per-arm
+   reward estimates under non-stationarity (tv_keff49: epsilon-greedy
+   +2.9% at 10/20 while both fixed shapes hit +20% at 20/20 — arm
+   estimates are only corrected for arms replayed) and the fixed
+   exploration tax at tight budgets. D-UCB decays all arms' counts every
+   decision, so a stale arm's bonus REGROWS (auto re-exploration) and
+   bonuses anneal as counts grow (no permanent tax). Unit-verified for
+   exploit / sustained-explore / post-shift re-adaptation; end-to-end
+   smoke-tested. **Verdict: two wins, one structural lesson.** At d=100 it
+   largely fixes the variance problem (24.44±7.19 at 15/20 →
+   **31.41±3.50 at 20/20**, +69.8% — within ~1 HV point of the best fixed
+   arms while staying adaptive; **now the recommended bandit default**).
+   On the mid-run switch it triples epsilon-greedy's improvement (+2.9% →
+   +9.3%, 16/20) but recovers only ~half the fixed shapes' +20-21%. At
+   tight-budget d=200 it stays at 0.00: arm-switching itself dilutes
+   persistent-state arms (cma's covariance only updates when its arm is
+   played), a structural limit of the bandit abstraction — next iteration:
+   shared CMA state updated from every batch, or commit-per-TR-lifetime
+   designs.
 1b. **`mab_shape_ducb_shared` — DONE, results in (RESULTS.md §11h). Closes
    the bandit line.** The CMA covariance now advances at EVERY shape
    update regardless of which arm is played (the cma arm merely consumes
@@ -370,7 +371,7 @@ created one sharply-motivated new method. Current ranked queue:
    ARD-based most exposed (lengthscales from noisy Y).
 4. **Remaining benchmarks/mechanisms**: MOPTA08 / HPA / PMO; composite
    Rover (checkpointed trajectory costs); objective-aware rotation.
-5. **BBOB-style landscape taxonomy — CODED, queued
+5. **BBOB-style landscape taxonomy — DONE, results in
    (`cluster/submit_bbob_style.sh`, 160 jobs; RESULTS.md §12).** Two
    motivations: LABCAT (our closest prior art) was evaluated on COCO/BBOB,
    a family we hadn't touched; the `ard_box` landscape-dependence finding
@@ -380,14 +381,28 @@ created one sharply-motivated new method. Current ranked queue:
    representatives (5 categories: sphere/rosenbrock/ellipsoidal/rastrigin/
    peaks) — **not** the official `cocoex` package, so results are internal
    comparisons only, not directly comparable to published COCO/LABCAT
-   numbers (full honesty caveat in the module docstring). 6 taxonomy pairs
-   at d=100 plus a 2-point effective-dimension dose-response on
-   `rastrigin_rastrigin` (does §7's SparseDTLZ2 dose-response generalize
-   beyond DTLZ2's smooth `g`?). `rosenbrock_rosenbrock` gives a direct
+   numbers (full honesty caveat in the module docstring). All 8 experiments
+   × 4 methods × 5 seeds landed. **Headline: the effect is real and mostly
+   significant but an order of magnitude smaller than DTLZ2's (1–9% vs.
+   +66.6%)** — `cma_ellipsoid` is the most robust geometry (confirms the
+   rotation-robustness prediction on `ellipsoidal_ellipsoidal` exactly),
+   but two of four stated-in-advance predictions were refuted: `peaks_peaks`
+   was *not* near-null (all variants +3.4–4.0%, 5/5), and the
+   `rastrigin_rastrigin` `k_eff` dose-response did not reproduce
+   `SparseDTLZ2`'s clean monotone curve (near-zero at `k_eff=20`, barely
+   significant for `cma_ellipsoid` alone at `k_eff=80`). Most striking:
+   `sphere_sphere`, predicted trivial, showed the *largest* relative gain
+   (+6.9–8.9%) despite having no engineered low-effective-dimension
+   structure — pointing to a second, smaller-magnitude "trajectory
+   alignment" contributor to shape adaptation's benefit beyond the
+   effective-dimension theory. `rosenbrock_rosenbrock` gives a direct
    within-study comparison point to LABCAT's own reported finding (their
-   PCA-aligned region wins on Rosenbrock, struggles on highly multimodal
-   Levy) — see `LITERATURE_REVIEW.md`'s LABCAT entry.
-6. **`labcat_style` — CODED, unit-tested, smoke-tested, queued
+   PCA-aligned region wins sharply on Rosenbrock): our results show small,
+   roughly *equal* gains across `pca_ellipsoid`/`ard_pca_ellipsoid`/
+   `cma_ellipsoid` (+1.9–2.0%), no PCA-specific edge — see
+   `LITERATURE_REVIEW.md`'s LABCAT entry and `RESULTS.md` §12 for full
+   numbers and discussion.
+6. **`labcat_style` — DONE, results in
    (`cluster/submit_labcat_style.sh`, 210 jobs: 42 experiments × 5 seeds
    across the full tr_shape study; RESULTS.md §13).** Closes
    the remaining completeness gap from item 5: item 5 tests LABCAT's own
@@ -396,12 +411,23 @@ created one sharply-motivated new method. Current ranked queue:
    (`compute_labcat_style_shape` in `morbo/utils.py`) — fitness-weighted
    PCA computed genuinely in lengthscale-whitened coordinates, rotation
    kept directly rather than reweighted afterward, the opposite order from
-   `ard_pca_ellipsoid`. Run against `tr_shape_dtlz2_100d` (core comparison)
-   and `bbob_rosenbrock_rosenbrock` (LABCAT's own reported win condition).
+   `ard_pca_ellipsoid`. **Result: our own ordering wins the direct
+   comparison.** Loses consistently to `pca_ellipsoid`/`ard_pca_ellipsoid`
+   wherever a real signal exists — including on `bbob_rosenbrock_rosenbrock`
+   (LABCAT's own reported win condition: our reimplementation loses
+   tightly/significantly to all three of our own variants there, and isn't
+   even distinguishable from plain isotropic `morbo`). At
+   `tr_shape_dtlz2_100d` it beats isotropic `morbo` (+47.2%) but loses to
+   `pca_ellipsoid` (−11.4%, CI excluding zero). Sharpest result: collapses
+   to exactly 0 hypervolume in 3/5 seeds at d=150 — `morbo`'s own failure
+   signature — while both PCA variants stay healthy throughout, suggesting
+   whiten-then-PCA is more fragile at high d than PCA-first-then-reweight.
    Multi-objective weighting substitution (mean per-objective min-max rank
    in place of LABCAT's single-scalar `1-y'`) is a disclosed, necessary
-   adaptation, not a hidden simplification — see `writeup/methods.tex`
-   §7.1's `labcat_style` subsection for the full mechanism.
+   adaptation and a genuine confound on how far this generalizes back to
+   LABCAT's own single-objective setting — see `writeup/methods.tex`
+   §7.1's `labcat_style` subsection for the full mechanism and honest
+   scoping.
 
 Resolved and closed by §11: Rover-family (conclusively null), the
 PCA-under-rotation question (seed noise; cma is the robust winner), the

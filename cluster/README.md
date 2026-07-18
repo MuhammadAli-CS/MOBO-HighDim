@@ -230,30 +230,37 @@ RESULTS.md §11h for the full diagnosis.
 
 ## 4h. BBOB-style landscape taxonomy
 
-**Status: coded, smoke-tested, QUEUED -- not yet run.**
+**Status: DONE, results in -- all 8 experiments x 4 methods x 5 seeds landed.**
 
 ```
-bash cluster/submit_bbob_style.sh   # 160 jobs: 8 experiments x 5 seeds x 4 methods
+bash cluster/submit_bbob_style.sh   # 160 jobs: 8 experiments x 5 seeds x 4 methods (already run)
 ```
 
-Tests whether the `ard_box` landscape-dependence finding (wins on rugged-$g$
+Tested whether the `ard_box` landscape-dependence finding (wins on rugged-$g$
 DTLZ3/7, fails on smooth-$g$ DTLZ2/5 -- RESULTS.md §10e/11a, from only 4
 hand-picked functions) generalizes to BBOB's own 5-category landscape
-taxonomy, and gives a within-study comparison point to LABCAT (our closest
+taxonomy, and gave a within-study comparison point to LABCAT (our closest
 prior art, evaluated on COCO/BBOB). **Read
 `morbo/problems/bbob_style.py`'s docstring before citing any numbers from
 this batch**: these are faithful-in-spirit reimplementations of
 representative BBOB functions, not the official `cocoex` package -- results
 are internally comparable across our own methods, not directly comparable
-to published COCO/LABCAT hypervolume tables. See RESULTS.md §12 for the
-full experiment list and stated predictions.
+to published COCO/LABCAT hypervolume tables. **Headline**: the effect is
+real and mostly significant but an order of magnitude smaller than DTLZ2's
+(1-9% vs. +66.6%); `cma_ellipsoid` is the most robust geometry; two of four
+stated-in-advance predictions were refuted informatively (`peaks_peaks` was
+not near-null; the `rastrigin_rastrigin` `k_eff` dose-response did not
+reproduce `SparseDTLZ2`'s clean curve); `sphere_sphere` (predicted trivial)
+showed the largest gain, pointing to a second "trajectory-alignment"
+contributor to shape adaptation's benefit. Full numbers, per-experiment
+table, and discussion in RESULTS.md §12 and `writeup/methods.tex` §7.6.
 
 ## 4i. `labcat_style`: LABCAT's own construction, implemented directly
 
-**Status: coded, unit-tested, smoke-tested, QUEUED -- not yet run.**
+**Status: DONE, results in -- all 42/42 experiments x 5 seeds landed.**
 
 ```
-bash cluster/submit_labcat_style.sh   # 210 jobs: 42 experiments x 5 seeds
+bash cluster/submit_labcat_style.sh   # 210 jobs: 42 experiments x 5 seeds (already run)
 ```
 
 Implements LABCAT's actual mechanism (fitness-weighted PCA computed
@@ -262,23 +269,25 @@ genuinely in lengthscale-whitened coordinates, rotation kept directly) as
 which computes an unweighted PCA rotation first and only reweights axis
 widths by lengthscale afterward. Closes the completeness gap: §12 tests
 LABCAT's own *benchmark family* against our shape variants; this tests
-LABCAT's own *construction* directly, and does so across every experiment
-in the tr_shape study that already has other shape-variant baselines to
-compare against -- the full DTLZ2 dimension sweep, other DTLZ landscapes,
-the `tr_shape_methods_*` (cma/mab/linear_gp) experiments, Rover,
-Penicillin, the SparseDTLZ2/RotatedSparseDTLZ2/TimeVarying
-effective-dimension families, SparseRover, LassoBench, and all 8 BBOB
-taxonomy pairs (see `cluster/submit_labcat_style.sh`'s group comments for
-the exact list and rationale) -- not just the two headline comparisons
-(DTLZ2 d=100, `bbob_rosenbrock_rosenbrock`, where LABCAT's paper reports
-its construction winning specifically on Rosenbrock's ill-conditioned
-curved valley -- the sharpest test of whether fitness-weighting the
-rotation matters). See RESULTS.md §13 and `compute_labcat_style_shape`'s
-docstring in `morbo/utils.py` for the exact mechanism and the
-multi-objective weighting adaptation (LABCAT is single-objective; we
-substitute mean per-objective min-max rank since there's no single scalar
-to weight by). LassoBench experiments require the LassoBench package on
-the cluster node, as with every other label run against them.
+LABCAT's own *construction* directly, across every experiment in the
+tr_shape study that already has other shape-variant baselines to compare
+against. **Result: our own ordering wins the direct comparison.**
+`labcat_style` loses consistently to `pca_ellipsoid`/`ard_pca_ellipsoid`
+wherever a real signal exists, including on `bbob_rosenbrock_rosenbrock`
+(LABCAT's paper reports its construction winning specifically there --
+our reimplementation instead loses tightly/significantly to all three of
+our own shape variants, and isn't even distinguishable from plain
+isotropic `morbo`). At `tr_shape_dtlz2_100d` it beats `morbo` (+47.2%) but
+loses to `pca_ellipsoid` (-11.4%, CI excluding zero). Sharpest result: a
+collapse to exactly 0 hypervolume in 3/5 seeds at d=150 -- `morbo`'s own
+failure signature -- while both PCA variants stay healthy throughout,
+suggesting whiten-then-PCA is more fragile at high d than
+PCA-first-then-reweight. Two disclosed confounds (the multi-objective
+weighting substitution, and LABCAT being tuned/evaluated in a
+lower-dimensional single-objective regime) temper how far this
+generalizes back to LABCAT's own setting -- see RESULTS.md §13 and
+`writeup/methods.tex`'s `labcat_style` subsection for full numbers, the
+exact mechanism, and honest scoping.
 
 ## 5. LLM-dependent parts (Parts 2 and 3)
 

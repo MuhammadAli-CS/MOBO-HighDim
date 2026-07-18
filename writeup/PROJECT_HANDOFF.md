@@ -37,7 +37,7 @@ local data helps high-dimensional multi-objective BO, and if so, why.
 
 **Headline, now confirmed across 5 seeds and multiple problem types:**
 Trust-region shape adaptation (PCA-rotated ellipsoids) produces large,
-unanimous, seed-robust wins (+64–72% hypervolume) on problems with
+unanimous, seed-robust wins (+66–79% hypervolume) on problems with
 low-dimensional *effective* structure (DTLZ2: 1 informative variable of
 nominal `d`), and produces a noise-level effect (near coin-flip win rates,
 no systematic direction) on problems where all dimensions genuinely matter
@@ -237,44 +237,60 @@ git commit && git push                          # or scp results back
 
 ## Open threads / natural next steps
 
-**QUEUED: BBOB-style landscape taxonomy, `RESULTS.md` §12**
-(`cluster/submit_bbob_style.sh`, 160 jobs) — tests the `ard_box`
-landscape-dependence finding (rugged-`g` DTLZ3/7 wins, smooth-`g` DTLZ2/5
-fails) against BBOB's own 5-category taxonomy, and gives a within-study
-comparison point to LABCAT (closest prior art, evaluated on COCO/BBOB).
-**Read `morbo/problems/bbob_style.py`'s docstring before citing numbers**:
+**DONE, results in: BBOB-style landscape taxonomy, `RESULTS.md` §12**
+(`cluster/submit_bbob_style.sh`, 160 jobs, all landed) — tested the
+`ard_box` landscape-dependence finding against BBOB's own 5-category
+taxonomy and gave a within-study comparison point to LABCAT. **Read
+`morbo/problems/bbob_style.py`'s docstring before citing numbers**:
 faithful-in-spirit reimplementations, not the official `cocoex` package —
-internally comparable only, not directly comparable to published
-COCO/LABCAT tables. Coded, unit-tested (shapes, finiteness, `k_eff`
-no-op-masking, optimum-location sanity), end-to-end BO-loop smoke-tested.
+internally comparable only. **Headline**: real, mostly-significant effect
+but an order of magnitude smaller than DTLZ2's (1–9% vs. +66.6%);
+`cma_ellipsoid` most robust (confirms the rotation-robustness prediction
+exactly on `ellipsoidal_ellipsoidal`); two of four stated predictions
+refuted informatively — `peaks_peaks` was *not* near-null (+3.4–4.0%,
+5/5) and the `rastrigin_rastrigin` `k_eff` dose-response did not
+reproduce `SparseDTLZ2`'s clean curve; `sphere_sphere` (predicted
+trivial) showed the *largest* gain (+6.9–8.9%), suggesting a second,
+smaller "trajectory-alignment" contributor to shape adaptation's benefit
+distinct from the effective-dimension theory. `rosenbrock_rosenbrock`
+shows small, roughly equal gains across all three shape variants
+(+1.9–2.0%) — no PCA-specific edge, unlike LABCAT's own reported
+Rosenbrock result. Full analysis in `writeup/methods.tex` §7.6 and
+`RESULTS.md` §12.
 
-**QUEUED: `labcat_style`, `RESULTS.md` §13** (`cluster/submit_labcat_style.sh`,
-210 jobs: 42 experiments × 5 seeds) — completes the LABCAT comparison: §12
-tests LABCAT's own benchmark family against our shape variants; this
-implements LABCAT's own *construction* directly as
+**DONE, results in: `labcat_style`, `RESULTS.md` §13** (`cluster/submit_labcat_style.sh`,
+210 jobs: 42 experiments × 5 seeds, all landed) — completes the LABCAT
+comparison: §12 tests LABCAT's own benchmark family against our shape
+variants; this implements LABCAT's own *construction* directly as
 `tr_shape="labcat_style"` (`compute_labcat_style_shape` in
 `morbo/utils.py`) — fitness-weighted PCA computed genuinely in
 lengthscale-whitened coordinates, rotation kept directly rather than
-reweighted afterward, the opposite order from `ard_pca_ellipsoid` (which
-computes an unweighted PCA rotation first and only reweights axis widths
-by lengthscale afterward — deliberately, since the reverse ordering is a
-proven no-op, see `methods.tex` §7.1). Run across the full tr_shape study
-— every experiment that already has other shape-variant baselines to
-compare against (DTLZ2 dimension sweep, other DTLZ landscapes,
-`tr_shape_methods_*`, Rover, Penicillin, SparseDTLZ2/RotatedSparseDTLZ2/
-TimeVarying, SparseRover, LassoBench, all 8 BBOB pairs — see
-`cluster/submit_labcat_style.sh`'s group comments for the exact list).
-The two headline comparisons remain `tr_shape_dtlz2_100d` (smooth, no
-ill-conditioning — expect it to land close to `ard_pca_ellipsoid`) and
-`bbob_rosenbrock_rosenbrock` (LABCAT's own reported win condition — the
-sharpest test of whether fitness-weighting the rotation matters).
-Multi-objective weighting
-substitution (mean per-objective min-max rank in place of LABCAT's
-single-scalar `1-y'`) is disclosed in `methods.tex`'s `labcat_style`
-subsection. Coded, unit-tested (uniform weights + uniform lengthscale
-reduces exactly to plain PCA; varying either changes the rotation;
-isotropic fallback and geometric-mean normalization both verified),
-smoke-tested end-to-end.
+reweighted afterward, the opposite order from `ard_pca_ellipsoid`.
+**Result: our own ordering wins the direct comparison empirically.**
+`labcat_style` loses consistently to `pca_ellipsoid`/`ard_pca_ellipsoid`
+wherever a real signal exists (DTLZ2 sweep, DTLZ3/5/7, informative
+non-stationary regime, all 8 BBOB pairs), including on
+`bbob_rosenbrock_rosenbrock` (LABCAT's own reported win condition — our
+reimplementation loses tightly/significantly to all three of our own
+variants there, +0.2% CI-including-zero edge over even plain isotropic
+`morbo`). At `tr_shape_dtlz2_100d` it beats `morbo` (+47.2%) but loses to
+`pca_ellipsoid` (−11.4%, CI excluding zero). Sharpest result: collapses to
+exactly 0 hypervolume in 3/5 seeds at d=150 — `morbo`'s own failure
+signature — while PCA variants stay healthy throughout, suggesting
+whiten-then-PCA is more fragile at high d. Roughly ties our methods where
+nothing helps anyone (LassoBench, SparseRover, near-null
+effective-dimension regimes) — consistent with the effective-dimension
+theory. One exception favors it: beats `cma_ellipsoid` on
+`tr_shape_methods_dtlz2_100d` (+19.5%, CI touches zero at n=5). Two
+disclosed confounds temper generalizing back to LABCAT's own
+single-objective setting: the multi-objective weighting substitution
+(mean per-objective min-max rank in place of LABCAT's single-scalar
+`1-y'`) may be a weaker signal than LABCAT's own, and LABCAT was
+tuned/evaluated in a lower-dimensional single-objective regime. What the
+ablation does establish cleanly: our design choice is the empirically
+more robust construction in this study's regime, not merely the one that
+avoids the degenerate no-op — full mechanism and honest scoping in
+`methods.tex`'s `labcat_style` subsection.
 
 **20-seed confirmation program: DONE, results in `RESULTS.md` §11** —
 core results confirmed at 20/20-or-0/20 unanimity; three revisions (Rover
@@ -325,13 +341,11 @@ confirmed at 19-20/20 in §11a.
 Everything originally proposed in `FURTHER_DIRECTIONS.md` (multi-seed
 sweep, composite×shape, CMA/linear-kernel/dim-prior, `mab_shape`,
 `SparseDTLZ2`, and the `sobol` random-search baseline) is now done and
-written up. Top literature-informed
-priorities (full list in `FURTHER_DIRECTIONS.md`'s last section):
+written up, as is the real-problem validation (LassoBench, above) and the
+multi-seeding of every method past the original 4-method core sweep (the
+20-seed program, above). Genuinely open literature-informed priorities
+remaining (full list in `FURTHER_DIRECTIONS.md`'s last section):
 
-- **Validate the effective-dimension finding on a real problem** —
-  LassoBench made bi-objective is the best available bridge from our
-  synthetic `SparseDTLZ2` result to something reviewers won't dismiss as
-  self-constructed.
 - **Upgrade `mab_shape` to a contextual bandit** using an online
   effective-dimension estimate (top-k PCA eigenvalue mass ratio, already
   computed by `pca_ellipsoid`) as context — turns the empirical
@@ -342,8 +356,8 @@ priorities (full list in `FURTHER_DIRECTIONS.md`'s last section):
   recovers and even wins at 2000 evals), not a fix for a standing flaw.
 - **Learned/objective-aware rotation** — current PCA/CMA are both
   variance-driven, not objective-gradient-driven. Not yet coded.
-- **Multi-seed the new-methods sweep** (`cma_ellipsoid`, `linear_gp_pca`,
-  dim-prior variants, `mab_shape`, `SparseDTLZ2`) — everything past the
-  original 4-method core sweep is currently single-seed only. The
-  `ard_pca_ellipsoid` loss at `SparseDTLZ2` effective-dim 51 (§7,
-  RESULTS.md) is a specific single-seed result worth confirming first.
+- **Diagnostic lengthscale-spread check** (`methods.tex` §7.1) — verify
+  directly that DTLZ3/7's rugged landscapes avoid the 99-flat/1-sharp
+  lengthscale pattern that triggers `ard_box`'s constraint-compounding
+  collapse, rather than inferring it from the landscape-dependence result
+  alone. Still open.
