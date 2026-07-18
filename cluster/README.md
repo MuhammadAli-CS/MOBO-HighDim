@@ -289,6 +289,35 @@ generalizes back to LABCAT's own setting -- see RESULTS.md §13 and
 `writeup/methods.tex`'s `labcat_style` subsection for full numbers, the
 exact mechanism, and honest scoping.
 
+## 4j. Two targeted budget extensions (600 -> 2000 evals)
+
+**Status: coded, QUEUED -- not yet run.**
+
+```
+bash cluster/submit_bbob_rastrigin_keff20_2000ev.sh   # 25 jobs: 5 methods x 5 seeds
+bash cluster/submit_150d_2000ev_paired.sh              # 12 jobs: 3 methods x 4 new seeds
+```
+
+Not a blanket budget increase across the study -- 600 evals is the
+standard budget everywhere else and stays that way. These two are
+targeted follow-ups on specific 600-eval results that left an open
+question about whether 600 evals was simply insufficient budget, the same
+rationale as the existing `tr_shape_dtlz2_{150,200}d_2000ev` extensions:
+
+- **`bbob_rastrigin_rastrigin_keff20_2000ev`**: the k_eff=20 Group B point
+  (RESULTS.md §12) was a flat null at 600 evals for every shape variant.
+  Does a real signal appear with more budget, or does it stay null?
+- **`tr_shape_dtlz2_150d_2000ev` (seeds 1-4 for `morbo`/`pca_ellipsoid`/
+  `ard_pca_ellipsoid`)**: this experiment already has `labcat_style` at 5
+  seeds (from `submit_labcat_style.sh`), and the existing seed-0-only data
+  is striking -- `labcat_style`'s well-documented d=150/600-eval collapse
+  (RESULTS.md §13) fully recovers at 2000 evals, landing close to
+  `ard_pca_ellipsoid`. But the other three labels only have seed 0 here,
+  so there's no paired multi-seed comparison yet. This fills that in to
+  confirm whether the d=150 failure was budget-starvation (affecting
+  everyone) rather than a fundamental flaw specific to `labcat_style`'s
+  construction.
+
 ## 5. LLM-dependent parts (Parts 2 and 3)
 
 ```
