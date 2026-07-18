@@ -61,6 +61,15 @@ METHODS = {
     "mab_shape": {"tr_shape": "mab_shape", "mab_policy": "ducb"},
 }
 
+# `run_one_replication`'s `label` kwarg is validated against a fixed
+# whitelist (`morbo.run_one_replication.supported_labels`) that predates
+# this module and doesn't include "isotropic" -- it uses "morbo" for the
+# isotropic baseline instead. `label` has no effect on the actual
+# algorithm (that's entirely governed by `tr_shape` and friends above);
+# it's only used for that whitelist check and a `label == "sobol"`
+# special case, so this remapping is purely cosmetic/for bookkeeping.
+_LABEL_OVERRIDES = {"isotropic": "morbo"}
+
 # benchmark name (as in benchmarks.py) -> the `evalfn` string
 # `run_one_replication` dispatches on, plus which of its own kwargs a
 # benchmark's extra parameters (num_objectives, k_eff, ...) map to.
@@ -144,7 +153,7 @@ def run(
     outputs = []
     run_one_replication(
         seed=seed,
-        label=method,
+        label=_LABEL_OVERRIDES.get(method, method),
         max_evals=max_evals,
         evalfn=_EVALFN_MAP[benchmark],
         dim=spec.dim,
