@@ -353,22 +353,32 @@ def compute_cma_ellipsoid_shape(
     if state.C is None:
         state.reset(dim, X_center.device, X_center.dtype)
 
-    if elites.numel() > 0:
-        delta = elites - X_center
-        C_elites = (delta.t() @ delta) / elites.shape[0]
-    else:
-        C_elites = torch.eye(dim, device=X_center.device, dtype=X_center.dtype)
+    # `sigma` is the CMA-ES step-size normalizer -- both the evolution path
+    # and the elite-covariance update are computed in units of the current
+    # trust-region length, not raw coordinate distance. Skipping this (an
+    # earlier version of this function did) is NOT a cosmetic omission: it
+    # changes what the path update actually measures (direction-only,
+    # magnitude-blind, if normalized by the step's own norm instead) and
+    # silently couples the covariance's scale to the TR's current size.
+    sigma = length.clamp_min(1e-12)
 
     if state.prev_center is not None:
-        step = (X_center - state.prev_center).squeeze(0)
-        state.path = (1 - c_p) * state.path + math.sqrt(
-            c_p * (2 - c_p)
-        ) * step / step.norm().clamp_min(1e-12)
-        rank_one = torch.outer(state.path, state.path)
-    else:
-        rank_one = torch.zeros(dim, dim, device=X_center.device, dtype=X_center.dtype)
+        delta_m = (X_center - state.prev_center).reshape(-1) / sigma
+        state.path = (1 - c_p) * state.path + math.sqrt(c_p * (2 - c_p)) * delta_m
+    # else: state.path is left as its prior value (zero on the first call).
 
-    state.C = (1 - c_mu - c1) * state.C + c_mu * C_elites + c1 * rank_one
+    if elites.numel() > 0:
+        Y = (elites - X_center) / sigma
+        rank_mu = (Y.t() @ Y) / elites.shape[0]
+        state.C = (1 - c_mu - c1) * state.C + c_mu * rank_mu + c1 * torch.outer(
+            state.path, state.path
+        )
+    else:
+        # No elites this iteration: decay toward what we had, path term only
+        # -- deliberately NOT `c_mu * I`, which would be a different (and
+        # wrong) update.
+        state.C = (1 - c1) * state.C + c1 * torch.outer(state.path, state.path)
+
     state.C = 0.5 * (state.C + state.C.t())  # symmetrize against fp drift
     state.prev_center = X_center.detach().clone()
 
