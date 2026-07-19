@@ -19,19 +19,19 @@ needs to think about per-problem bound ranges. This matches what most BO
 libraries (BoTorch included) expect a black-box multi-objective test
 function to look like.
 
-Where possible, the actual objective math is NOT reimplemented here --
-each factory below is a thin wrapper around this project's existing,
-tested problem implementations (``morbo/problems/*.py`` for anything
-project-specific, BoTorch's built-in synthetic problems for the standard
-DTLZ family, Penicillin, and the two engineering problems). This file's
-only job is to present them all through one consistent, minimal
-interface. Practically: the plain-BoTorch benchmarks (``dtlz1``...``dtlz7``,
-``penicillin``, ``vehicle_safety``, ``welded_beam``) need only BoTorch
-installed and nothing else from this repo; the project-specific ones
-(``sparse_dtlz2``, ``rotated_sparse_dtlz2``, ``time_varying_sparse_dtlz2``,
-``rover``, ``sparse_rover``, ``bbob_biobj``, ``lasso_bench_mo``) import
-from ``morbo/problems/`` -- this file adds the repo root to ``sys.path``
-automatically so that works regardless of where it's imported from.
+Where possible, the actual objective math is NOT hand-retyped here -- the
+project-specific benchmarks (``sparse_dtlz2``, ``rotated_sparse_dtlz2``,
+``time_varying_sparse_dtlz2``, ``rover``, ``sparse_rover``, ``bbob_biobj``,
+``lasso_bench_mo``) live in ``problems/`` *inside this folder* (copied
+from this project's own tested implementations, not imported across the
+repo boundary), and the standard-benchmark ones (``dtlz1``...``dtlz7``,
+``penicillin``, ``vehicle_safety``, ``welded_beam``) use BoTorch's
+built-in synthetic problems directly. This whole folder -- ``methods.py``,
+``benchmarks.py``, ``problems/``, ``optimizer.py``, ``run.py`` -- is
+self-contained: nothing here imports from this repo's top-level ``morbo``
+package. Only ``torch``, ``botorch``, and ``gpytorch`` are required
+(plus, only if you use it, the third-party ``LassoBench`` package for
+``lasso_bench_mo``).
 
 **Benchmark families available** (pass the corresponding key as ``name``
 to ``get_benchmark``; see each factory function's docstring for details
@@ -40,6 +40,12 @@ and extra kwargs):
 - ``dtlz1`` / ``dtlz2`` / ``dtlz3`` / ``dtlz5`` / ``dtlz7``: the standard
   DTLZ multi-objective test family (Deb et al.), varying in landscape
   character (smooth vs. rugged, degenerate/disconnected Pareto fronts).
+- ``composite_dtlz2``: DTLZ2 exposed as a COMPOSITE benchmark -- the raw
+  intermediate quantities its formula is built from, plus the known
+  reduction to final objectives, generalized (unlike this project's own
+  ``composite_dtlz2.py``) to any number of objectives ``M``, not just
+  ``M=2``. Defaults to ``dim=6, num_objectives=5``. See ``Benchmark``'s
+  ``raw_eval_fn``/``composite_reduction`` fields.
 - ``sparse_dtlz2``: DTLZ2 with a controllable, literal gap between
   nominal and *effective* input dimension (``k_eff`` of the informative
   dims are kept, the rest are pinned no-ops).
@@ -52,7 +58,7 @@ and extra kwargs):
 - ``bbob_biobj``: pairs of BBOB-style landscape representatives (sphere,
   rosenbrock, ellipsoidal, rastrigin, a custom multi-peak function) --
   faithful-in-spirit reimplementations of representative BBOB functions,
-  not the official ``cocoex`` package (see ``morbo/problems/bbob_style.py``
+  not the official ``cocoex`` package (see ``problems/bbob_style.py``
   for the exact honesty caveat).
 - ``lasso_bench_mo``: a real bi-objective feature-selection benchmark
   built on the LassoBench package (requires ``pip install LassoBench``).
@@ -66,23 +72,11 @@ Adding a new benchmark: write a ``_make_<name>(dim, **kwargs) ->
 Benchmark`` function following the pattern below, then add it to the
 ``BENCHMARKS`` registry at the bottom of this file.
 """
-import os
-import sys
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
 import torch
 from torch import Tensor
-
-# A handful of benchmarks below (sparse_dtlz2, rotated_sparse_dtlz2,
-# time_varying_sparse_dtlz2, rover, sparse_rover, bbob_biobj,
-# lasso_bench_mo) delegate to this project's own `morbo/problems/*`
-# implementations rather than reimplementing them -- make the repo root
-# importable so those work even when this file is imported standalone
-# (i.e. without going through `run.py`, which does the same thing).
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
 
 __all__ = ["Benchmark", "get_benchmark", "BENCHMARKS"]
 
@@ -94,6 +88,12 @@ class Benchmark:
     Attributes:
         eval_fn: callable, ``X`` (``n x dim``, values in ``[0, 1]^dim``)
             -> ``Y`` (``n x num_objectives``), MAXIMIZATION convention.
+            For composite benchmarks (``raw_eval_fn`` is not ``None``),
+            this is ``composite_reduction`` already composed with
+            ``raw_eval_fn`` -- so ``eval_fn`` always gives you final,
+            directly-hypervolume-able objectives regardless of whether a
+            benchmark is composite, and every benchmark stays usable the
+            same way.
         dim: input dimension.
         num_objectives: number of objectives.
         ref_point: length-``num_objectives`` list, a hypervolume
@@ -101,11 +101,24 @@ class Benchmark:
             (i.e. worse than the worst value achievable on every
             objective) -- required for computing hypervolume-based
             metrics, not used by ``eval_fn`` itself.
+        raw_eval_fn: only set for COMPOSITE benchmarks (currently just
+            ``composite_dtlz2``). ``X -> Y_raw`` (``n x num_raw``,
+            un-negated/minimization convention), the raw intermediate
+            response a composite GP would model directly -- richer than
+            the final objectives, with a KNOWN deterministic reduction to
+            them (see ``composite_reduction``). ``None`` for every other
+            benchmark.
+        composite_reduction: only set alongside ``raw_eval_fn``.
+            ``Y_raw -> Y`` (``n x num_objectives``, MAXIMIZATION
+            convention) -- the known reduction. ``eval_fn`` is exactly
+            ``lambda X: composite_reduction(raw_eval_fn(X))``.
     """
     eval_fn: Callable[[Tensor], Tensor]
     dim: int
     num_objectives: int
     ref_point: List[float]
+    raw_eval_fn: Optional[Callable[[Tensor], Tensor]] = None
+    composite_reduction: Optional[Callable[[Tensor], Tensor]] = None
 
 
 def _unit_cube_wrap(raw_f: Callable, bounds: Tensor) -> Callable[[Tensor], Tensor]:
@@ -121,6 +134,20 @@ def _unit_cube_wrap(raw_f: Callable, bounds: Tensor) -> Callable[[Tensor], Tenso
         return -raw_f(X_native)
 
     return eval_fn
+
+
+def _unit_cube_wrap_raw(raw_f: Callable, bounds: Tensor) -> Callable[[Tensor], Tensor]:
+    r"""Like ``_unit_cube_wrap``, but WITHOUT negating the output -- for
+    composite benchmarks' raw response, which stays in its natural
+    (un-negated) convention; only the final ``composite_reduction``
+    negates, matching how this project's own composite problems work."""
+    lb, ub = bounds[0], bounds[1]
+
+    def raw_eval_fn(X_unit: Tensor) -> Tensor:
+        X_native = lb + X_unit * (ub - lb)
+        return raw_f(X_native)
+
+    return raw_eval_fn
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +192,57 @@ def _make_dtlz(name: str, dim: int, num_objectives: int = 2, **_) -> Benchmark:
 
 
 # ---------------------------------------------------------------------------
+# Composite-modeling DTLZ2 (project-specific; generalizes this project's
+# own composite_dtlz2.py, which hardcodes num_objectives=2, to any M).
+# ---------------------------------------------------------------------------
+def _make_composite_dtlz2(dim: Optional[int] = None, num_objectives: int = 5, **_) -> Benchmark:
+    r"""Composite-structure DTLZ2: the RAW intermediate quantities DTLZ2's
+    own formula is built from --
+    ``[g, cos(p_0), sin(p_0), ..., cos(p_{M-2}), sin(p_{M-2})]`` (``1 +
+    2*(M-1)`` raw components) -- exposed as what a composite GP would
+    model directly, together with the KNOWN deterministic reduction back
+    to the ``M`` final objectives. Mathematically identical to direct
+    DTLZ2 (verified numerically against BoTorch's own ``DTLZ2`` in
+    ``problems/composite_dtlz2_general.py``'s tests) -- same Pareto front,
+    same optimum -- so this is an apples-to-apples A/B against modeling
+    the objectives directly (this project's own composite-modeling
+    extension, generalized here from its original ``num_objectives=2``
+    special case to arbitrary ``M``). Defaults to ``dim=6, M=5``: with
+    ``k = dim - M + 1 = 2`` distance variables feeding ``g`` and ``M-1=4``
+    position variables, the raw response is ``1 + 2*(M-1) = 9``-dim --
+    richer than the 6-dim input, the interesting composite-modeling
+    regime (contrast with high-``dim``/low-``M`` DTLZ2, where the raw
+    response is much lower-dimensional than the input).
+
+    Args:
+        dim: input dimension. Must satisfy ``dim >= num_objectives``.
+        num_objectives: ``M >= 2`` (unlike ``composite_dtlz2.py``, not
+            restricted to 2).
+    """
+    from problems.composite_dtlz2_general import (
+        composite_dtlz2_general_reduction,
+        get_composite_dtlz2_general_fn,
+    )
+
+    dim = dim if dim is not None else 6
+    raw_f, bounds = get_composite_dtlz2_general_fn(dim=dim, num_objectives=num_objectives)
+    bounds = bounds.to(torch.double)
+    raw_eval_fn = _unit_cube_wrap_raw(raw_f, bounds)
+
+    def reduction(Y_raw: Tensor) -> Tensor:
+        return composite_dtlz2_general_reduction(Y_raw, num_objectives=num_objectives)
+
+    return Benchmark(
+        eval_fn=lambda X: reduction(raw_eval_fn(X)),
+        dim=dim,
+        num_objectives=num_objectives,
+        ref_point=[-6.0] * num_objectives,
+        raw_eval_fn=raw_eval_fn,
+        composite_reduction=reduction,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Effective-vs-nominal-dimension DTLZ2 variants (project-specific).
 # ---------------------------------------------------------------------------
 def _make_sparse_dtlz2(dim: int, num_objectives: int = 2, k_eff: int = 5, **_) -> Benchmark:
@@ -172,9 +250,9 @@ def _make_sparse_dtlz2(dim: int, num_objectives: int = 2, k_eff: int = 5, **_) -
     actually informative -- the rest are literal no-ops (pinned to their
     optimal value regardless of what the optimizer sets them to), so
     nominal dimension and effective dimension can be varied independently.
-    See ``morbo/problems/sparse_dtlz2.py`` for the exact construction.
+    See ``problems/sparse_dtlz2.py`` for the exact construction.
     """
-    from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
+    from problems.sparse_dtlz2 import get_sparse_dtlz2_fn
 
     f, bounds = get_sparse_dtlz2_fn(dim=dim, num_objectives=num_objectives, k_eff=k_eff)
     return Benchmark(
@@ -188,7 +266,7 @@ def _make_rotated_sparse_dtlz2(dim: int, num_objectives: int = 2, k_eff: int = 5
     rotated off the coordinate axes -- tests whether shape-adaptation
     methods that assume axis-alignment (e.g. ``ard_box``) lose their edge
     once the informative subspace isn't axis-aligned."""
-    from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
+    from problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
 
     f, bounds = get_rotated_sparse_dtlz2_fn(dim=dim, num_objectives=num_objectives, k_eff=k_eff)
     return Benchmark(
@@ -204,7 +282,7 @@ def _make_time_varying_sparse_dtlz2(
     switches to a different random subset partway through optimization
     (after ``switch_at_eval`` evaluations) -- tests robustness to a
     non-stationary effective subspace."""
-    from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
+    from problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
 
     f, bounds = get_time_varying_sparse_dtlz2_fn(
         dim=dim, num_objectives=num_objectives, k_eff=k_eff, switch_at_eval=switch_at_eval,
@@ -223,7 +301,7 @@ def _make_rover(dim: int = 60, **_) -> Benchmark:
     a B-spline path through obstacles, trading off path cost against
     start/goal deviation. Bi-objective (path cost, goal deviation). ``dim``
     must be even and >= 20 (each pair of dims is one 2D waypoint)."""
-    from morbo.problems.rover import get_rover_fn
+    from problems.rover import get_rover_fn
 
     f, bounds = get_rover_fn(dim=dim, force_goal=False, force_start=True)
     return Benchmark(
@@ -237,7 +315,7 @@ def _make_sparse_rover(dim: int, base_dim: int = 60, **_) -> Benchmark:
     dimensions -- tests whether input no-ops alone (without changing the
     underlying landscape's difficulty) are enough to unlock a
     shape-adaptation benefit."""
-    from morbo.problems.sparse_rover import get_sparse_rover_fn
+    from problems.sparse_rover import get_sparse_rover_fn
 
     f, bounds = get_sparse_rover_fn(dim=dim, base_dim=base_dim, force_goal=False, force_start=True)
     return Benchmark(
@@ -248,7 +326,7 @@ def _make_sparse_rover(dim: int, base_dim: int = 60, **_) -> Benchmark:
 
 # ---------------------------------------------------------------------------
 # BBOB-style landscape taxonomy (project-specific; see honesty caveat in
-# morbo/problems/bbob_style.py).
+# problems/bbob_style.py).
 # ---------------------------------------------------------------------------
 def _make_bbob_biobj(
     dim: int, f1_name: str = "sphere", f2_name: str = "sphere",
@@ -264,7 +342,7 @@ def _make_bbob_biobj(
     point isn't derivable in closed form for these landscapes (unlike
     DTLZ's known geometry) -- pass one explicitly based on empirical
     scale, or accept the default which is unlikely to be tight."""
-    from morbo.problems.bbob_style import get_bbob_biobj_fn
+    from problems.bbob_style import get_bbob_biobj_fn
 
     f, bounds = get_bbob_biobj_fn(dim=dim, f1_name=f1_name, f2_name=f2_name, k_eff=k_eff)
     return Benchmark(
@@ -285,7 +363,7 @@ def _make_lasso_bench_mo(bench_name: str = "synt_medium", **_) -> Benchmark:
     synthetic benchmarks (``"synt_simple"``, ``"synt_medium"``,
     ``"synt_high"``, ``"synt_hard"``) or a real dataset name (``"DNA"``,
     ``"Leukemia"``, ``"RCV1"``, ``"Breast_cancer"``, ``"Diabetes"``)."""
-    from morbo.problems.lasso_bench_mo import get_lasso_bench_mo_fn
+    from problems.lasso_bench_mo import get_lasso_bench_mo_fn
 
     f, bounds, dim = get_lasso_bench_mo_fn(bench_name=bench_name)
     return Benchmark(
@@ -345,6 +423,7 @@ BENCHMARKS: dict = {
     "dtlz3": lambda dim, **kw: _make_dtlz("dtlz3", dim, **kw),
     "dtlz5": lambda dim, **kw: _make_dtlz("dtlz5", dim, **kw),
     "dtlz7": lambda dim, **kw: _make_dtlz("dtlz7", dim, **kw),
+    "composite_dtlz2": _make_composite_dtlz2,
     "sparse_dtlz2": _make_sparse_dtlz2,
     "rotated_sparse_dtlz2": _make_rotated_sparse_dtlz2,
     "time_varying_sparse_dtlz2": _make_time_varying_sparse_dtlz2,

@@ -121,7 +121,12 @@ def extract_ard_lengthscale(model, dim: int) -> Optional[Tensor]:
         if ls.numel() != dim:
             return None
         log_ls_per_output.append(ls.log())
-    return torch.stack(log_ls_per_output, dim=0).mean(dim=0).exp()
+    # Detach: this is a live GP kernel parameter (requires_grad=True). Shape
+    # methods only ever read it as a fixed number; leaving it attached to
+    # the model's autograd graph would leak that graph into whatever
+    # downstream tensor (e.g. sampled candidates) consumes the lengthscale,
+    # corrupting the next model fit that touches those tensors.
+    return torch.stack(log_ls_per_output, dim=0).mean(dim=0).exp().detach()
 
 
 # ---------------------------------------------------------------------------
