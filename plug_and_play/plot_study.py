@@ -2,6 +2,13 @@ r"""Aggregate (multi-seed) hypervolume comparison for a ``run_and_save.py``
 study -- the ``plug_and_play`` analogue of the top-level repo's
 ``plot_aggregate.py``: mean HV-vs-evals curve per method, +/- 1 SEM band.
 
+Recomputes hypervolume from ``objective_history`` at fixed evaluation-count
+checkpoints (same approach as ``plot_aggregate.py``/``plot_comparison.py``'s
+``hv_trace``, reimplemented here self-contained) rather than relying on
+``true_hv``'s own checkpoint schedule -- ``objective_history`` always has
+exactly one row per evaluation, so this sidesteps any risk of different
+runs' checkpoint schedules not lining up.
+
 Usage:
     python plot_study.py <study> <budget>
 e.g.
@@ -15,6 +22,7 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from botorch.utils.multi_objective.box_decompositions.dominated import DominatedPartitioning
 
 
 def discover_method_seeds(budget_dir: str):
@@ -29,6 +37,22 @@ def discover_method_seeds(budget_dir: str):
         if seeds:
             out[name] = sorted(seeds)
     return out
+
+
+def hv_trace(Y: torch.Tensor, ref_point: torch.Tensor, step: int):
+    """Running hypervolume of Y[:k] for k = step, 2*step, ..., up to Y.shape[0]."""
+    ns, hvs = [], []
+    for k in range(step, Y.shape[0] + 1, step):
+        Yk = Y[:k]
+        better = (Yk > ref_point).all(dim=-1)
+        if better.any():
+            part = DominatedPartitioning(ref_point=ref_point, Y=Yk[better])
+            hv = part.compute_hypervolume().item()
+        else:
+            hv = 0.0
+        ns.append(k)
+        hvs.append(hv)
+    return ns, hvs
 
 
 def main() -> None:
@@ -55,23 +79,24 @@ def main() -> None:
     n_init = None
     for method, seeds in method_seeds.items():
         traces = []
+        ns_ref = None
         for s in seeds:
             path = os.path.join(budget_dir, method, f"{s:04d}.pt")
             out = torch.load(path, map_location="cpu", weights_only=False)
-            hv = np.asarray([float(v) for v in out["hv_history"]])
-            n_init = out["n_init"]
-            checkpoints = np.arange(step, len(hv) + 1, step)
-            if checkpoints[-1] != len(hv):
-                checkpoints = np.append(checkpoints, len(hv))
-            traces.append(hv[checkpoints - 1])
-        traces = np.stack(traces)  # n_seeds x n_checkpoints
+            Y = out["objective_history"].double()
+            ref_point = torch.as_tensor(out["run_config"]["ref_point"], dtype=torch.double)
+            n_init = out["run_config"]["n_initial_points"]
+            ns, hvs = hv_trace(Y, ref_point, step=step)
+            if ns_ref is None:
+                ns_ref = ns
+            traces.append(hvs)
+        traces = np.array(traces)  # n_seeds x n_checkpoints
         mean = traces.mean(axis=0)
         spread = traces.std(axis=0, ddof=1) if len(seeds) > 1 else np.zeros_like(mean)
         if args.band == "sem" and len(seeds) > 1:
             spread = spread / np.sqrt(len(seeds))
-        ns = checkpoints
-        line, = ax.plot(ns, mean, label=f"{method} (n={len(seeds)})")
-        ax.fill_between(ns, mean - spread, mean + spread, alpha=0.2, color=line.get_color())
+        line, = ax.plot(ns_ref, mean, label=f"{method} (n={len(seeds)})")
+        ax.fill_between(ns_ref, mean - spread, mean + spread, alpha=0.2, color=line.get_color())
         summary.append((method, mean[-1], spread[-1], len(seeds)))
 
     if n_init:
@@ -80,7 +105,7 @@ def main() -> None:
     ax.set_xlabel("Function evaluations")
     ax.set_ylabel("Hypervolume")
     ax.set_title(f"{args.study}: mean hypervolume over seeds (± 1 {args.band.upper()} band)\n"
-                 f"plug_and_play/optimizer.py, {args.budget} evals")
+                 f"plug_and_play (real morbo engine), {args.budget} evals")
     ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
     out_path = os.path.join(budget_dir, "comparison.png")

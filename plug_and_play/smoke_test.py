@@ -1,17 +1,13 @@
-r"""Fast local sanity checks for this folder's self-contained
-implementation -- every benchmark evaluates and every method optimizes,
-at toy scale, with no dependency outside this folder.
-
-This replaced an earlier version of this file that compared results
-against this repo's full multi-region MORBO engine (`morbo/run_one_replication.py`)
-byte-for-byte. That comparison stopped being meaningful once `optimizer.py`
-became a genuinely different (simpler, single-trust-region) algorithm
-rather than a thin wrapper around the full engine -- the point of this
-folder is a small, from-scratch reference implementation, not a
-numerically-matching reimplementation. What's checked here instead: every
-method actually runs to completion, produces finite output, and improves
-(or at least never decreases) hypervolume over the run -- i.e. the wiring
-is correct, not that the numbers match some other implementation.
+r"""Fast local sanity checks: every benchmark evaluates, and every method
+runs to completion end-to-end through the REAL engine (``run.py`` ->
+``morbo.run_one_replication`` -> ``morbo/trust_region.py``'s
+``TurboHParams(tr_shape=...)``, the same tested implementation this
+project's recorded results come from -- not a simplified reimplementation).
+This only checks correctness at toy scale (wiring, no crashes, finite
+output, monotone hypervolume); it does NOT check numerical reproduction
+of any specific recorded result -- see ``verify_reproduction.py`` for
+that (byte-for-byte comparison against this repo's own recorded
+experiment results at full scale).
 
 Usage: python smoke_test.py
 """
@@ -22,9 +18,11 @@ from methods import SHAPE_METHODS
 from run import METHODS, run
 
 DIM = 8
-N_INIT = 12
-N_ITER = 3
-BATCH_SIZE = 4
+N_INITIAL_POINTS = 15
+N_TRUST_REGIONS = 2
+MIN_TR_SIZE = 12
+BATCH_SIZE = 5
+MAX_EVALS = 40
 
 
 def check_all_benchmarks_evaluate() -> None:
@@ -60,7 +58,7 @@ def check_all_benchmarks_evaluate() -> None:
 
 
 def check_all_methods_optimize() -> None:
-    print("\n=== methods: end-to-end optimization on dtlz2 ===")
+    print("\n=== methods: end-to-end optimization on dtlz2 (real morbo engine) ===")
     assert set(SHAPE_METHODS) | {"mab_shape"} == set(METHODS), (
         f"run.METHODS out of sync with methods.SHAPE_METHODS: "
         f"{set(SHAPE_METHODS) | {'mab_shape'} ^ set(METHODS)}"
@@ -68,20 +66,20 @@ def check_all_methods_optimize() -> None:
     for method in METHODS:
         result = run(
             benchmark="dtlz2", method=method, dim=DIM, seed=0,
-            n_init=N_INIT, n_iter=N_ITER, batch_size=BATCH_SIZE,
-            benchmark_kwargs={"num_objectives": 2},
+            max_evals=MAX_EVALS, batch_size=BATCH_SIZE,
+            n_initial_points=N_INITIAL_POINTS, n_trust_regions=N_TRUST_REGIONS,
+            min_tr_size=MIN_TR_SIZE, benchmark_kwargs={"num_objectives": 2},
         )
-        hv_history = result["hv_history"]
-        assert torch.isfinite(hv_history).all(), f"{method}: non-finite hypervolume trace"
-        assert (hv_history.diff() >= -1e-9).all(), (
+        true_hv = torch.as_tensor(result["true_hv"])
+        assert torch.isfinite(true_hv).all(), f"{method}: non-finite hypervolume trace"
+        assert (true_hv.diff() >= -1e-9).all(), (
             f"{method}: hypervolume decreased somewhere -- should be monotone "
             f"non-decreasing by construction (Pareto front only grows)"
         )
-        n_expected = N_INIT + N_ITER * BATCH_SIZE
-        assert result["X"].shape[0] == n_expected, (
-            f"{method}: expected {n_expected} evaluations, got {result['X'].shape[0]}"
+        assert result["n_evals"][-1] == MAX_EVALS, (
+            f"{method}: expected {MAX_EVALS} evaluations, got {result['n_evals'][-1]}"
         )
-        print(f"OK {method:20s} final HV = {result['final_hypervolume']:.4f}")
+        print(f"OK {method:20s} final HV = {float(true_hv[-1]):.4f}")
 
 
 if __name__ == "__main__":

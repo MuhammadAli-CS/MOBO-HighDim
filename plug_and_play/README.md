@@ -1,19 +1,22 @@
 # Plug-and-play: trust-region shape methods x benchmarks
 
-A minimal, self-contained, modular interface to this project's
-trust-region shape-adaptation methods and benchmarks. Everything needed
-to run an experiment lives inside this folder -- nothing here imports
-from this repo's top-level `morbo` package. Only `torch`, `botorch`, and
-`gpytorch` are required (plus, only if you use it, the third-party
-`LassoBench` package for the `lasso_bench_mo` benchmark).
+A minimal, modular interface to this project's trust-region
+shape-adaptation methods and benchmarks -- exposing the REAL engine
+(this repo's own validated, multi-region MORBO implementation), not a
+simplified reimplementation of it. "Minimal" here means minimal *wrapper*
+code around the real thing, not a smaller/different algorithm: results
+should match `experiments/tr_shape_dtlz2_100d`'s recorded numbers up to
+ordinary floating-point/hardware nondeterminism (see
+`verify_reproduction.py`).
 
 | File | What it is |
 |---|---|
-| [`methods.py`](methods.py) | Every trust-region shape-adaptation method (`isotropic`, `ard_box`, `pca_ellipsoid`, `ard_pca_ellipsoid`, `cma_ellipsoid`, `labcat_style`) as pure functions, plus `MABShapeBandit` (a small stateful class) for the `mab_shape` meta-strategy. |
-| [`benchmarks.py`](benchmarks.py) + [`problems/`](problems) | Every benchmark used in this study (DTLZ1/2/3/5/7, `composite_dtlz2`, `sparse_dtlz2`, `rotated_sparse_dtlz2`, `time_varying_sparse_dtlz2`, `rover`, `sparse_rover`, `bbob_biobj`, `lasso_bench_mo`, `penicillin`, `vehicle_safety`, `welded_beam`) behind one `get_benchmark(name, dim=..., **kwargs)` call, all normalized to the same `[0,1]^d` input / maximize-every-objective convention. Project-specific problem implementations live in `problems/`, copied into this folder rather than imported across the repo boundary. |
-| [`optimizer.py`](optimizer.py) | A minimal, self-contained single-trust-region Bayesian optimization loop, built directly on BoTorch primitives (independent `SingleTaskGP`s, `qLogExpectedHypervolumeImprovement`). Candidates are drawn from a trust region whose shape is recomputed every iteration by one of `methods.py`'s functions -- the one thing this whole folder is actually about. |
-| [`run.py`](run.py) | Thin driver tying `benchmarks.py` + `methods.py` + `optimizer.py` together: `run(benchmark=..., method=...)`. |
-| [`smoke_test.py`](smoke_test.py) | Fast local sanity checks -- every benchmark evaluates, every method optimizes end-to-end. |
+| [`methods.py`](methods.py) | Every trust-region shape-adaptation method (`isotropic`, `ard_box`, `pca_ellipsoid`, `ard_pca_ellipsoid`, `cma_ellipsoid`, `labcat_style`) as pure functions, plus `MABShapeBandit` (a small stateful class) for the `mab_shape` meta-strategy. Zero dependency on the rest of this repo -- import it into any project. These are the SAME functions `morbo/trust_region.py`'s `TurboHParams(tr_shape=...)` dispatches to internally, not a copy. |
+| [`benchmarks.py`](benchmarks.py) + [`problems/`](problems) | Every benchmark used in this study (DTLZ1/2/3/5/7, `composite_dtlz2`, `sparse_dtlz2`, `rotated_sparse_dtlz2`, `time_varying_sparse_dtlz2`, `rover`, `sparse_rover`, `bbob_biobj`, `lasso_bench_mo`, `penicillin`, `vehicle_safety`, `welded_beam`) behind one `get_benchmark(name, dim=..., **kwargs)` call, all normalized to the same `[0,1]^d` input / maximize-every-objective convention. Project-specific problem implementations live in `problems/` (self-contained copies, not imports across the repo boundary) -- these two files have zero dependency on the rest of this repo. |
+| [`run.py`](run.py) | Thin driver: maps a `(benchmark, method)` pair onto this repo's actual, validated MORBO engine (`morbo/run_one_replication.py`) and runs one full BO replication. This is the one file that depends on the top-level `morbo` package -- necessary, not a shortcut avoided, since it's what makes results match the rest of this repo. |
+| [`run_and_save.py`](run_and_save.py) / [`plot_study.py`](plot_study.py) | CLI runner + multi-seed aggregate plotting, for reproducing a full study (e.g. the `tr_shape_dtlz2_100d` comparison) via `plug_and_play`'s naming instead of `run_comparison.py`'s. See `cluster/submit_plug_and_play_dtlz2_100d_study.sh`. |
+| [`verify_reproduction.py`](verify_reproduction.py) | Runs every method on DTLZ2 (d=100, 600 evals, seed 0 -- the exact `tr_shape_dtlz2_100d` config) and checks the result against the recorded `.pt` value for that label, within tolerance. The actual "does this reproduce the real results" check. |
+| [`smoke_test.py`](smoke_test.py) | Fast local sanity checks at toy scale -- every benchmark evaluates, every method runs to completion through the real engine. Correctness-of-wiring only, not numerical reproduction (see `verify_reproduction.py` for that). |
 
 Every function has a full docstring explaining its mechanism -- read
 `methods.py`'s module docstring first for the shared representation all
@@ -24,32 +27,22 @@ specific math.
 
 ```bash
 cd plug_and_play
-python run.py --benchmark dtlz2 --method pca_ellipsoid --dim 20 --seed 0 --n-iter 20
+python run.py --benchmark dtlz2 --method pca_ellipsoid --dim 100 --seed 0 --max-evals 600
 ```
 
 ```python
 from run import run
 
-result = run(benchmark="dtlz2", method="pca_ellipsoid", dim=20, seed=0, n_iter=20)
-print(result["final_hypervolume"])
+result = run(benchmark="dtlz2", method="pca_ellipsoid", dim=100, seed=0, max_evals=600)
+print(result["true_hv"][-1])  # final hypervolume
 ```
-
-## Design note: this is NOT the same engine as the rest of the repo
-
-`optimizer.py` is a single trust region (not this project's full
-coordinated multi-region MORBO), so its numbers won't match this repo's
-recorded experiment results -- that's expected, not a bug. The tradeoff
-is deliberate: this folder is meant to be a small, from-scratch reference
-implementation anyone can read start to finish, not a second copy of the
-production system. What it keeps faithfully is the actual subject of this
-project -- every shape method is the same function, producing the same
-`(R, axis_lengths)` rotated-box representation, that the full system uses.
 
 ## Using `methods.py` / `benchmarks.py` standalone
 
-Both are usable with zero knowledge of the rest of this folder -- useful
-if you want the shape methods or benchmark implementations in a different
-BO codebase entirely:
+Both are usable with zero knowledge of the rest of this repo (including
+`run.py` and the top-level `morbo` package) -- useful if you want the
+shape methods or benchmark implementations in a different BO codebase
+entirely:
 
 ```python
 import torch
@@ -81,9 +74,13 @@ Y_raw = bench.raw_eval_fn(X)      # n x 9, the raw response a composite GP would
 
 Verified numerically identical to direct `dtlz2` at the same `dim`/`num_objectives`
 (same Pareto front, same optimum) -- see `problems/composite_dtlz2_general.py`.
-`run.py`/`optimizer.py` don't model composite structure (they only ever
-call `eval_fn`) -- use `raw_eval_fn`/`composite_reduction` directly with
-your own composite-aware modeling code if you want that.
+**Only runs through `run.py` at `num_objectives=2`**: this repo's own
+`morbo/problems/composite_dtlz2.py` (what `run.py` actually calls for
+`evalfn="CompositeDTLZ2"`) hardcodes `M=2` -- its reduction formula isn't
+implemented for other `M`. Requesting a different `M` through `run.py`
+surfaces `morbo`'s own `ValueError` rather than silently working around
+it; use `raw_eval_fn`/`composite_reduction` directly at other `M` with
+your own composite-aware modeling code instead.
 
 ## Adding a new benchmark or method
 
@@ -91,18 +88,24 @@ your own composite-aware modeling code if you want that.
   in `benchmarks.py` (see any existing one for the pattern), add it to the
   `BENCHMARKS` dict at the bottom. If it needs project-specific objective
   math, put that in a new file under `problems/` (self-contained --
-  only `torch`/`numpy`, no imports from outside this folder).
+  only `torch`/`numpy`, no imports from outside this folder). If it needs
+  to run through `run.py` too, add a `name -> evalfn` entry to `run.py`'s
+  `_EVALFN_MAP` (only needed if `morbo/run_one_replication.py` doesn't
+  already know that `evalfn`).
 - **Method**: write a `compute_<name>_shape(...) -> (R, axis_lengths)`
   function in `methods.py` returning the same `(R, axis_lengths)`
   convention as the others (see `methods.py`'s module docstring), add it
-  to `SHAPE_METHODS`. It becomes runnable through `run.py` immediately --
-  `optimizer.py` dispatches off `SHAPE_METHODS` directly, no separate
-  wiring step needed (unlike this repo's full `morbo` engine, where a new
-  method also needs registering in `morbo/trust_region.py`).
+  to `SHAPE_METHODS`. To run it end-to-end through `run.py`, it also needs
+  a `tr_shape` mode registered in `morbo/trust_region.py`'s
+  `TurboHParams`/`TrustRegion._compute_shape_for_mode` -- see that file
+  for the existing methods' wiring as a template. This step is
+  unavoidable, not a gap in this folder: `run.py` deliberately reuses the
+  real engine rather than a second, parallel dispatch mechanism.
 
-## Running the smoke tests
+## Running the checks
 
 ```bash
 cd plug_and_play
-python smoke_test.py
+python smoke_test.py            # fast, toy scale, wiring only
+python verify_reproduction.py   # full scale (d=100, 600 evals x 7 methods), checks against recorded results
 ```
