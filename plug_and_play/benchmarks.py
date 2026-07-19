@@ -219,16 +219,19 @@ def _make_composite_dtlz2(dim: Optional[int] = None, num_objectives: int = 5, **
         num_objectives: ``M >= 2`` (unlike ``composite_dtlz2.py``, not
             restricted to 2).
 
-    Note on running this (or any ``M=5`` benchmark) through
+    Note on running this at the default ``M=5`` through
     ``run.py``/``optimizer.py``: ``optimizer.py``'s acquisition function
     uses BoTorch's EXACT hypervolume box decomposition
-    (``NondominatedPartitioning``), which scales very poorly with the
-    number of objectives -- this is a general property of exact
-    hypervolume partitioning, not specific to this benchmark (plain
-    ``dtlz2`` at the same ``dim``/``M`` hits the identical memory blowup).
-    If you hit an out-of-memory error, it's this, not a bug in the
-    benchmark's construction (verified numerically above); keep
-    ``n_init``/the evaluated-point count small, or use a lower ``M``.
+    (``NondominatedPartitioning``). Confirmed by direct testing:
+    ``M=2``/``3``/``4`` all run fine at this file's default settings, but
+    ``M=5`` hits an out-of-memory error -- not specific to this benchmark
+    (plain ``dtlz2`` at the same ``dim``/``M=5`` hits the identical
+    blowup), so it's ``optimizer.py``'s exact-partitioning acquisition
+    hitting its scaling wall around the Pareto-front size ``M=5``
+    produces here, not a bug in this benchmark's construction (verified
+    numerically identical to BoTorch's ``DTLZ2`` above). Workarounds: a
+    smaller ``n_init``/evaluated-point count, or ``num_objectives=4`` or
+    fewer.
     """
     from problems.composite_dtlz2_general import (
         composite_dtlz2_general_reduction,
