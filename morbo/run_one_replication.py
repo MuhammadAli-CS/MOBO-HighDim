@@ -335,6 +335,13 @@ def run_one_replication(
             force_start=True,
         )
     elif evalfn == "LassoBenchMO":
+        # Hardcoded, not `num_outputs = num_objectives`: get_lasso_bench_mo_fn
+        # always returns exactly 2 columns (loss, active-coef fraction)
+        # regardless of what a config's max_reference_point length claims --
+        # trusting the config here would silently mismatch BenchmarkFunction's
+        # buffer width against f's actual output if a config ever supplied a
+        # wrong-length ref point (matches the SparseRover branch's pattern).
+        num_objectives, num_outputs = 2, 2
         f, bounds, bench_dim = get_lasso_bench_mo_fn(
             bench_name=lasso_bench_name, dtype=dtype, device=device
         )
@@ -344,7 +351,6 @@ def run_one_replication(
                 f"'{lasso_bench_name}' n_features={bench_dim}."
             )
         bounds = bounds.to(**tkwargs)
-        num_outputs = num_objectives
     elif evalfn == "BBOBBiObj":
         f, bounds = get_bbob_biobj_fn(
             dim=dim,

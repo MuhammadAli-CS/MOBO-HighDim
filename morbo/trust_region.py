@@ -311,6 +311,18 @@ class TurboHParams:
             raise ValueError("mab_ducb_c must be >= 0.")
         if self.tr_shape == "mab_shape" and len(self.mab_arms) < 2:
             raise ValueError("mab_arms must contain at least 2 arms.")
+        # "mab_shape" itself is excluded: an arm can't recursively be the
+        # bandit. Without this check, a typo'd arm name (e.g. "ard_boxx")
+        # would silently fall through _compute_shape_for_mode's final
+        # `else` branch (labcat_style) instead of raising -- a config typo
+        # would silently swap in a different shape rather than erroring.
+        _valid_arms = self._TR_SHAPES - {"mab_shape"}
+        _bad_arms = [a for a in self.mab_arms if a not in _valid_arms]
+        if _bad_arms:
+            raise ValueError(
+                f"mab_arms contains unrecognized shape name(s) {_bad_arms}; "
+                f"must be a subset of {_valid_arms}."
+            )
 
     @classmethod
     def from_dict(cls, tr_hparams: Dict) -> None:
