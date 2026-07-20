@@ -1,0 +1,17 @@
+{
+    "dim": 6,
+    "evalfn": "DTLZ2",
+    "max_evals": 300,
+    "n_initial_points": 50,
+    "batch_size": 10,
+    "n_trust_regions": 3,
+    "min_tr_size": 20,
+    "max_reference_point": [
+        -6,
+        -6,
+        -6,
+        -6,
+        -6
+    ],
+    "verbose": true
+}
