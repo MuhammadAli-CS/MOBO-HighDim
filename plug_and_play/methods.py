@@ -2,14 +2,32 @@ r"""Trust-region SHAPE-ADAPTATION methods, as a standalone, plug-and-play
 module.
 
 This file is the "methods" half of a minimal two-file interface (see
-``benchmarks.py`` for the other half): everything here is a pure function
-(or, for ``mab_shape``, a small stateful class) that computes a trust
-region's *shape* -- a rotation ``R`` (``d x d`` orthonormal matrix) and a
-per-axis width vector ``axis_lengths`` (``d``-dim) -- from local
-optimization data. None of these functions know anything about BoTorch
-acquisition functions, GP fitting, or the rest of a BO loop; they are
-swappable, testable in isolation, and safe to import into any other
-project's trust-region-style optimizer.
+``benchmarks.py`` for the other half). It is a REGISTRY, not a
+reimplementation: every ``compute_*_shape`` function below is imported
+directly from this repo's own ``morbo/utils.py`` -- the exact code
+``morbo/trust_region.py``'s ``TurboHParams(tr_shape=...)`` dispatches to
+internally -- not a copy. (An earlier version of this file copied those
+functions' bodies locally "for standalone-ness." One of those copies --
+``compute_cma_ellipsoid_shape`` -- turned out to have a real,
+non-cosmetic bug: it omitted CMA-ES's sigma/trust-region-length
+normalization on both the evolution-path and elite-covariance updates,
+and used the wrong formula in the no-elites branch. It was never invoked
+by ``run.py``, which always called the real ``morbo`` engine, so it never
+affected any recorded result -- but it did mean this file's own claim of
+being "the same functions, not a copy" was false for that one function.
+Importing instead of copying makes that class of bug structurally
+impossible: there is nothing left here that could drift from the
+original.)
+
+Everything here is a pure function (or, for ``mab_shape``, a small
+stateful class) that computes a trust region's *shape* -- a rotation
+``R`` (``d x d`` orthonormal matrix) and a per-axis width vector
+``axis_lengths`` (``d``-dim) -- from local optimization data. None of
+these functions know anything about BoTorch acquisition functions, GP
+fitting, or the rest of a BO loop; they are swappable, testable in
+isolation, and safe to import into any other project's trust-region-style
+optimizer (that part IS standalone -- ``morbo/utils.py`` itself has no
+dependency on the rest of a running BO loop either, only ``torch``).
 
 **Shared representation.** Every method returns the SAME two objects:
 ``R`` (rotation) and ``axis_lengths`` (full edge length along each
@@ -30,31 +48,40 @@ underflows well before :math:`d=100`. ``R = I`` recovers an axis-aligned
 box (this is exactly ``ard_box``, and the fallback every method uses when
 it doesn't have enough local data yet).
 
-**Method summary** (full mechanism in each function's own docstring):
+**Method summary** (full mechanism in each function's own docstring, in
+``morbo/utils.py``):
 
 - ``isotropic``: no adaptation. ``R = I``, uniform widths. The baseline
-  every other method is compared against.
+  every other method is compared against. (No dedicated ``morbo/utils.py``
+  function -- inlined in ``TrustRegion._compute_shape_for_mode`` there;
+  ``isotropic_shape`` below is new, trivial, 4-line code reproducing it.)
 - ``ard_box``: axis-aligned, but each axis rescaled by the fitted GP's
   per-dimension ARD lengthscale (the original TuRBO paper's own
-  technique). No rotation.
+  technique). No rotation. -> ``morbo.utils.compute_ard_box_shape``.
 - ``pca_ellipsoid``: rotates to align with the principal components of
   the trust region's own local data -- lengthscale-blind, purely
-  data-driven.
+  data-driven. -> ``morbo.utils.compute_pca_ellipsoid_shape``.
 - ``ard_pca_ellipsoid``: ``pca_ellipsoid``'s rotation, with axis widths
   *additionally* reweighted by ARD lengthscale projected onto each
-  (already-fixed) principal axis.
+  (already-fixed) principal axis. -> ``morbo.utils.compute_ard_pca_ellipsoid_shape``.
 - ``cma_ellipsoid``: CMA-ES-style persistent covariance, updated from
   elite (Pareto-improving) points plus an evolution-path term -- unlike
   the one-shot methods above, this has state that must be carried across
-  iterations by the caller (see ``CMAState``).
+  iterations by the caller (see ``CMAState``, which wraps
+  ``morbo.utils.compute_cma_ellipsoid_shape``'s pure-functional
+  state-in/state-out signature into a mutate-in-place object).
 - ``labcat_style``: replicates LABCAT (Visser et al. 2023)'s own
   construction -- fitness-weighted PCA computed *inside* a
   lengthscale-whitened coordinate frame, the opposite order from
-  ``ard_pca_ellipsoid``.
+  ``ard_pca_ellipsoid``. -> ``morbo.utils.compute_labcat_style_shape``.
 - ``mab_shape``: not a geometry itself, but a per-trust-region bandit
   (``MABShapeBandit``) that picks among the methods above using each
   region's own reward history, so no single geometry needs to be fixed
-  in advance.
+  in advance. (No standalone ``morbo/utils.py`` equivalent -- the real
+  engine's version is inlined as ``TrustRegion._select_mab_arm``, coupled
+  to that class's buffers; ``MABShapeBandit`` extracts the same
+  epsilon-greedy/D-UCB selection logic into an object usable without a
+  full ``TrustRegion``.)
 
 Usage:
 
@@ -63,12 +90,30 @@ Usage:
         X=local_X, X_center=center, length=length, dim=100,
     )
 """
-import math
-from dataclasses import dataclass, field
+import os
+import sys
+from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple
 
 import torch
 from torch import Tensor
+
+# The compute_*_shape functions below import directly from this repo's own
+# morbo/utils.py -- make the repo root importable so that works even when
+# this file is used standalone (i.e. without going through run.py, which
+# does the same path fixup for the same reason).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from morbo.utils import (  # noqa: E402
+    compute_ard_box_shape,
+    compute_ard_pca_ellipsoid_shape,
+    compute_cma_ellipsoid_shape as _morbo_compute_cma_ellipsoid_shape,
+    compute_labcat_style_shape,
+    compute_pca_ellipsoid_shape,
+    extract_ard_lengthscale,
+)
 
 __all__ = [
     "isotropic_shape",
@@ -85,52 +130,10 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
-# Shared helper: extracting a usable per-dimension lengthscale from a GP.
-# ---------------------------------------------------------------------------
-def extract_ard_lengthscale(model, dim: int) -> Optional[Tensor]:
-    r"""Pull a ``dim``-dim per-input ARD lengthscale vector out of a fitted
-    GP, geometric-mean-averaging across output dimensions if ``model``
-    bundles more than one (e.g. a ``ModelListGP`` over several objectives).
-
-    Returns ``None`` if the model has no per-dimension lengthscale to give
-    (a single shared lengthscale, a kernel with no ``lengthscale``
-    attribute, or a jointly-modeled multi-task GP) -- callers should fall
-    back to ``isotropic_shape`` in that case, which is exactly what
-    ``ard_box``/``ard_pca_ellipsoid``/``labcat_style`` do below.
-
-    Args:
-        model: a fitted GP (single-output ``Model`` or ``ModelListGP``)
-            exposing ``.covar_module.base_kernel.lengthscale`` per output,
-            e.g. any BoTorch ``SingleTaskGP`` with a Matern/RBF kernel.
-        dim: expected input dimension; a mismatch also returns ``None``.
-    """
-    from botorch.models.multitask import KroneckerMultiTaskGP
-
-    if isinstance(model, KroneckerMultiTaskGP):
-        return None  # jointly-modeled multi-task GP has no per-dim ARD lengthscale to read
-    models = [model] if not hasattr(model, "models") else model.models
-    log_ls_per_output = []
-    for m in models:
-        try:
-            ls = m.covar_module.base_kernel.lengthscale
-        except AttributeError:
-            return None
-        if ls is None:
-            return None
-        ls = ls.reshape(-1)
-        if ls.numel() != dim:
-            return None
-        log_ls_per_output.append(ls.log())
-    # Detach: this is a live GP kernel parameter (requires_grad=True). Shape
-    # methods only ever read it as a fixed number; leaving it attached to
-    # the model's autograd graph would leak that graph into whatever
-    # downstream tensor (e.g. sampled candidates) consumes the lengthscale,
-    # corrupting the next model fit that touches those tensors.
-    return torch.stack(log_ls_per_output, dim=0).mean(dim=0).exp().detach()
-
-
-# ---------------------------------------------------------------------------
 # isotropic: the trivial baseline every other method is measured against.
+# No dedicated morbo/utils.py function exists for this (it's the
+# do-nothing case, inlined directly in TrustRegion._compute_shape_for_mode
+# rather than factored out) -- this is new, but trivial, code.
 # ---------------------------------------------------------------------------
 def isotropic_shape(length: Tensor, dim: int) -> Tuple[Tensor, Tensor]:
     r"""No shape adaptation: identity rotation, uniform axis widths.
@@ -147,136 +150,17 @@ def isotropic_shape(length: Tensor, dim: int) -> Tuple[Tensor, Tensor]:
 
 
 # ---------------------------------------------------------------------------
-# ard_box: TuRBO's own per-dimension rescaling (Eriksson et al. 2019).
-# ---------------------------------------------------------------------------
-def compute_ard_box_shape(
-    lengthscale: Tensor, length: Tensor, dim: int
-) -> Tuple[Tensor, Tensor]:
-    r"""Axis-aligned box, rescaled per-dimension by GP ARD lengthscales
-    (the original TuRBO paper's technique). No rotation: this is a
-    lengthscale-weighted special case of every other method here, using
-    ``R = I``.
-
-    Directions the GP thinks are smooth (large lengthscale -> safe to
-    explore widely, uninformative) get wider axes; directions it thinks
-    are sharp (small lengthscale -> risky to stray far, informative) get
-    narrower ones. At high dimension with many noisy per-dimension
-    lengthscale estimates, this can pathologically collapse the region's
-    volume -- see ``ard_pca_ellipsoid``'s docstring for why rotating
-    first, rather than reweighting axis-aligned dimensions directly, is
-    often more robust.
-
-    Args:
-        lengthscale: ``dim``-dim ARD lengthscale vector, e.g. from
-            ``extract_ard_lengthscale``.
-        length: 0-dim tensor, the trust region's current isotropic edge
-            length.
-        dim: input dimension.
-
-    Returns:
-        ``(R, axis_lengths)`` with ``R = I`` and
-        ``axis_lengths.prod() ** (1/d) == length``.
-    """
-    R = torch.eye(dim, device=length.device, dtype=length.dtype)
-    log_ls = lengthscale.log()
-    weights = (log_ls - log_ls.mean()).exp()  # geometric-mean-normalized, prod == 1
-    axis_lengths = length * weights
-    return R, axis_lengths
-
-
-# ---------------------------------------------------------------------------
-# pca_ellipsoid: rotate to the local data's own principal axes.
-# ---------------------------------------------------------------------------
-def compute_pca_ellipsoid_shape(
-    X: Tensor, X_center: Tensor, length: Tensor, dim: int, eig_floor: float = 1e-8
-) -> Tuple[Tensor, Tensor]:
-    r"""Rotate the trust region to the principal axes of its own local
-    accumulated data, lengthscale-blind. Falls back to ``isotropic_shape``
-    if fewer than ``dim + 1`` local points are available (PCA is
-    underdetermined otherwise).
-
-    Args:
-        X: ``n x d`` local data (normalized to ``[0, 1]^d``).
-        X_center: ``1 x d`` trust-region center -- used as the fixed
-            center for the second-moment matrix (not ``X``'s own mean),
-            so the ellipsoid stays anchored at the same point every other
-            trust-region operation uses.
-        length: 0-dim tensor, current isotropic edge length.
-        dim: input dimension.
-        eig_floor: minimum eigenvalue before taking a square root, guards
-            near-zero axis widths from a near-degenerate point cloud.
-
-    Returns:
-        ``R``: eigenvectors of the local second-moment matrix about
-            ``X_center``. ``axis_lengths``: geometric-mean-normalized so
-            ``axis_lengths.prod() ** (1/d) == length``.
-    """
-    if X.shape[0] < dim + 1:
-        return isotropic_shape(length, dim)
-    delta = X - X_center
-    cov = (delta.t() @ delta) / X.shape[0]
-    eigvals, eigvecs = torch.linalg.eigh(cov)
-    eigvals = eigvals.clamp_min(eig_floor)
-    scale = eigvals.sqrt()
-    log_scale = scale.log()
-    weights = (log_scale - log_scale.mean()).exp()
-    axis_lengths = length * weights
-    return eigvecs, axis_lengths
-
-
-# ---------------------------------------------------------------------------
-# ard_pca_ellipsoid: PCA rotation + lengthscale-reweighted widths.
-# ---------------------------------------------------------------------------
-def compute_ard_pca_ellipsoid_shape(
-    X: Tensor,
-    X_center: Tensor,
-    lengthscale: Tensor,
-    length: Tensor,
-    dim: int,
-    eig_floor: float = 1e-8,
-) -> Tuple[Tensor, Tensor]:
-    r"""``pca_ellipsoid``'s rotation, with axis widths additionally
-    reweighted by the ARD lengthscale projected onto each already-fixed
-    principal axis.
-
-    IMPORTANT design note: this deliberately does NOT compute PCA on
-    lengthscale-normalized coordinates (``X / lengthscale``) and map the
-    result back -- that construction is a mathematical no-op, since
-    undoing a diagonal whitening exactly cancels it:
-    ``D @ (D^-1 @ Sigma @ D^-1) @ D == Sigma`` for any diagonal ``D``. So
-    instead, the rotation ``R`` is computed exactly as in
-    ``pca_ellipsoid`` (lengthscale never touches the rotation), and
-    lengthscale only enters afterward as a per-axis reweighting of that
-    already-fixed rotation's widths:
-    ``lambda_eff_k = || diag(lengthscale) @ R[:, k] ||_2``.
-
-    (Contrast with ``labcat_style`` below, which whitens by lengthscale
-    *before* computing a genuinely different PCA -- the opposite,
-    non-degenerate ordering.)
-
-    Args:
-        X, X_center, length, dim, eig_floor: as in ``compute_pca_ellipsoid_shape``.
-        lengthscale: ``dim``-dim ARD lengthscale vector.
-
-    Returns:
-        ``R``: identical to ``compute_pca_ellipsoid_shape``'s.
-        ``axis_lengths``: geometric-mean-normalized so
-            ``axis_lengths.prod() ** (1/d) == length``.
-    """
-    R, axis_lengths_pca = compute_pca_ellipsoid_shape(
-        X=X, X_center=X_center, length=length, dim=dim, eig_floor=eig_floor
-    )
-    ell_eff = (lengthscale.unsqueeze(-1) * R).norm(dim=0)
-    log_eff = ell_eff.log()
-    eff_weights = (log_eff - log_eff.mean()).exp()
-    axis_lengths = axis_lengths_pca * eff_weights
-    log_axis = axis_lengths.log()
-    axis_lengths = axis_lengths * (length / log_axis.mean().exp())
-    return R, axis_lengths
-
-
-# ---------------------------------------------------------------------------
 # cma_ellipsoid: persistent CMA-ES-style covariance adaptation.
+#
+# morbo.utils.compute_cma_ellipsoid_shape is pure-functional: it takes
+# (elites, X_center, prev_center, C, path, ...) and RETURNS
+# (R, axis_lengths, C_new, path_new), leaving the caller (normally
+# TrustRegion, a stateful Module) responsible for storing C_new/path_new
+# back into its own buffers for next time. CMAState below is a thin
+# mutate-in-place wrapper around that exact function, for callers who'd
+# rather keep one state object per trust region than thread C/path
+# through their own loop by hand. The math is 100% morbo.utils's -- this
+# adds no computation of its own.
 # ---------------------------------------------------------------------------
 @dataclass
 class CMAState:
@@ -316,22 +200,10 @@ def compute_cma_ellipsoid_shape(
     eig_floor: float = 1e-8,
 ) -> Tuple[Tensor, Tensor]:
     r"""CMA-ES-style covariance adaptation (cf. Wang et al. 2026's
-    AS-SMEA), mutating ``state`` in place.
-
-    Two differences from the one-shot ``pca_ellipsoid``-family methods:
-    (1) the covariance is *persistent*, exponentially smoothed across
-    iterations (``C_new = (1 - c_mu - c1) * C_old + c_mu * C_elites +
-    c1 * (path outer path)``), so one noisy batch can't whipsaw the
-    region's orientation; (2) the update is weighted toward *success*
-    (elite/Pareto-improving points) plus a rank-one evolution-path term
-    tracking sustained center movement, rather than toward wherever
-    candidates happened to be sampled (which for one-shot PCA partly
-    reflects the sampler's own previous shape -- a feedback loop this
-    construction avoids).
-
-    Multi-objective note: classical CMA weights elites by fitness rank;
-    a Pareto set has no total order, so elites (already selected by
-    non-dominated sorting upstream) are weighted equally.
+    AS-SMEA) -- a thin mutate-``state``-in-place wrapper around
+    ``morbo.utils.compute_cma_ellipsoid_shape``'s pure-functional
+    state-in/state-out signature. See that function's docstring
+    (``morbo/utils.py``) for the exact mechanism and math.
 
     Args:
         elites: ``n_elite x d`` current Pareto-elite points (normalized
@@ -353,108 +225,22 @@ def compute_cma_ellipsoid_shape(
     if state.C is None:
         state.reset(dim, X_center.device, X_center.dtype)
 
-    # `sigma` is the CMA-ES step-size normalizer -- both the evolution path
-    # and the elite-covariance update are computed in units of the current
-    # trust-region length, not raw coordinate distance. Skipping this (an
-    # earlier version of this function did) is NOT a cosmetic omission: it
-    # changes what the path update actually measures (direction-only,
-    # magnitude-blind, if normalized by the step's own norm instead) and
-    # silently couples the covariance's scale to the TR's current size.
-    sigma = length.clamp_min(1e-12)
-
-    if state.prev_center is not None:
-        delta_m = (X_center - state.prev_center).reshape(-1) / sigma
-        state.path = (1 - c_p) * state.path + math.sqrt(c_p * (2 - c_p)) * delta_m
-    # else: state.path is left as its prior value (zero on the first call).
-
-    if elites.numel() > 0:
-        Y = (elites - X_center) / sigma
-        rank_mu = (Y.t() @ Y) / elites.shape[0]
-        state.C = (1 - c_mu - c1) * state.C + c_mu * rank_mu + c1 * torch.outer(
-            state.path, state.path
-        )
-    else:
-        # No elites this iteration: decay toward what we had, path term only
-        # -- deliberately NOT `c_mu * I`, which would be a different (and
-        # wrong) update.
-        state.C = (1 - c1) * state.C + c1 * torch.outer(state.path, state.path)
-
-    state.C = 0.5 * (state.C + state.C.t())  # symmetrize against fp drift
+    R, axis_lengths, C_new, path_new = _morbo_compute_cma_ellipsoid_shape(
+        elites=elites,
+        X_center=X_center,
+        prev_center=state.prev_center,
+        C=state.C,
+        path=state.path,
+        length=length,
+        dim=dim,
+        c_mu=c_mu,
+        c1=c1,
+        c_p=c_p,
+        eig_floor=eig_floor,
+    )
+    state.C = C_new
+    state.path = path_new
     state.prev_center = X_center.detach().clone()
-
-    eigvals, eigvecs = torch.linalg.eigh(state.C)
-    eigvals = eigvals.clamp_min(eig_floor)
-    log_scale = eigvals.sqrt().log()
-    weights = (log_scale - log_scale.mean()).exp()
-    axis_lengths = length * weights
-    return eigvecs, axis_lengths
-
-
-# ---------------------------------------------------------------------------
-# labcat_style: LABCAT (Visser et al. 2023)'s own construction.
-# ---------------------------------------------------------------------------
-def compute_labcat_style_shape(
-    X: Tensor,
-    X_center: Tensor,
-    Y_obj: Tensor,
-    lengthscale: Tensor,
-    length: Tensor,
-    dim: int,
-    eig_floor: float = 1e-8,
-) -> Tuple[Tensor, Tensor]:
-    r"""LABCAT-style shape (Visser et al. 2023): fitness-weighted PCA
-    computed genuinely *inside* lengthscale-whitened coordinates, composed
-    (not undone) with the whitening -- the opposite construction/order
-    from ``ard_pca_ellipsoid`` above, and (per the no-op identity
-    documented there) a non-degenerate one.
-
-    Procedure: (1) whiten local data by lengthscale,
-    ``X' = (X - X_center) / lengthscale``; (2) compute a fitness-weighted
-    covariance of ``X'`` (better objective values get more weight); (3)
-    eigendecompose *that* covariance directly -- lengthscale and fitness
-    both shape the rotation itself, unlike ``ard_pca_ellipsoid`` where
-    lengthscale only ever touches axis widths. Axis widths use the same
-    lengthscale-proportional formula as ``ard_box``.
-
-    Multi-objective note: LABCAT is single-objective and weights points
-    by ``1 - y'`` (lower normalized loss = more weight). With no single
-    scalar to rank by, this weights each point by the mean of its
-    per-objective values, independently min-max normalized across the
-    local data (higher = better) -- the natural multi-objective analogue,
-    not a literal reimplementation of a mechanism that presupposes a
-    total order.
-
-    Falls back to ``isotropic_shape`` if fewer than ``dim + 1`` local
-    points are available.
-
-    Args:
-        X, X_center, length, dim, eig_floor: as in ``compute_pca_ellipsoid_shape``.
-        Y_obj: ``n x m`` already-selected objective values for the same
-            points as ``X`` (row-aligned) -- i.e. objectives, not raw
-            model outputs.
-        lengthscale: ``dim``-dim ARD lengthscale vector.
-
-    Returns:
-        ``R``: eigenvectors of the fitness-weighted whitened covariance.
-        ``axis_lengths``: geometric-mean-normalized so
-            ``axis_lengths.prod() ** (1/d) == length``.
-    """
-    if X.shape[0] < dim + 1:
-        return isotropic_shape(length, dim)
-    Xw = (X - X_center) / lengthscale
-    y_min = Y_obj.min(dim=0).values
-    y_max = Y_obj.max(dim=0).values
-    y_range = (y_max - y_min).clamp_min(1e-9)
-    y_norm = (Y_obj - y_min) / y_range
-    w = y_norm.mean(dim=-1).clamp_min(1e-6)
-    w_sum = w.sum()
-    cov = (Xw * w.unsqueeze(-1)).t() @ Xw / w_sum
-    cov = 0.5 * (cov + cov.t())
-    eigvals, eigvecs = torch.linalg.eigh(cov)
-    R = eigvecs
-    log_ls = lengthscale.log()
-    weights = (log_ls - log_ls.mean()).exp()
-    axis_lengths = length * weights
     return R, axis_lengths
 
 
@@ -473,7 +259,9 @@ class MABShapeBandit:
     counter was just incremented (i.e. the outer BO loop's own
     length-doubling logic already detected an improving step), else 0.0.
 
-    Two selection policies:
+    Two selection policies (same logic as ``TrustRegion._select_mab_arm``
+    in ``morbo/trust_region.py``, extracted here into a standalone object
+    usable without a full ``TrustRegion``):
 
     - ``"epsilon"``: epsilon-greedy over a per-arm exponential moving
       average of reward. Simple, but under non-stationary landscapes a

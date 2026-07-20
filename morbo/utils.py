@@ -330,7 +330,14 @@ def extract_ard_lengthscale(model: Model, dim: int) -> Optional[Tensor]:
         if ls.numel() != dim:
             return None
         log_ls_per_output.append(ls.log())
-    return torch.stack(log_ls_per_output, dim=0).mean(dim=0).exp()
+    # Detach: this is a live GP kernel parameter (requires_grad=True).
+    # Callers only ever read it as a fixed number to build a shape from;
+    # leaving it attached to the model's autograd graph would leak that
+    # graph into whatever downstream tensor (e.g. sampled candidates,
+    # buffers) consumes the lengthscale, retaining memory it shouldn't and
+    # risking it getting pulled into gradient computations it has no
+    # business being part of.
+    return torch.stack(log_ls_per_output, dim=0).mean(dim=0).exp().detach()
 
 
 def compute_ard_box_shape(
