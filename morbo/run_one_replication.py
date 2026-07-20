@@ -164,6 +164,9 @@ def run_one_replication(
     bbob_f1: str = "sphere",
     bbob_f2: str = "sphere",
     bbob_k_eff: Optional[int] = None,
+    raw_evaluate: Optional[Callable[[Tensor], Tensor]] = None,
+    raw_evaluate_components: Optional[Callable[[Tensor], Tensor]] = None,
+    raw_compose: Optional[Callable[[Tensor], Tensor]] = None,
     dtype: torch.device = torch.double,
     device: Optional[torch.device] = None,
     save_callback: Optional[Callable[[Tensor], None]] = None,
@@ -367,6 +370,41 @@ def run_one_replication(
         f = problem
         bounds = problem.bounds.to(**tkwargs)
         num_outputs = problem.num_objectives
+    elif evalfn == "Callable":
+        # Generic direct-callable evalfn: wraps an arbitrary externally
+        # supplied minimize-convention evaluate(X)->Tensor (and, for
+        # composite mode, evaluate_components(X)->Tensor plus a
+        # compose(H)->Tensor reduction) into the real engine. Lets other
+        # projects drive this repo's actual, validated MORBO machinery from
+        # an in-memory callable, without registering a new named problem in
+        # this file. Domain is always [0, 1]^dim, matching every other
+        # evalfn's convention.
+        if raw_evaluate is None and raw_evaluate_components is None:
+            raise ValueError(
+                "evalfn='Callable' requires raw_evaluate or "
+                "raw_evaluate_components to be set."
+            )
+        bounds = torch.zeros(2, dim, **tkwargs)
+        bounds[1] = 1.0
+        if raw_evaluate_components is not None:
+            if raw_compose is None:
+                raise ValueError(
+                    "raw_evaluate_components requires raw_compose to also "
+                    "be set."
+                )
+            f = raw_evaluate_components
+            with torch.no_grad():
+                probe = raw_evaluate_components(torch.rand(2, dim, **tkwargs))
+            num_outputs = probe.shape[-1]
+            # `raw_compose` follows `raw_evaluate`'s minimize convention, so
+            # (matching `composite_dtlz2_reduction`) it must perform its own
+            # negation here -- `negate=False` is set for this evalfn below
+            # whenever composite_reduction is used, so BenchmarkFunction
+            # itself won't negate the raw components.
+            composite_reduction = lambda Y: -raw_compose(Y)
+        else:
+            f = raw_evaluate
+            num_outputs = num_objectives
     elif evalfn == "CompositePenicillin":
         f, bounds = get_composite_penicillin_fn(
             n_checkpoints=n_penicillin_checkpoints, dtype=dtype, device=device
@@ -407,8 +445,13 @@ def run_one_replication(
         tkwargs=tkwargs,
         # CompositeDTLZ2's raw response isn't in the maximize/negated
         # convention the other evalfns use -- `composite_dtlz2_reduction`
-        # performs that negation itself as part of the reduction.
-        negate=(evalfn not in ("CompositeDTLZ2", "CompositeDTLZ2Curve")),
+        # performs that negation itself as part of the reduction. Same
+        # deal for evalfn="Callable" whenever a composite_reduction was
+        # built above (raw_evaluate_components + raw_compose path).
+        negate=not (
+            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve")
+            or (evalfn == "Callable" and composite_reduction is not None)
+        ),
         observation_noise_std=observation_noise_std,
         observation_noise_bias=observation_noise_bias,
     )
