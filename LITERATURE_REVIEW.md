@@ -580,13 +580,47 @@ high-dimensional regime, not merely the one that avoids the degenerate
 no-op.
 
 **CMA-BO / CMA-TuRBO / CMA-BAxUS** — Ngo, Ha, Chan, Nguyen & Zhang, TMLR 2024,
-arXiv:2402.03104. Uses CMA-ES as a *meta-algorithm* estimating a
-distribution over where the optimum likely lies, then restricts an existing
-method (BO/TuRBO/BAxUS) to that region — a softer "focus region," not an
-ellipsoidal trust region built directly from CMA's rank-mu/evolution-path
-covariance the way our `cma_ellipsoid` is. Confirms CMA+TuRBO is an active,
-validated combination (supports the motivation) but is mechanistically
-distinct enough to just need a differentiating footnote, not a rewrite.
+arXiv:2402.03104. **Corrected characterization** (verified directly from
+the paper's PDF, Section 4.2.2/Eq. 4/6 — an earlier note here calling this
+a "softer focus region, not an ellipsoidal trust region built directly
+from CMA's covariance" was imprecise and is replaced by this entry): the
+local region genuinely **is** a true hyper-ellipsoid built directly from
+the adapted covariance, `S = {x : (x-m)ᵀ(L²Σ)⁻¹(x-m) ≤ χ²}` — a real
+Mahalanobis confidence region, with `L` (TuRBO's own success/failure
+streak factor) uniformly scaling the *whole* covariance. Candidates are
+drawn by **direct multivariate-Gaussian sampling** from `N(m, L²Σ)`, which
+sidesteps the rejection-sampling-underflow problem a bounding-box
+acceptance test has at high `d` (the reason our own rotated variants use
+an L-infinity box instead of a true ellipsoid) — a genuinely different,
+elegant solution we hadn't fully appreciated on an abstract-only read. Σ
+itself is updated by **unmodified CMA-ES** (rank-mu + evolution-path,
+weighted by literal fitness rank among a freshly-sampled population), run
+as an **outer generational loop** that wraps TuRBO as a sub-routine (a
+full λ-sized batch runs inside a fixed ellipsoid, then CMA-ES's standard
+update fires once per generation) — two nested timescales, not the single
+per-refit cadence every `tr_shape` mode in this project shares. It is also
+**entirely single-objective** (Alpine/Levy/Rastrigin/Schaffer2, `argmin`
+over a global dataset — no hypervolume or Pareto concept anywhere).
+
+What survives as genuinely distinct in `cma_ellipsoid`, given the above:
+(1) multi-objective, full stop — nothing in this paper touches MO, and
+`cma_ellipsoid` operates inside MORBO's coordinated multi-region,
+hypervolume-driven framework, with Pareto-elites weighted equally (no
+total order exists) instead of by literal fitness rank; (2) the shared
+rotated-box representation `(R, axis_lengths)` used identically by every
+other shape method here, vs. a true ellipsoid that is this paper's own
+separate primitive; (3) single-timescale integration — the covariance
+updates every trust-region refit, not via a separate outer CMA-ES
+generational loop wrapping a TuRBO sub-run.
+**CODED, unit-tested, smoke-tested, QUEUED (RESULTS.md §15):** rather than
+rely on prose differentiation alone, we implemented `cma_turbo_style` — a
+direct ablation replicating this paper's exact mechanism (rank-weighted
+covariance from the best half of all local points, direct Gaussian
+candidate sampling) inside our own multi-objective framework
+(`cluster/submit_cma_turbo_style.sh`, 20 jobs) — and will run it against
+`cma_ellipsoid` on the core comparison and `cma_ellipsoid`'s own strongest
+documented landscapes, the same completeness treatment already applied to
+LABCAT.
 
 **FuRBO** — Ascia et al., AutoML 2025, arXiv:2506.14619. Replaces TuRBO's
 hyperrectangle with a hypersphere for constrained BO — still isotropic, not

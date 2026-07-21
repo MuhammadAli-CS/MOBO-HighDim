@@ -428,6 +428,28 @@ created one sharply-motivated new method. Current ranked queue:
    LABCAT's own single-objective setting — see `writeup/methods.tex`
    §7.1's `labcat_style` subsection for the full mechanism and honest
    scoping.
+7. **`cma_turbo_style` — CODED, unit-tested, smoke-tested, QUEUED
+   (`cluster/submit_cma_turbo_style.sh`, 20 jobs; RESULTS.md §15).**
+   Closes the second-closest-prior-art gap after LABCAT: `cma_ellipsoid`'s
+   own "Relation to prior work" note on CMA-BO/CMA-TuRBO (Ngo et al. 2024,
+   arXiv:2402.03104) was based on an abstract-level read and turned out
+   imprecise once the actual PDF was checked (Section 4.2.2) — its local
+   region genuinely *is* a true hyper-ellipsoid built directly from an
+   adapted covariance, with direct multivariate-Gaussian candidate
+   sampling (not rotated-box perturbation) and unmodified CMA-ES
+   rank-fitness weighting over the whole local population (not just
+   Pareto-elites) inside an outer generational loop wrapping TuRBO — much
+   closer to `cma_ellipsoid` than "a softer meta-algorithm" suggested.
+   Implemented `tr_shape="cma_turbo_style"`
+   (`compute_cma_turbo_style_shape` + `sample_tr_gaussian_ellipsoid` in
+   `morbo/utils.py`) replicating this mechanism directly rather than
+   relying on prose differentiation alone — the same completeness
+   treatment already applied to LABCAT. Queued against `cma_ellipsoid` on
+   the core comparison and `cma_ellipsoid`'s own strongest documented
+   landscapes (`RotatedSparseDTLZ2` k_eff=50, `bbob_rosenbrock_rosenbrock`).
+   See `writeup/methods.tex` §7.1's `cma_turbo_style` subsection for the
+   full mechanism, disclosed simplifications, and predictions stated in
+   advance.
 
 Resolved and closed by §11: Rover-family (conclusively null), the
 PCA-under-rotation question (seed noise; cma is the robust winner), the

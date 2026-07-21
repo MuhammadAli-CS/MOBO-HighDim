@@ -1262,6 +1262,88 @@ Rover/LassoBench null results landing exactly where the theory predicts
 they should, with the same statistical rigor applied to both the wins and
 the non-wins.
 
+## 15. `cma_turbo_style` — replicating CMA-TuRBO's own mechanism — QUEUED, not yet run
+
+§13 established that a direct, empirical ablation of the closest prior
+art beats prose differentiation alone (LABCAT). The same gap existed for
+the *second*-closest prior art: `cma_ellipsoid`'s "Relation to prior
+work" note characterized CMA-BO/CMA-TuRBO (Ngo et al. 2024,
+arXiv:2402.03104) as a "softer meta-algorithm... rather than building the
+trust region's own geometry directly from CMA's covariance" — this was
+based on an abstract-level read and is **imprecise**, corrected here after
+pulling the actual PDF (Section 4.2.2, Eq. 4/6), not the abstract.
+
+**What CMA-TuRBO actually does.** Its local region genuinely *is* a true
+hyper-ellipsoid built directly from an adapted covariance,
+`S = {x : (x-m)ᵀ(L²Σ)⁻¹(x-m) ≤ χ²}` (`L` a TuRBO-style success/failure
+scale factor applied uniformly to the whole covariance). Candidates are
+drawn by **direct multivariate-Gaussian sampling** from `N(m, L²Σ)` — a
+different, elegant solution to the same high-dimensional
+rejection-sampling-underflow problem that motivated this study's own
+rotated-box-not-true-ellipsoid scoping decision (§7.1), not a "softer"
+approximation. Σ itself is updated by **unmodified CMA-ES** (rank-mu +
+evolution-path, weighted by literal fitness rank over a freshly-sampled
+population) inside an **outer generational loop** wrapping TuRBO as a
+sub-routine — two nested timescales, not the single per-refit cadence
+`cma_ellipsoid` shares with every other `tr_shape` mode. It is also
+**entirely single-objective** (Alpine/Levy/Rastrigin/Schaffer2 synthetic
+benchmarks, `argmin` over a global dataset — no hypervolume/Pareto concept
+anywhere).
+
+**What survives as genuinely distinct in `cma_ellipsoid`, given the
+above**: (1) the multi-objective setting, full stop — nothing in
+CMA-BO/CMA-TuRBO/CMA-BAxUS touches MO; `cma_ellipsoid` operates inside
+MORBO's coordinated multi-region, hypervolume-driven framework, weighting
+Pareto-elites equally (no total order exists) instead of by literal
+fitness rank; (2) the shared rotated-box representation `(R,
+axis_lengths)` used identically by every other shape method in this
+study, vs. a true ellipsoid that is CMA-TuRBO's own separate primitive;
+(3) single-timescale integration — the covariance updates every
+trust-region refit, not via a separate outer CMA-ES generational loop.
+
+**The ablation.** Implemented `tr_shape="cma_turbo_style"`
+(`compute_cma_turbo_style_shape` + `sample_tr_gaussian_ellipsoid` in
+`morbo/utils.py`) replicating CMA-TuRBO's exact mechanism — rank-weighted
+covariance from the best half of ALL local points (not just Pareto-elites)
+using classical CMA-ES log-rank weights, plus direct Gaussian candidate
+sampling instead of rotated-box perturbation — inside MORBO's own
+multi-objective framework, reusing `cma_ellipsoid`'s persistent
+covariance/evolution-path state. Unit-tested (rotation changes when the
+fitness ranking is reversed; differs from `cma_ellipsoid`'s
+equal-weighted-elites rotation on the same data; `n<2` fallback verified;
+geometric-mean axis-length normalization verified) and smoke-tested
+end-to-end.
+
+**Multi-objective adaptation, stated plainly**: the source paper ranks its
+population by literal fitness value; with no single scalar to rank by,
+points are ranked by the mean of their per-objective values, independently
+min-max normalized across the local population (higher is better) — the
+same substitution already established for `labcat_style`, not a new one
+invented for this ablation.
+
+Queued: the core comparison (`tr_shape_dtlz2_100d`,
+`tr_shape_methods_dtlz2_100d` — `cma_ellipsoid` lives in the latter, not
+the former) and `cma_ellipsoid`'s own strongest documented landscapes
+(`RotatedSparseDTLZ2` at `k_eff=50`, where `cma_ellipsoid` is the only
+unanimous winner under a rotated effective subspace — §10c/11c — and
+`bbob_rosenbrock_rosenbrock`, a curved-valley landscape natural for
+covariance adaptation), 5 seeds each
+(`cluster/submit_cma_turbo_style.sh`, 20 jobs).
+
+Predictions, stated in advance: if CMA-TuRBO's literal fitness-rank
+weighting and true-ellipsoid Gaussian sampling capture something our own
+equal-weighted-elites/rotated-box simplification misses, `cma_turbo_style`
+should show its clearest edge on `RotatedSparseDTLZ2` (the landscape where
+covariance-driven rotation matters most already) and
+`bbob_rosenbrock_rosenbrock` (a single dominant curved direction, similar
+to the regime `labcat_style` was predicted — and failed — to win on
+against `pca_ellipsoid`/`ard_pca_ellipsoid`; §13's near-identical
+prediction for `labcat_style` did not hold there, which is a reason for
+modest priors here too). On the smooth `tr_shape_dtlz2_100d` core
+comparison, we expect the two CMA variants to land close together, since
+that landscape's structure gives literal-fitness-ranking little to bite
+into beyond what equal-elite-weighting already captures.
+
 Plots, three per experiment directory:
 - `comparison_aggregate.png` — **the headline view**: mean HV-vs-evals
   curve per method over all available seeds with a ±1 SEM band (the

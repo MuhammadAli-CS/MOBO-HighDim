@@ -292,6 +292,38 @@ more robust construction in this study's regime, not merely the one that
 avoids the degenerate no-op — full mechanism and honest scoping in
 `methods.tex`'s `labcat_style` subsection.
 
+**QUEUED: `cma_turbo_style`, `RESULTS.md` §15**
+(`cluster/submit_cma_turbo_style.sh`, 20 jobs) — the same completeness
+treatment for the *second*-closest prior art: `cma_ellipsoid`'s own
+"Relation to prior work" note characterized CMA-BO/CMA-TuRBO (Ngo et al.
+2024, arXiv:2402.03104) as "a softer meta-algorithm... rather than
+building the trust region's own geometry directly from CMA's covariance"
+— **this was based on an abstract-level read and is imprecise**, corrected
+after pulling the actual PDF (Section 4.2.2/Eq. 4/6). CMA-TuRBO's local
+region genuinely *is* a true hyper-ellipsoid built directly from an
+adapted covariance, with candidates drawn by direct multivariate-Gaussian
+sampling (a different, elegant solution to the same high-d
+rejection-sampling problem that motivated our own box-not-ellipsoid
+scoping decision) and an unmodified-CMA-ES rank-fitness-weighted update
+over ALL local points (not just Pareto-elites) inside an outer
+generational loop wrapping TuRBO — two nested timescales, not
+`cma_ellipsoid`'s single per-refit cadence. It is also entirely
+single-objective. What survives as genuinely distinct in `cma_ellipsoid`:
+the multi-objective setting (equal-weighted Pareto-elites inside MORBO's
+coordinated hypervolume framework), the shared rotated-box representation,
+and single-timescale integration. Implemented `tr_shape="cma_turbo_style"`
+(`compute_cma_turbo_style_shape` + `sample_tr_gaussian_ellipsoid` in
+`morbo/utils.py`) replicating CMA-TuRBO's exact mechanism rather than
+relying on prose alone, reusing `cma_ellipsoid`'s persistent
+covariance/path state. Unit-tested (rotation changes when fitness ranking
+reverses; differs from `cma_ellipsoid`'s rotation on the same data; `n<2`
+fallback verified) and smoke-tested end-to-end. Queued against
+`cma_ellipsoid` on the core comparison and `cma_ellipsoid`'s own strongest
+documented landscapes (`RotatedSparseDTLZ2` k_eff=50,
+`bbob_rosenbrock_rosenbrock`) — full mechanism, disclosed simplifications,
+and predictions stated in advance in `methods.tex`'s `cma_turbo_style`
+subsection.
+
 **20-seed confirmation program: DONE, results in `RESULTS.md` §11** —
 core results confirmed at 20/20-or-0/20 unanimity; three revisions (Rover
 conclusively null; PCA's keff50 edge was seed noise, cma is the robust

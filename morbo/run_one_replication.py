@@ -91,6 +91,7 @@ supported_labels = [
     "mab_shape_ducb",
     "mab_shape_ducb_shared",
     "labcat_style",
+    "cma_turbo_style",
 ]
 
 BASE_SEED = 12346

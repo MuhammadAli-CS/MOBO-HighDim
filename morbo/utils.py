@@ -240,6 +240,118 @@ def sample_tr_discrete_points_subset_d_rotated(
     return X_cand_new.clamp(0.0, 1.0)
 
 
+def sample_tr_gaussian_ellipsoid(
+    best_X: Tensor,
+    X_center: Tensor,
+    R: Tensor,
+    axis_lengths: Tensor,
+    n_discrete_points: int,
+) -> Tensor:
+    r"""Direct multivariate-Gaussian candidate sampling -- CMA-TuRBO's own
+    mechanism (Ngo et al. 2024, arXiv:2402.03104, Eq. 6, verified against
+    the reference implementation at github.com/LamNgo1/cma-meta-algorithm),
+    used only by `tr_shape == "cma_turbo_style"`. Draws candidates from
+    `N(X_center, Sigma)` with `Sigma = R diag((axis_lengths / (2*radius))^2) R^T`,
+    where `radius = sqrt(chi2.ppf(0.9973, df=d))` -- the paper's own
+    "3-sigma rule" is a fixed *label* for a radius that actually scales
+    with dimension via the chi-squared quantile (confirmed directly from
+    the reference code: `self.std = sqrt(chi2.ppf(q=0.9973, df=self.dim))`),
+    not a literal "3" at any `d > 1`. Rejects and resamples any draw whose
+    standardized offset falls outside that radius, matching the reference
+    implementation's own oversample-then-filter behavior
+    (`np.random.multivariate_normal(..., size=n_cand*1.2)` followed by a
+    Mahalanobis-distance mask) rather than accepting an unconstrained
+    Gaussian draw. This is the genuinely different candidate-generation
+    primitive `cma_turbo_style` exists to test, replacing the perturbation
+    of a bounded dimension subset within a rotated BOX that every other
+    `tr_shape` mode in this project uses
+    (`sample_tr_discrete_points_subset_d_rotated`). It never has the
+    rejection-sampling-underflow problem a bounding-*box* acceptance test
+    would at high `d` (the reason this project's other rotated variants
+    use an L-infinity box instead of a true ellipsoid, per
+    `compute_pca_ellipsoid_shape`'s scoping discussion in
+    `writeup/methods.tex`) -- because the vast majority of a Gaussian's
+    mass already lies within its own chi-squared confidence radius by
+    construction, unlike a box's vanishing corner-volume fraction.
+
+    Args:
+        best_X: `n x d`-dim tensor of candidate perturbation centers, in
+            original (unrotated) `[0, 1]^d` coordinates -- same convention
+            as `sample_tr_discrete_points_subset_d_rotated`'s `best_X`
+            (in practice, one Pareto-elite point per candidate; CMA-TuRBO
+            itself has only one region mean, since it is single-objective).
+        X_center: `1 x d`-dim tensor, the TR center in original coordinates.
+        R: `d x d`-dim rotation (eigenvectors of the adapted covariance).
+        axis_lengths: `d`-dim tensor, full edge length along each rotated
+            axis (same convention as every other shape method here).
+        n_discrete_points: number of candidates to draw.
+
+    Returns:
+        `n_discrete_points x d`-dim tensor in original `[0, 1]^d`
+        coordinates. Clamped to bounds -- the source paper does not detail
+        its own boundary handling; clamping is a disclosed simplification.
+    """
+    from scipy.stats import chi2
+
+    d = R.shape[-1]
+    if best_X.shape[0] == 1:
+        centers = best_X.repeat(n_discrete_points, 1)
+    else:
+        rand_indices = torch.randint(
+            best_X.shape[0], (n_discrete_points,), device=best_X.device
+        )
+        centers = best_X[rand_indices]
+
+    # The source paper's "3-sigma rule" is a fixed label for a radius that
+    # actually scales with dimension: chi^2_{1-alpha,d}'s quantile, not a
+    # literal "3" (verified against the reference implementation,
+    # github.com/LamNgo1/cma-meta-algorithm/cmabo/cma_bo.py:
+    # `self.std = sqrt(chi2.ppf(q=0.9973, df=self.dim))`). We interpret
+    # `axis_lengths/2` as the extent along that dimension-correct
+    # confidence radius (consistent with how `axis_lengths/2` is already
+    # the half-width extent along each rotated axis in every other shape
+    # mode's L-infinity box), and reject-and-resample candidates whose
+    # standardized offset falls outside it -- matching the reference
+    # implementation's own oversample-then-filter behavior
+    # (`x_cand = np.random.multivariate_normal(..., size=n_cand*1.2);
+    # mask = self._is_in_ellipse(...)`), not just an unconstrained Gaussian
+    # draw.
+    radius = float(chi2.ppf(0.9973, df=d)) ** 0.5
+    sigma = (axis_lengths / (2 * radius)).clamp_min(1e-12)
+
+    W_pert = torch.zeros(
+        n_discrete_points, d, dtype=axis_lengths.dtype, device=axis_lengths.device
+    )
+    remaining = n_discrete_points
+    filled = 0
+    max_rounds = 20
+    for _ in range(max_rounds):
+        if remaining <= 0:
+            break
+        z = torch.randn(
+            int(remaining * 1.2) + 1, d, dtype=axis_lengths.dtype, device=axis_lengths.device
+        )
+        accepted = z[z.norm(dim=-1) <= radius][:remaining]
+        n_acc = accepted.shape[0]
+        W_pert[filled : filled + n_acc] = accepted * sigma
+        filled += n_acc
+        remaining -= n_acc
+    if remaining > 0:
+        # Extremely unlikely at any reasonable d (the chi^2 radius is
+        # calibrated to retain 99.73% of the mass), but guard against a
+        # pathological run of rejections rather than looping forever.
+        z = torch.randn(
+            remaining, d, dtype=axis_lengths.dtype, device=axis_lengths.device
+        )
+        norms = z.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        z = z * torch.clamp(radius / norms, max=1.0)  # clip onto the boundary
+        W_pert[filled:] = z * sigma
+
+    W_center = (centers - X_center) @ R
+    X_cand = X_center + (W_center + W_pert) @ R.t()
+    return X_cand.clamp(0.0, 1.0)
+
+
 def get_tr_center(X: Tensor, f_obj: Tensor) -> Tensor:
     r"""Find the best point in the trust region.
 
@@ -611,6 +723,113 @@ def compute_cma_ellipsoid_shape(
         C_new = (1 - c1) * C + c1 * torch.outer(path_new, path_new)
 
     # Symmetrize against floating-point drift before eigh.
+    C_new = 0.5 * (C_new + C_new.t())
+
+    eigvals, eigvecs = torch.linalg.eigh(C_new)
+    eigvals = eigvals.clamp_min(eig_floor)
+    scale = eigvals.sqrt()
+    log_scale = scale.log()
+    weights = (log_scale - log_scale.mean()).exp()
+    axis_lengths = length * weights
+    return eigvecs, axis_lengths, C_new, path_new
+
+
+def compute_cma_turbo_style_shape(
+    X_local: Tensor,
+    Y_obj_local: Tensor,
+    X_center: Tensor,
+    prev_center: Optional[Tensor],
+    C: Tensor,
+    path: Tensor,
+    length: Tensor,
+    dim: int,
+    c_mu: float,
+    c1: float,
+    c_p: float,
+    eig_floor: float = 1e-8,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    r"""CMA-TuRBO-style covariance adaptation (Ngo et al. 2024,
+    arXiv:2402.03104, Eq. 4) -- a direct ablation of `compute_cma_ellipsoid_shape`
+    isolating exactly one question: does literal CMA-ES fitness-RANK
+    weighting over the whole local population change anything relative to
+    our own simplification (equal-weighted Pareto-elites only)?
+
+    Two differences from `compute_cma_ellipsoid_shape`, both taken directly
+    from the source paper's Eq. 4 rather than invented here: (1) the
+    rank-mu update is computed from the best `mu = floor(n/2)` of ALL local
+    points (not just the TR's current Pareto-elite subset), (2) those
+    points are weighted by classical CMA-ES log-rank weights
+    (`w_i = log(mu + 0.5) - log(i)` for rank `i = 1..mu`, normalized to sum
+    to 1) rather than equally. Everything else -- the persistent,
+    exponentially-smoothed covariance, the rank-one evolution-path term,
+    the blending coefficients `c_mu`/`c1`/`c_p` -- is identical in
+    structure to `compute_cma_ellipsoid_shape`, and this function reuses
+    that function's `C`/`path`/`prev_center` persistent-state slots (only
+    one CMA-style mode is ever active per trust region at a time).
+
+    This implements the paper's "standard" (positive-weights-only) CMA-ES
+    recombination, not "active" CMA (which also assigns negative weight to
+    the worst points) -- `compute_cma_ellipsoid_shape` similarly omits
+    active CMA, so this stays an apples-to-apples test of the ranking
+    question specifically, not every CMA-ES engineering detail in the
+    source paper.
+
+    Multi-objective adaptation note: the source paper is single-objective
+    and ranks its population by literal fitness value. With no single
+    scalar to rank by, points are ranked by the mean of their per-objective
+    values, independently min-max normalized across the local population
+    (higher = better, since we maximize) -- the same substitution already
+    established for `compute_labcat_style_shape`, not a new one invented
+    for this function.
+
+    Candidate sampling: this function only computes the shape `(R,
+    axis_lengths)`; the OTHER mechanistic difference from CMA-ellipsoid --
+    direct multivariate-Gaussian candidate sampling instead of rotated-box
+    perturbation -- is `sample_tr_gaussian_ellipsoid`, wired in separately
+    at the trust region's candidate-generation call site.
+
+    Args:
+        X_local: `n x d`-dim tensor, the TR's local accumulated data
+            (normalized `[0,1]^d`) -- ALL of it, not just elites.
+        Y_obj_local: `n x m`-dim tensor, `self.objective(self.Y)` for the
+            same points as `X_local` (row-aligned).
+        X_center, prev_center, C, path, length, dim, c_mu, c1, c_p,
+            eig_floor: as in `compute_cma_ellipsoid_shape`.
+
+    Returns:
+        `(R, axis_lengths, C_new, path_new)`, same conventions as
+        `compute_cma_ellipsoid_shape`.
+    """
+    sigma = length.clamp_min(1e-12)
+
+    if prev_center is not None:
+        delta_m = (X_center - prev_center).reshape(-1) / sigma
+        path_new = (1 - c_p) * path + (c_p * (2 - c_p)) ** 0.5 * delta_m
+    else:
+        path_new = path.clone()
+
+    n = X_local.shape[0]
+    if n >= 2:
+        y_min = Y_obj_local.min(dim=0).values
+        y_max = Y_obj_local.max(dim=0).values
+        y_range = (y_max - y_min).clamp_min(1e-9)
+        goodness = ((Y_obj_local - y_min) / y_range).mean(dim=-1)  # higher = better
+        order = goodness.argsort(descending=True)
+        mu = max(1, n // 2)
+        best_idx = order[:mu]
+
+        ranks = torch.arange(1, mu + 1, dtype=length.dtype, device=length.device)
+        raw_w = (log(mu + 0.5) - ranks.log()).clamp_min(0.0)
+        w = raw_w / raw_w.sum().clamp_min(1e-12)
+
+        Y = (X_local[best_idx] - X_center) / sigma  # `mu x d`
+        rank_mu = (Y * w.unsqueeze(-1)).t() @ Y
+        C_new = (1 - c_mu - c1) * C + c_mu * rank_mu + c1 * torch.outer(
+            path_new, path_new
+        )
+    else:
+        C_new = (1 - c1) * C + c1 * torch.outer(path_new, path_new)
+
     C_new = 0.5 * (C_new + C_new.t())
 
     eigvals, eigvecs = torch.linalg.eigh(C_new)

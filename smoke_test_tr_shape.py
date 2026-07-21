@@ -299,6 +299,7 @@ if __name__ == "__main__":
     check_variant("ard_pca_ellipsoid", "ard_pca_ellipsoid", expect_rotation=True)
     check_variant("cma_ellipsoid", "cma_ellipsoid", expect_rotation=True)
     check_variant("labcat_style", "labcat_style", expect_rotation=True)
+    check_variant("cma_turbo_style", "cma_turbo_style", expect_rotation=True)
     check_linear_kernel()
     check_dim_prior()
     check_mab_shape()
