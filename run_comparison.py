@@ -245,6 +245,16 @@ LABEL_OVERRIDES = {
     # procedure and the multi-objective weighting adaptation (LABCAT is
     # single-objective; we substitute mean per-objective min-max rank).
     "labcat_style": {"tr_shape": "labcat_style"},
+    # Direct ablation of cma_ellipsoid replicating CMA-TuRBO's own mechanism
+    # (Ngo, Ha, Chan, Nguyen & Zhang, TMLR 2024, arXiv:2402.03104) instead of
+    # our own simplification: rank-mu update from the best half of ALL local
+    # points (not just Pareto-elites) weighted by classical CMA-ES log-rank
+    # weights (not equally), plus direct multivariate-Gaussian candidate
+    # sampling (not rotated-box perturbation). See
+    # compute_cma_turbo_style_shape's docstring (morbo/utils.py) for the
+    # exact procedure and the multi-objective ranking substitution (the
+    # source paper is single-objective).
+    "cma_turbo_style": {"tr_shape": "cma_turbo_style"},
 }
 
 if __name__ == "__main__":

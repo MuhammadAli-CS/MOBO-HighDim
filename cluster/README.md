@@ -342,6 +342,39 @@ real effect/null, or an artifact of insufficient budget:
   correction -- just direct verification of an assumption currently stated
   as fact rather than tested at a longer horizon.
 
+## 4k. `cma_turbo_style`: CMA-TuRBO's own mechanism, implemented directly
+
+**Status: coded, unit-tested, smoke-tested, QUEUED -- not yet run.**
+
+```
+bash cluster/submit_cma_turbo_style.sh   # 20 jobs: 4 experiments x 5 seeds
+```
+
+Same completeness treatment as `labcat_style`, for the *second*-closest
+prior art. `cma_ellipsoid`'s own "Relation to prior work" note
+characterized CMA-BO/CMA-TuRBO (Ngo et al. 2024, arXiv:2402.03104) as "a
+softer meta-algorithm... rather than building the trust region's own
+geometry directly from CMA's covariance" -- **this was based on an
+abstract-level read and is imprecise**, corrected after pulling the actual
+PDF (Section 4.2.2/Eq. 4/6). CMA-TuRBO's local region genuinely *is* a
+true hyper-ellipsoid built directly from an adapted covariance, with
+candidates drawn by direct multivariate-Gaussian sampling (a different,
+elegant high-d-safe alternative to this project's own box-not-ellipsoid
+scoping decision) and an unmodified-CMA-ES rank-fitness-weighted update
+over ALL local points (not just Pareto-elites) inside an outer
+generational loop wrapping TuRBO -- two nested timescales, not
+`cma_ellipsoid`'s single per-refit cadence. It is also entirely
+single-objective. Implemented `tr_shape="cma_turbo_style"`
+(`compute_cma_turbo_style_shape` + `sample_tr_gaussian_ellipsoid` in
+`morbo/utils.py`), reusing `cma_ellipsoid`'s persistent covariance/path
+state. Run against `cma_ellipsoid` on the core comparison
+(`tr_shape_dtlz2_100d`, `tr_shape_methods_dtlz2_100d`) and
+`cma_ellipsoid`'s own strongest documented landscapes
+(`RotatedSparseDTLZ2` at `k_eff=50`, `bbob_rosenbrock_rosenbrock`). See
+RESULTS.md §15 and `writeup/methods.tex`'s `cma_turbo_style` subsection
+for the full mechanism, disclosed simplifications, and predictions stated
+in advance.
+
 ## 5. LLM-dependent parts (Parts 2 and 3)
 
 ```

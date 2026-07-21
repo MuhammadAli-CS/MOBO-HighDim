@@ -36,6 +36,7 @@ from morbo.utils import (
     sample_tr_discrete_points,
     sample_tr_discrete_points_subset_d,
     sample_tr_discrete_points_subset_d_rotated,
+    sample_tr_gaussian_ellipsoid,
 )
 from torch import Tensor
 from torch.quasirandom import SobolEngine
@@ -226,6 +227,17 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
                     qmc=trbo_state.tr_hparams.qmc,
                     trunc_normal_perturb=trbo_state.tr_hparams.trunc_normal_perturb,
                     prob_perturb=prob_perturb,
+                )
+            elif tr.tr_hparams.tr_shape == "cma_turbo_style":
+                # CMA-TuRBO's own candidate-generation mechanism (Ngo et al.
+                # 2024): direct multivariate-Gaussian sampling, not rotated-box
+                # perturbation -- see sample_tr_gaussian_ellipsoid's docstring.
+                X_cand = sample_tr_gaussian_ellipsoid(
+                    best_X=best_X,
+                    X_center=tr.X_center_normalized,
+                    R=tr.R,
+                    axis_lengths=tr.axis_lengths,
+                    n_discrete_points=trbo_state.tr_hparams.raw_samples,
                 )
             else:
                 if trbo_state.tr_hparams.trunc_normal_perturb:

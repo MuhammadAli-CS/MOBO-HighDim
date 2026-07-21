@@ -34,6 +34,7 @@ from morbo.utils import (
     compute_ard_pca_ellipsoid_shape,
     compute_labcat_style_shape,
     compute_cma_ellipsoid_shape,
+    compute_cma_turbo_style_shape,
     compute_pca_ellipsoid_shape,
     extract_ard_lengthscale,
     get_constraint_slack_and_feasibility,
@@ -141,12 +142,31 @@ class TurboHParams:
             -- both lengthscale and (a multi-objective adaptation of) fitness shape
             the rotation itself, not just the widths. See
             `compute_labcat_style_shape` (morbo/utils.py) for the exact procedure.
+            "cma_turbo_style": a direct ablation of "cma_ellipsoid" replicating
+            CMA-TuRBO's own mechanism (Ngo et al. 2024, arXiv:2402.03104) instead
+            of our own simplification -- the rank-mu update is computed from the
+            best half of ALL local points (not just Pareto-elites), weighted by
+            classical CMA-ES log-rank weights (not equally), and candidates are
+            drawn by direct multivariate-Gaussian sampling
+            (`sample_tr_gaussian_ellipsoid`) rather than rotated-box perturbation.
+            Shares "cma_ellipsoid"'s persistent covariance/path state (only one
+            CMA-style mode is ever active per trust region). See
+            `compute_cma_turbo_style_shape` (morbo/utils.py) for the exact
+            procedure and how it isolates the fitness-ranking question from
+            `compute_cma_ellipsoid_shape`. Disclosed simplification: only
+            candidate SAMPLING uses direct Gaussian draws; trust-region
+            CONTAINMENT (which existing points count as "local," via
+            `get_indices_in_tr`) still uses the same L-infinity rotated-box
+            test every other mode uses, not CMA-TuRBO's own Mahalanobis/L2
+            ellipsoid test -- reusing the existing containment machinery
+            rather than adding a second containment primitive.
             Only "isotropic" is supported together with `use_kronecker_gp`.
-        cma_c_mu: (cma_ellipsoid only) learning rate for the rank-mu covariance
-            update from elite points. Higher adapts faster but is noisier.
-        cma_c1: (cma_ellipsoid only) learning rate for the rank-one evolution-path
-            covariance term.
-        cma_c_p: (cma_ellipsoid only) decay rate of the evolution path itself.
+        cma_c_mu: (cma_ellipsoid/cma_turbo_style only) learning rate for the
+            rank-mu covariance update. Higher adapts faster but is noisier.
+        cma_c1: (cma_ellipsoid/cma_turbo_style only) learning rate for the
+            rank-one evolution-path covariance term.
+        cma_c_p: (cma_ellipsoid/cma_turbo_style only) decay rate of the
+            evolution path itself.
         use_linear_kernel: Replace each local GP's Matern-ARD kernel with a linear
             kernel over inputs bijectively projected onto a hypersphere in R^{d+1}
             (cosine-similarity kernel), following Doumont et al. 2026 ("We Still
@@ -281,6 +301,7 @@ class TurboHParams:
         "ard_pca_ellipsoid",
         "cma_ellipsoid",
         "labcat_style",
+        "cma_turbo_style",
         "mab_shape",
     }
 
@@ -411,13 +432,15 @@ class TrustRegion(ABC, Module):
         self.register_buffer(
             "axis_lengths", length.expand(self.dim).clone()
         )
-        # cma_ellipsoid-only persistent state: the adapted covariance `C`
-        # (identity = isotropic start), the evolution path `p` (zeros), and
-        # the previous normalized center (for the path update). Unlike the
-        # one-shot PCA variants these carry information ACROSS iterations;
-        # they reinitialize naturally on TR restart because restart creates
-        # a fresh TrustRegion object. Never read unless tr_shape ==
-        # "cma_ellipsoid".
+        # cma_ellipsoid/cma_turbo_style-only persistent state: the adapted
+        # covariance `C` (identity = isotropic start), the evolution path
+        # `p` (zeros), and the previous normalized center (for the path
+        # update). Shared by both modes (only one is ever active per trust
+        # region at a time, so no state collision). Unlike the one-shot PCA
+        # variants these carry information ACROSS iterations; they
+        # reinitialize naturally on TR restart because restart creates a
+        # fresh TrustRegion object. Never read unless tr_shape ==
+        # "cma_ellipsoid" or "cma_turbo_style".
         self.register_buffer(
             "cma_C", torch.eye(self.dim, device=bounds.device, dtype=bounds.dtype)
         )
@@ -861,6 +884,27 @@ class TrustRegion(ABC, Module):
                 )
             R, axis_lengths, C_new, path_new = compute_cma_ellipsoid_shape(
                 elites=elites,
+                X_center=self.X_center_normalized,
+                prev_center=self.cma_prev_center,
+                C=self.cma_C,
+                path=self.cma_path,
+                length=self.length,
+                dim=self.dim,
+                c_mu=self.tr_hparams.cma_c_mu,
+                c1=self.tr_hparams.cma_c1,
+                c_p=self.tr_hparams.cma_c_p,
+            )
+            self.cma_C = C_new.detach()
+            self.cma_path = path_new.detach()
+            self.cma_prev_center = self.X_center_normalized.detach().clone()
+            return R, axis_lengths
+        elif shape == "cma_turbo_style":
+            # Reuses the same cma_C/cma_path/cma_prev_center buffers as
+            # "cma_ellipsoid" -- only one CMA-style mode is ever active per
+            # trust region at a time, so there is no state collision.
+            R, axis_lengths, C_new, path_new = compute_cma_turbo_style_shape(
+                X_local=normalize(self.X, bounds=self.bounds),
+                Y_obj_local=self.objective(self.Y),
                 X_center=self.X_center_normalized,
                 prev_center=self.cma_prev_center,
                 C=self.cma_C,
