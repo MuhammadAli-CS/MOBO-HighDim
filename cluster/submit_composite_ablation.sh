@@ -68,10 +68,36 @@ submit langermann3_ackley_2obj_6d  chebyshev  06:00:00 64g  --source tau --bench
 submit five_ackley_5obj_6d         standard   10:00:00 64g  --source tau --benchmark five_ackley_5obj_6d
 submit five_ackley_5obj_6d         chebyshev  10:00:00 64g  --source tau --benchmark five_ackley_5obj_6d
 
-# High-suite: one pair only (spherical), already confirmed to comfortably
-# finish within these budgets on the first run.
-submit ackley_griewank_2obj_50d    spherical  04:00:00 64g  --source tau --benchmark ackley_griewank_2obj_50d
-submit projected_langermann_500d   spherical  12:00:00 96g  --source tau --benchmark projected_langermann_2obj_500d
+# High-suite: one pair only (spherical). EVAL BUDGET SCALED BY DIMENSION --
+# the first run used tau315's own fixed 45-eval protocol (5 init + 40
+# adaptive) unchanged even at d=50/d=500, which is far too thin at that
+# scale (this project's own convention elsewhere uses 600+ evals even at
+# d=100). Low-dim (d<=10) benchmarks above are intentionally left at the
+# unscaled 45-eval default -- it's already ~7.5x dim there, reasonable,
+# and changing it would obsolete the 8 already-running low-dim jobs from
+# the previous fix for no benefit.
+#
+# Scaling rule (dim > 10 only): n_init = clamp(round(dim/5), 10, 100),
+# n_iter = clamp(8*dim, 80, 400). d=50 -> n_init=10, n_iter=400 (410
+# total, ~9x the old budget). d=500 -> n_init=100, n_iter=400 (500 total,
+# capped -- scaling n_iter uncapped, 8*500=4000, would need an estimated
+# 250+ hours per trial given observed per-eval cost, not tractable at any
+# reasonable job length). Empirical basis for the time estimates below:
+# the ORIGINAL 45-eval run's per-trial time (direct+composite combined,
+# 90 evals total) was ~450-500s at BOTH d=50 and d=500 -- i.e. cost is
+# not dimension-driven in this range (the spherical kernel handles that
+# fine), it's driven by iteration count and the exact GP's accumulating
+# training set. Scaling linearly from that 90-evals/~500s baseline to
+# 820/1000 combined evals gives ~75-90 min/trial; a real 32-core timing
+# probe of the accumulating-training-set cost itself did not finish in a
+# reasonable check-in window, so these times use a conservative LINEAR
+# extrapolation (if per-iteration cost instead grows worse than linear as
+# the training set accumulates, actual time will be higher than this
+# estimate -- the generous time budgets below have headroom for that, but
+# if a job runs past its limit, that means growth is worse than assumed
+# and the budget needs revisiting, not just extending).
+submit ackley_griewank_2obj_50d    spherical  48:00:00 64g  --source tau --benchmark ackley_griewank_2obj_50d --n-init 10 --n-iter 400
+submit projected_langermann_500d   spherical  48:00:00 96g  --source tau --benchmark projected_langermann_2obj_500d --n-init 100 --n-iter 400
 
 echo "Submitted 12 jobs. Check with: squeue -u \$USER"
 echo "Per-job console logs: cluster/logs/composite-ablation-<job>-<pair>_<jobid>.out"
