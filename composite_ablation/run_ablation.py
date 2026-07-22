@@ -170,6 +170,9 @@ def run_pair(
         del direct_result, composite_result
         gc.collect()
 
+        if out_dir is not None:
+            _save_traces(out_dir, name, direct_traces, composite_traces)
+
     summary = {"name": name, "direct_finals": direct_finals, "composite_finals": composite_finals}
     if composite_finals:
         line = _paired_summary(np.array(direct_finals), np.array(composite_finals))
@@ -177,14 +180,31 @@ def run_pair(
         summary["summary"] = line
 
     if out_dir is not None:
-        out_dir.mkdir(parents=True, exist_ok=True)
+        _save_traces(out_dir, name, direct_traces, composite_traces)
+        # Written per-pair (not one shared summary.json) so concurrent jobs
+        # for different pairs of the SAME benchmark (now the norm -- see
+        # --pair) never race on the same file.
         safe_name = name.replace(" ", "_").replace("/", "-")
-        np.savez(
-            out_dir / f"{safe_name}.npz",
-            direct_traces=np.array(direct_traces, dtype=object),
-            composite_traces=np.array(composite_traces, dtype=object),
-        )
+        with open(out_dir / f"{safe_name}_summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
     return summary
+
+
+def _save_traces(out_dir: Path, name: str, direct_traces: list, composite_traces: list) -> None:
+    """Write whatever trials have completed so far -- called after EVERY
+    trial (not just at the end of a pair) so a mid-pair SLURM timeout still
+    leaves usable partial results instead of losing the whole pair (this
+    happened for real: the first `composite_ablation` cluster run allotted
+    too little wall-clock time per job, and 4 of 7 jobs were killed
+    mid-pair with nothing saved -- see cluster/submit_composite_ablation.sh's
+    per-pair time budgets, since bumped up in response)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = name.replace(" ", "_").replace("/", "-")
+    np.savez(
+        out_dir / f"{safe_name}.npz",
+        direct_traces=np.array(direct_traces, dtype=object),
+        composite_traces=np.array(composite_traces, dtype=object),
+    )
 
 
 def _build_problem(args) -> tuple:
@@ -227,6 +247,13 @@ def main() -> None:
     )
     parser.add_argument("--quick", action="store_true", help="tiny smoke-test-scale run")
     parser.add_argument("--out-dir", type=Path, default=None, help="save raw HV traces here (.npz per pair)")
+    parser.add_argument(
+        "--pair", choices=["all", "standard", "chebyshev", "spherical"], default="all",
+        help="run only one solver pair instead of every pair its suite allows -- lets each "
+        "pair run as its own SLURM job (real per-trial costs turned out to be 300-550s, "
+        "so 'all' in one job routinely blew past a 2h budget; see cluster/"
+        "submit_composite_ablation.sh).",
+    )
     args = parser.parse_args()
 
     if args.quick:
@@ -236,13 +263,13 @@ def main() -> None:
     problem, num_objectives, suites = _build_problem(args)
     print(
         f"source={args.source} benchmark={args.benchmark} dim={problem.dim} "
-        f"num_objectives={num_objectives} suites={suites} "
+        f"num_objectives={num_objectives} suites={suites} pair={args.pair} "
         f"composite structure available: {problem.evaluate_components is not None}",
         flush=True,
     )
 
     all_summaries = []
-    if "low" in suites:
+    if "low" in suites and args.pair in ("all", "standard"):
         all_summaries.append(run_pair(
             "standard_mobo / composite_mobo",
             standard_mobo, composite_mobo, problem,
@@ -251,6 +278,7 @@ def main() -> None:
             out_dir=args.out_dir,
         ))
 
+    if "low" in suites and args.pair in ("all", "chebyshev"):
         weights = simplex_weights(args.weights, num_objectives, seed=314159)
         all_summaries.append(run_pair(
             "chebyshev_bo / composite_chebyshev_bo",
@@ -260,7 +288,7 @@ def main() -> None:
             out_dir=args.out_dir,
         ))
 
-    if "high" in suites:
+    if "high" in suites and args.pair in ("all", "spherical"):
         weights = simplex_weights(args.weights, num_objectives, seed=314159)
         all_summaries.append(run_pair(
             "spherical_chebyshev_bo / composite_spherical_chebyshev_bo",
@@ -269,11 +297,6 @@ def main() -> None:
             solver_kwargs=dict(weights=weights, n_init=args.n_init, n_per_scalarization=args.per_weight),
             out_dir=args.out_dir,
         ))
-
-    if args.out_dir is not None:
-        args.out_dir.mkdir(parents=True, exist_ok=True)
-        with open(args.out_dir / "summary.json", "w") as f:
-            json.dump(all_summaries, f, indent=2)
 
 
 if __name__ == "__main__":
