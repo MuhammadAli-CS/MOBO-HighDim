@@ -31,6 +31,16 @@
 # five_ackley_5obj_6d) + 2 high-suite tau benchmarks x 1 pair each
 # (ackley_griewank_2obj_50d, projected_langermann_2obj_500d).
 #
+# THREAD CAP: passes --num-threads 8 --num-interop-threads 4 to every job
+# (matching --cpus-per-task=32 below). Without this, three jobs sharing a
+# node with five others were observed to either get OOM-killed or have
+# per-trial time balloon 10x mid-run before timing out -- torch/MKL spawn
+# thread pools sized to the node's full core count, not this job's actual
+# 32-cpu SLURM allocation, causing severe contention on a shared node. See
+# composite_ablation/run_ablation.py's module docstring ("Threading"
+# section) -- this is the same class of problem already fixed once before
+# in this project, in run_comparison.py, for one specific experiment.
+#
 # Usage: bash cluster/submit_composite_ablation.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -48,7 +58,7 @@ submit() {
     --error="cluster/logs/composite-ablation-${job_name}-${pair}_%j.err" \
     --partition=aimi --account=kilian \
     --cpus-per-task=32 --mem="$mem" --time="$time" \
-    --wrap="cd $(pwd); . /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python -m composite_ablation.run_ablation ${args[*]} --pair $pair --trials $TRIALS --out-dir composite_ablation/results/${job_name}"
+    --wrap="cd $(pwd); . /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python -m composite_ablation.run_ablation ${args[*]} --pair $pair --trials $TRIALS --num-threads 8 --num-interop-threads 4 --out-dir composite_ablation/results/${job_name}"
 }
 
 # This project's own composite_dtlz2 (dim=6, M=5 default -- see

@@ -37,6 +37,20 @@ Only benchmarks exposing composite structure (`--source ours`:
 `Benchmark.raw_eval_fn` set, currently just `composite_dtlz2`;
 `--source tau`: all six always do) can run the composite half of each
 pair -- others only report the direct solver's hypervolume.
+
+Threading: caps `torch`'s intra-/inter-op thread pools (`--num-threads`/
+`--num-interop-threads`, defaults 8/4) at the top of `main()`. Without
+this, torch/MKL spawn threads sized to the NODE's full core count rather
+than this job's actual `--cpus-per-task` allocation -- on a shared node
+running several jobs at once this causes severe over-subscription
+contention, not just slower-than-expected runs but outright failures:
+three cluster jobs sharing a node with five others were observed to
+either OOM-kill or have per-trial time balloon 10x over a run before
+timing out entirely, while running alone on a node was fine. The exact
+same class of problem (`torch`/MKL saturating far more threads than the
+SLURM allocation) was already hit and fixed once before in this project,
+in `run_comparison.py`, for one specific experiment -- this carries that
+fix into this newer entry point instead of rediscovering it per-script.
 """
 
 from __future__ import annotations
@@ -254,7 +268,16 @@ def main() -> None:
         "so 'all' in one job routinely blew past a 2h budget; see cluster/"
         "submit_composite_ablation.sh).",
     )
+    parser.add_argument(
+        "--num-threads", type=int, default=8,
+        help="torch intra-op thread cap -- see module docstring's Threading section. "
+        "Should not exceed this job's actual --cpus-per-task.",
+    )
+    parser.add_argument("--num-interop-threads", type=int, default=4, help="torch inter-op thread cap")
     args = parser.parse_args()
+
+    torch.set_num_threads(args.num_threads)
+    torch.set_num_interop_threads(args.num_interop_threads)
 
     if args.quick:
         args.trials, args.n_init, args.n_iter = 1, 3, 2
