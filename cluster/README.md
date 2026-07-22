@@ -346,6 +346,11 @@ real effect/null, or an artifact of insufficient budget:
 
 **Status: coded, unit-tested, smoke-tested, QUEUED -- not yet run.**
 
+**Requires the `cma` PyPI package** (added to `setup.py`'s
+`install_requires`). If `~/morbo-env` was built before this was added,
+re-run `pip install -e .` inside it (see step 3) before submitting --
+otherwise the job fails immediately on `import cma`.
+
 ```
 bash cluster/submit_cma_turbo_style.sh   # 20 jobs: 4 experiments x 5 seeds
 ```
@@ -356,24 +361,63 @@ characterized CMA-BO/CMA-TuRBO (Ngo et al. 2024, arXiv:2402.03104) as "a
 softer meta-algorithm... rather than building the trust region's own
 geometry directly from CMA's covariance" -- **this was based on an
 abstract-level read and is imprecise**, corrected after pulling the actual
-PDF (Section 4.2.2/Eq. 4/6). CMA-TuRBO's local region genuinely *is* a
-true hyper-ellipsoid built directly from an adapted covariance, with
-candidates drawn by direct multivariate-Gaussian sampling (a different,
-elegant high-d-safe alternative to this project's own box-not-ellipsoid
-scoping decision) and an unmodified-CMA-ES rank-fitness-weighted update
-over ALL local points (not just Pareto-elites) inside an outer
-generational loop wrapping TuRBO -- two nested timescales, not
-`cma_ellipsoid`'s single per-refit cadence. It is also entirely
-single-objective. Implemented `tr_shape="cma_turbo_style"`
-(`compute_cma_turbo_style_shape` + `sample_tr_gaussian_ellipsoid` in
-`morbo/utils.py`), reusing `cma_ellipsoid`'s persistent covariance/path
-state. Run against `cma_ellipsoid` on the core comparison
+PDF (Section 4.2.2/Eq. 4/6) AND the paper's own reference implementation
+(github.com/LamNgo1/cma-meta-algorithm). CMA-TuRBO's local region
+genuinely *is* a true hyper-ellipsoid built directly from an adapted
+covariance, with candidates drawn by direct multivariate-Gaussian
+sampling and an unmodified-CMA-ES rank-fitness-weighted update over ALL
+local points (not just Pareto-elites) inside an outer generational loop
+wrapping TuRBO -- two nested timescales, not `cma_ellipsoid`'s single
+per-refit cadence. It is also entirely single-objective.
+`tr_shape="cma_turbo_style"` now wraps the actual `cma` PyPI package
+directly (`get_or_init_cma_turbo_es`/`update_cma_turbo_es`/
+`sample_tr_gaussian_ellipsoid` in `morbo/utils.py`) -- a genuine
+`cma.CMAEvolutionStrategy` per trust region, fed via `ask()`/`tell()`
+each batch and sampled from its own adapted mean/step-size/covariance
+line-for-line matching the reference's `create_candidates` closure --
+rather than the hand-rolled Eq. 4 rank-mu update an earlier version of
+this mode used. No longer shares `cma_ellipsoid`'s persistent
+covariance/path buffers (the `cma` object holds all of that state
+itself). Run against `cma_ellipsoid` on the core comparison
 (`tr_shape_dtlz2_100d`, `tr_shape_methods_dtlz2_100d`) and
 `cma_ellipsoid`'s own strongest documented landscapes
 (`RotatedSparseDTLZ2` at `k_eff=50`, `bbob_rosenbrock_rosenbrock`). See
 RESULTS.md §15 and `writeup/methods.tex`'s `cma_turbo_style` subsection
 for the full mechanism, disclosed simplifications, and predictions stated
 in advance.
+
+## 4l. `composite_ablation`: direct-vs-composite for non-MORBO solvers
+
+**Status: coded, smoke-tested locally, QUEUED -- not yet run.**
+
+This project already has its own direct-vs-composite comparison for
+MORBO (`experiments/composite_curve_dtlz2_100d/`, `experiments/
+correlation_ablation_dtlz2curve/`). `composite_ablation/` asks the same
+question for the OTHER solver families a collaborator's repo implements
+(`standard_mobo`/`chebyshev_bo`/`spherical_chebyshev_bo` and their
+composite counterparts, vendored with attribution in
+`composite_ablation/solvers.py` from
+https://github.com/tau315/composite-mobo) -- deliberately excluding that
+repo's own MORBO/`composite_morbo`/`batched_morbo` variants, since this
+project's own MORBO comparison is already authoritative for that engine.
+
+Runs both this project's own `composite_dtlz2` benchmark
+(`plug_and_play/benchmarks.py`) and all six of the collaborator repo's
+own benchmarks (vendored in `composite_ablation/tau_benchmarks.py`):
+
+```
+bash cluster/submit_composite_ablation.sh   # 7 jobs, one per benchmark
+```
+
+Each job runs 20 trials per applicable solver pair (low-dim benchmarks:
+`standard_mobo`/`composite_mobo` AND `chebyshev_bo`/`composite_chebyshev_bo`;
+the two high-dim benchmarks, `ackley_griewank_2obj_50d` and
+`projected_langermann_2obj_500d`: `spherical_chebyshev_bo`/
+`composite_spherical_chebyshev_bo` only, matching the collaborator repo's
+own low/high solver split) and writes raw hypervolume traces plus a
+paired-significance summary to `composite_ablation/results/<job>/`.
+Console output (including the printed per-pair delta/Wilcoxon/paired-t
+line) lands in `cluster/logs/composite-ablation-<job>_<jobid>.out`.
 
 ## 5. LLM-dependent parts (Parts 2 and 3)
 

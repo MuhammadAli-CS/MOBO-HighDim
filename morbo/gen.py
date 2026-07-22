@@ -230,14 +230,15 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
                 )
             elif tr.tr_hparams.tr_shape == "cma_turbo_style":
                 # CMA-TuRBO's own candidate-generation mechanism (Ngo et al.
-                # 2024): direct multivariate-Gaussian sampling, not rotated-box
-                # perturbation -- see sample_tr_gaussian_ellipsoid's docstring.
+                # 2024), now drawn directly from the TR's persistent `cma`
+                # package object -- see sample_tr_gaussian_ellipsoid's
+                # docstring.
                 X_cand = sample_tr_gaussian_ellipsoid(
-                    best_X=best_X,
-                    X_center=tr.X_center_normalized,
-                    R=tr.R,
-                    axis_lengths=tr.axis_lengths,
+                    es=tr._cma_turbo_es,
+                    length=tr.length,
                     n_discrete_points=trbo_state.tr_hparams.raw_samples,
+                    dtype=tr.X_center_normalized.dtype,
+                    device=tr.X_center_normalized.device,
                 )
             else:
                 if trbo_state.tr_hparams.trunc_normal_perturb:

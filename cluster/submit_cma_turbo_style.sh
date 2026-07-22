@@ -3,20 +3,24 @@
 # own mechanism (Ngo, Ha, Chan, Nguyen & Zhang, "High-dimensional Bayesian
 # Optimization via Covariance Matrix Adaptation Strategy," TMLR 2024,
 # arXiv:2402.03104) instead of our own simplification -- verified directly
-# from the paper's PDF (Section 4.2.2, Eq. 4/6), not from the abstract:
+# from the paper's PDF (Section 4.2.2, Eq. 4/6) AND the paper's own
+# reference implementation (github.com/LamNgo1/cma-meta-algorithm):
 #
-#   - rank-mu covariance update from the best HALF of ALL local points
-#     (not just the TR's Pareto-elite subset), weighted by classical
-#     CMA-ES log-rank weights (w_i = log(mu+0.5) - log(i), normalized) --
-#     not cma_ellipsoid's equal-weighted-elites simplification;
-#   - candidates drawn by DIRECT multivariate-Gaussian sampling from the
-#     adapted covariance (sample_tr_gaussian_ellipsoid) -- not rotated-box
+#   - now wraps the actual `cma` PyPI package directly (a genuine
+#     cma.CMAEvolutionStrategy per trust region, fed via ask()/tell() each
+#     batch) instead of a hand-rolled rank-mu/evolution-path update --
+#     requires the `cma` package, see cluster/README.md section 4k;
+#   - candidates drawn by DIRECT multivariate-Gaussian sampling from that
+#     object's own adapted mean/step-size/covariance
+#     (sample_tr_gaussian_ellipsoid), reproducing the reference's
+#     create_candidates closure line-for-line -- not rotated-box
 #     perturbation, the representation every other tr_shape mode uses.
 #
-# See compute_cma_turbo_style_shape's docstring (morbo/utils.py) for the
-# exact procedure and the multi-objective ranking substitution (the source
-# paper is single-objective; we rank by mean per-objective min-max value,
-# the same substitution already established for labcat_style).
+# See get_or_init_cma_turbo_es/update_cma_turbo_es/
+# sample_tr_gaussian_ellipsoid's docstrings (morbo/utils.py) for the exact
+# procedure and the multi-objective ranking substitution (the source paper
+# is single-objective; we rank by mean per-objective min-max value, the
+# same substitution already established for labcat_style).
 #
 # Targeted rollout (not a full-study sweep, matching how labcat_style was
 # originally scoped before later being run everywhere): the core headline

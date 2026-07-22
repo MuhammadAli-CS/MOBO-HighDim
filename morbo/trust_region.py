@@ -34,7 +34,7 @@ from morbo.utils import (
     compute_ard_pca_ellipsoid_shape,
     compute_labcat_style_shape,
     compute_cma_ellipsoid_shape,
-    compute_cma_turbo_style_shape,
+    compute_cma_turbo_style_containment_shape,
     compute_pca_ellipsoid_shape,
     extract_ard_lengthscale,
     get_constraint_slack_and_feasibility,
@@ -42,6 +42,8 @@ from morbo.utils import (
     get_fitted_model,
     get_indices_in_ellipsoid,
     get_indices_in_hypercube,
+    get_or_init_cma_turbo_es,
+    update_cma_turbo_es,
 )
 from scipy.stats.mstats import winsorize
 from torch import Tensor
@@ -142,25 +144,33 @@ class TurboHParams:
             -- both lengthscale and (a multi-objective adaptation of) fitness shape
             the rotation itself, not just the widths. See
             `compute_labcat_style_shape` (morbo/utils.py) for the exact procedure.
-            "cma_turbo_style": a direct ablation of "cma_ellipsoid" replicating
-            CMA-TuRBO's own mechanism (Ngo et al. 2024, arXiv:2402.03104) instead
-            of our own simplification -- the rank-mu update is computed from the
-            best half of ALL local points (not just Pareto-elites), weighted by
-            classical CMA-ES log-rank weights (not equally), and candidates are
-            drawn by direct multivariate-Gaussian sampling
-            (`sample_tr_gaussian_ellipsoid`) rather than rotated-box perturbation.
-            Shares "cma_ellipsoid"'s persistent covariance/path state (only one
-            CMA-style mode is ever active per trust region). See
-            `compute_cma_turbo_style_shape` (morbo/utils.py) for the exact
-            procedure and how it isolates the fitness-ranking question from
-            `compute_cma_ellipsoid_shape`. Disclosed simplification: only
-            candidate SAMPLING uses direct Gaussian draws; trust-region
-            CONTAINMENT (which existing points count as "local," via
-            `get_indices_in_tr`) still uses the same L-infinity rotated-box
-            test every other mode uses, not CMA-TuRBO's own Mahalanobis/L2
-            ellipsoid test -- reusing the existing containment machinery
-            rather than adding a second containment primitive.
-            Only "isotropic" is supported together with `use_kronecker_gp`.
+            "cma_turbo_style": a direct ablation of "cma_ellipsoid" that now
+            wraps the actual `cma` PyPI package (github.com/CMA-ES/pycma)
+            exactly as CMA-TuRBO's own reference implementation does
+            (Ngo et al. 2024, arXiv:2402.03104; github.com/LamNgo1/
+            cma-meta-algorithm, cmabo/cma_bo.py), rather than hand-rolling
+            CMA-ES's rank-mu/evolution-path update ourselves as an earlier
+            version of this mode did. Each trust region owns a persistent
+            `cma.CMAEvolutionStrategy` (a plain Python attribute, not a
+            buffer -- see `get_or_init_cma_turbo_es`); every model refit
+            feeds it the TR's newly evaluated batch via `update_cma_turbo_es`
+            (an `ask()`/`tell()` pair mirroring the reference's own update
+            loop), and candidates are drawn directly from its adapted
+            mean/step-size/covariance by `sample_tr_gaussian_ellipsoid`,
+            reproducing the reference's `create_candidates` closure
+            line-for-line rather than rotated-box perturbation. Does NOT
+            share "cma_ellipsoid"'s `cma_C`/`cma_path`/`cma_prev_center`
+            buffers -- CMA's full state now lives inside the `cma` object
+            itself. Disclosed simplification: only candidate SAMPLING uses
+            direct Gaussian draws; trust-region CONTAINMENT (which existing
+            points count as "local," via `get_indices_in_tr`) still uses the
+            same L-infinity rotated-box test every other mode uses (its
+            rotation/axis widths derived from the `cma` object's own
+            covariance by `compute_cma_turbo_style_containment_shape`), not
+            CMA-TuRBO's own Mahalanobis/L2 ellipsoid test -- reusing the
+            existing containment machinery rather than adding a second
+            containment primitive. Only "isotropic" is supported together
+            with `use_kronecker_gp`.
         cma_c_mu: (cma_ellipsoid/cma_turbo_style only) learning rate for the
             rank-mu covariance update. Higher adapts faster but is noisier.
         cma_c1: (cma_ellipsoid/cma_turbo_style only) learning rate for the
@@ -448,6 +458,14 @@ class TrustRegion(ABC, Module):
             "cma_path", torch.zeros(self.dim, device=bounds.device, dtype=bounds.dtype)
         )
         self.register_buffer("cma_prev_center", None)
+        # cma_turbo_style-only persistent state: a real `cma` package
+        # `CMAEvolutionStrategy`. A plain Python attribute, not a buffer --
+        # it is a stateful object with its own internal numpy state, not a
+        # tensor. Lazily constructed on first use (see
+        # `get_or_init_cma_turbo_es`); reinitializes naturally on TR
+        # restart because restart creates a fresh `TrustRegion` object.
+        # Never read/written unless tr_shape == "cma_turbo_style".
+        self._cma_turbo_es = None
         # mab_shape-only persistent state: per-arm EMA reward estimate and
         # pull count (both indexed identically to `tr_hparams.mab_arms`), and
         # the index of the arm chosen the last time `_update_tr_shape` ran (so
@@ -714,7 +732,7 @@ class TrustRegion(ABC, Module):
             # NOTE: this must live outside the `use_noisy_trbo`-gated branch
             # above -- none of the shape-adaptation variants set that, so a
             # naive placement inside it would silently never fire.
-            self._update_tr_shape()
+            self._update_tr_shape(X_new=X_new, Y_new=Y_new)
 
         if self.tr_hparams.verbose and X_new is not None:
             print(f"Num points in TR: {self.X.shape[0]}")
@@ -838,7 +856,12 @@ class TrustRegion(ABC, Module):
             axis_lengths=self.axis_lengths * length_multiplier,
         )
 
-    def _compute_shape_for_mode(self, shape: str) -> Tuple[Tensor, Tensor]:
+    def _compute_shape_for_mode(
+        self,
+        shape: str,
+        X_new: Optional[Tensor] = None,
+        Y_new: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor]:
         r"""Compute `(R, axis_lengths)` for a single named shape mode.
 
         Factored out of `_update_tr_shape` so that `tr_shape == "mab_shape"`
@@ -849,6 +872,13 @@ class TrustRegion(ABC, Module):
         `axis_lengths`) if ARD lengthscales aren't available (e.g.
         `use_ard=False`, or `self.model` is a `KroneckerMultiTaskGP`) for the
         `ard_box`/`ard_pca_ellipsoid` modes.
+
+        Args:
+            X_new, Y_new: the batch just appended this call to `self.X`/
+                `self.Y` (in original, unnormalized coordinates), or `None`
+                on the very first shape update (construction-time). Only
+                read by `shape == "cma_turbo_style"`, to `tell()` its
+                persistent CMA-ES object the newly evaluated points.
         """
         if shape == "isotropic":
             return (
@@ -899,26 +929,41 @@ class TrustRegion(ABC, Module):
             self.cma_prev_center = self.X_center_normalized.detach().clone()
             return R, axis_lengths
         elif shape == "cma_turbo_style":
-            # Reuses the same cma_C/cma_path/cma_prev_center buffers as
-            # "cma_ellipsoid" -- only one CMA-style mode is ever active per
-            # trust region at a time, so there is no state collision.
-            R, axis_lengths, C_new, path_new = compute_cma_turbo_style_shape(
-                X_local=normalize(self.X, bounds=self.bounds),
-                Y_obj_local=self.objective(self.Y),
+            # Now a genuine wrapper around the `cma` PyPI package -- see
+            # `get_or_init_cma_turbo_es`/`update_cma_turbo_es` docstrings
+            # and the `tr_shape` docstring above for the full mechanism.
+            self._cma_turbo_es = get_or_init_cma_turbo_es(
+                es=self._cma_turbo_es,
                 X_center=self.X_center_normalized,
-                prev_center=self.cma_prev_center,
-                C=self.cma_C,
-                path=self.cma_path,
-                length=self.length,
                 dim=self.dim,
-                c_mu=self.tr_hparams.cma_c_mu,
-                c1=self.tr_hparams.cma_c1,
-                c_p=self.tr_hparams.cma_c_p,
+                batch_size=self.tr_hparams.batch_size,
             )
-            self.cma_C = C_new.detach()
-            self.cma_path = path_new.detach()
-            self.cma_prev_center = self.X_center_normalized.detach().clone()
-            return R, axis_lengths
+            if X_new is not None and X_new.shape[0] > 0:
+                X_new_normalized = normalize(X_new, bounds=self.bounds)
+                # Normalization range comes from ALL local data (self.Y),
+                # not just this batch -- a batch of size 1 (or otherwise
+                # degenerate) would otherwise always normalize to a
+                # trivial constant. self.Y may already have been
+                # reordered/trimmed by `_update_training_data` by this
+                # point, so Y_new's own rows (not an index into self.Y)
+                # are what actually get scored.
+                Y_obj_local = self.objective(self.Y)
+                y_min = Y_obj_local.min(dim=0).values
+                y_max = Y_obj_local.max(dim=0).values
+                y_range = (y_max - y_min).clamp_min(1e-9)
+                Y_obj_new = self.objective(Y_new.to(self.Y))
+                # Higher = better (we maximize); CMA minimizes, hence the
+                # negation -- same "goodness" substitution used elsewhere
+                # in this file (e.g. compute_labcat_style_shape's docstring)
+                # for turning multi-objective values into a single scalar
+                # CMA-ES can rank by.
+                goodness = ((Y_obj_new - y_min) / y_range).mean(dim=-1)
+                update_cma_turbo_es(
+                    es=self._cma_turbo_es, X_new=X_new_normalized, fx_new=-goodness
+                )
+            return compute_cma_turbo_style_containment_shape(
+                es=self._cma_turbo_es, length=self.length, dim=self.dim
+            )
         elif shape == "ard_pca_ellipsoid":
             return compute_ard_pca_ellipsoid_shape(
                 X=normalize(self.X, bounds=self.bounds),
@@ -1000,11 +1045,17 @@ class TrustRegion(ABC, Module):
         )
         return arm
 
-    def _update_tr_shape(self) -> None:
+    def _update_tr_shape(
+        self, X_new: Optional[Tensor] = None, Y_new: Optional[Tensor] = None
+    ) -> None:
         r"""Recompute `self.R`/`self.axis_lengths` per `tr_hparams.tr_shape`.
 
         No-op for `tr_shape == "isotropic"` (never called for that mode, see
         `update()`).
+
+        Args:
+            X_new, Y_new: forwarded to `_compute_shape_for_mode` (only read
+                by `shape == "cma_turbo_style"`; see its docstring there).
         """
         # GP kernel lengthscales are `nn.Parameter`s (`requires_grad=True`).
         # Without `no_grad()`, R/axis_lengths (and everything derived from
@@ -1026,19 +1077,23 @@ class TrustRegion(ABC, Module):
                     # state update as a side effect; when cma IS the chosen
                     # arm, use its output directly (don't update twice).
                     cma_R, cma_axis_lengths = self._compute_shape_for_mode(
-                        "cma_ellipsoid"
+                        "cma_ellipsoid", X_new=X_new, Y_new=Y_new
                     )
                     if shape == "cma_ellipsoid":
                         R, axis_lengths = cma_R, cma_axis_lengths
                     else:
-                        R, axis_lengths = self._compute_shape_for_mode(shape)
+                        R, axis_lengths = self._compute_shape_for_mode(
+                            shape, X_new=X_new, Y_new=Y_new
+                        )
                     axis_lengths = axis_lengths.clamp(
                         self.tr_hparams.length_min, self.tr_hparams.length_max
                     )
                     self.R = R.detach()
                     self.axis_lengths = axis_lengths.detach()
                     return
-            R, axis_lengths = self._compute_shape_for_mode(shape)
+            R, axis_lengths = self._compute_shape_for_mode(
+                shape, X_new=X_new, Y_new=Y_new
+            )
             axis_lengths = axis_lengths.clamp(
                 self.tr_hparams.length_min, self.tr_hparams.length_max
             )

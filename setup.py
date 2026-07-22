@@ -11,6 +11,7 @@ requirements = [
     "gpytorch",
     "botorch>=0.6",
     "scipy",
+    "cma",
     "jupyter",
     "matplotlib",
     "anthropic",
