@@ -62,8 +62,22 @@ submit() {
 }
 
 # This project's own composite_dtlz2 (dim=6, M=5 default -- see
-# plug_and_play/benchmarks.py's _make_composite_dtlz2). 5 objectives:
-# generously budgeted.
+# plug_and_play/benchmarks.py's _make_composite_dtlz2).
+#
+# KNOWN ISSUE, unresolved: the "standard" (standard_mobo/composite_mobo)
+# pair on BOTH 5-objective benchmarks here (composite_dtlz2_ours,
+# five_ackley_5obj_6d below) has OOM-killed at 64g twice now -- once
+# sharing a node with 5 others (plausibly contention-related) AND once
+# running alone with the thread-cap fix already applied (NOT
+# contention -- this is a real memory scaling problem, most likely
+# NondominatedPartitioning's box decomposition, which is known to blow
+# up combinatorially with objective count; standard_mobo calls it
+# directly every iteration on qLogEHVI's exact acquisition path).
+# 2-objective benchmarks (langermann3_ackley_2obj_6d, ackley_griewank_2obj_6d)
+# complete fine. Before rerunning either 5-obj "standard" job, either bump
+# memory well past 64g or investigate whether this is inherent to
+# standard_mobo at M=5 regardless of memory (i.e. genuinely needs a
+# different/approximate HV formulation, not just more RAM).
 submit composite_dtlz2_ours standard   10:00:00 64g --source ours --benchmark composite_dtlz2 --dim 6 --num-objectives 5
 submit composite_dtlz2_ours chebyshev  10:00:00 64g --source ours --benchmark composite_dtlz2 --dim 6 --num-objectives 5
 
@@ -88,11 +102,23 @@ submit five_ackley_5obj_6d         chebyshev  10:00:00 64g  --source tau --bench
 # the previous fix for no benefit.
 #
 # Scaling rule (dim > 10 only): n_init = clamp(round(dim/5), 10, 100),
-# n_iter = clamp(8*dim, 80, 400). d=50 -> n_init=10, n_iter=400 (410
-# total, ~9x the old budget). d=500 -> n_init=100, n_iter=400 (500 total,
-# capped -- scaling n_iter uncapped, 8*500=4000, would need an estimated
-# 250+ hours per trial given observed per-eval cost, not tractable at any
-# reasonable job length). Empirical basis for the time estimates below:
+# remaining = clamp(8*dim, 80, 400). d=50 -> n_init=10, remaining=400
+# (410 total, ~9x the old budget). d=500 -> n_init=100, remaining=400
+# (500 total, capped -- scaling remaining uncapped, 8*500=4000, would need
+# an estimated 250+ hours per trial given observed per-eval cost, not
+# tractable at any reasonable job length).
+#
+# IMPORTANT: only the "standard" pair (standard_mobo/composite_mobo)
+# spends its budget as n_init + n_iter. "chebyshev"/"spherical" instead
+# spend theirs as n_init + weights*per_weight -- --n-iter is SILENTLY
+# IGNORED for those two pairs (verified directly: the first attempt at
+# this scaling passed --n-iter here and it did nothing, since the two
+# high-suite benchmarks only ever run the "spherical" pair -- their
+# results came back at 50/140 total evals instead of the intended
+# 410/500). Below, "remaining" is spent as weights=8 (unchanged pareto/
+# simplex coverage), per_weight=round(remaining/8).
+#
+# Empirical basis for the time estimates below:
 # the ORIGINAL 45-eval run's per-trial time (direct+composite combined,
 # 90 evals total) was ~450-500s at BOTH d=50 and d=500 -- i.e. cost is
 # not dimension-driven in this range (the spherical kernel handles that
@@ -106,8 +132,8 @@ submit five_ackley_5obj_6d         chebyshev  10:00:00 64g  --source tau --bench
 # estimate -- the generous time budgets below have headroom for that, but
 # if a job runs past its limit, that means growth is worse than assumed
 # and the budget needs revisiting, not just extending).
-submit ackley_griewank_2obj_50d    spherical  48:00:00 64g  --source tau --benchmark ackley_griewank_2obj_50d --n-init 10 --n-iter 400
-submit projected_langermann_500d   spherical  48:00:00 96g  --source tau --benchmark projected_langermann_2obj_500d --n-init 100 --n-iter 400
+submit ackley_griewank_2obj_50d    spherical  48:00:00 64g  --source tau --benchmark ackley_griewank_2obj_50d --n-init 10 --weights 8 --per-weight 50
+submit projected_langermann_500d   spherical  48:00:00 96g  --source tau --benchmark projected_langermann_2obj_500d --n-init 100 --weights 8 --per-weight 50
 
 echo "Submitted 12 jobs. Check with: squeue -u \$USER"
 echo "Per-job console logs: cluster/logs/composite-ablation-<job>-<pair>_<jobid>.out"
