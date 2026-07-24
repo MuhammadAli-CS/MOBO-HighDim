@@ -4,7 +4,9 @@
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+\usepackage[numbers]{natbib}
 \usepackage{booktabs}
+\usepackage{tabularx}
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{enumitem}
@@ -2081,10 +2083,540 @@ external anchor). The variants' predicted noise-sensitivity ordering
 lengthscales estimated from noisy $Y$) is a falsifiable prediction.
 \item \textbf{Remaining benchmarks and mechanisms:} MOPTA08 /
 Human-Powered Aircraft / PMO as further real problems; a composite Rover
-(checkpointed trajectory costs, Penicillin-style); and an
-objective-aware rotation (both PCA and CMA are variance-driven -- neither
-sees which directions matter to the \emph{objectives}).
+(checkpointed trajectory costs, Penicillin-style); a composite Bulk
+Carrier Design (RCM17 from the RWCMOP real-world constrained MOO suite
+\citep{kumar2021rwcmop} -- a real naval-architecture problem, 6 design
+variables, 3 objectives, whose closed-form computation is itself a chain
+of physically meaningful intermediate quantities -- steel/outfit/
+machinery weight $\to$ light-ship weight $\to$ deadweight $\to$
+capital/running/voyage cost -- making the intermediate chain rather than
+the flat final objectives the natural raw composite response; see
+Section~\ref{sec:rcm17}); a composite Optimal Power Flow (RCM40, same
+suite, \citep{biswas2020opf} -- a real IEEE 14-bus power-grid problem, 34
+design variables, 2 objectives, both literal sums over a per-bus raw
+response computed by solving the network's admittance equations; see
+Section~\ref{sec:rcm40}); a composite battery-aging design problem built
+on PyBaMM \citep{sulzer2021pybamm} (real, open-source electrochemical
+simulator; up to $\sim$28 tunable electrode/separator/electrolyte design
+parameters, a genuinely composite discretized voltage/capacity/temperature
+trajectory as the raw response, and, if built around a multi-cycle
+degradation experiment rather than a single discharge, a genuinely
+expensive evaluation with a real capacity-vs-degradation-vs-temperature
+trade-off; see Section~\ref{sec:pybamm} for the details actually verified
+by installing and running it); and an objective-aware rotation (both PCA and
+CMA are variance-driven -- neither sees which directions matter to the
+\emph{objectives}).
 \end{enumerate}
+
+Table~\ref{tab:all-candidates} summarizes every composite-benchmark
+candidate surveyed across this future-work discussion in one place, most
+promising first; each row's ``Detail'' column points to where the full
+verification (or, for the shorter entries, Table~\ref{tab:candidate-survey}
+in Section~\ref{sec:more-candidates}) can be found.
+
+\begin{table}[h]
+\centering
+\small
+\caption{All composite-benchmark candidates surveyed, most promising first. ``Verified'' means installed/run (PyBaMM) or checked against real source code/repos (everything else with a citation); ``Status'' summarizes the practical verdict.}
+\label{tab:all-candidates}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.1cm}>{\raggedright\arraybackslash}p{1.5cm}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+Candidate & Dim.\ & Objectives & Status \\
+\midrule
+PyBaMM battery aging \citep{sulzer2021pybamm} & $\sim$28 & 2--3 (energy, retention, temp.) & Strongest confirmed; installed \& run (\S\ref{sec:pybamm}) \\
+OC20/OC22 catalysis \citep{chanussot2021oc20,tran2022oc22} & high (atom coords.) & 2 (energy, stability) & Fixed dataset; live proxy via fairchem (\S\ref{sec:oc20}) \\
+OpenTO topology opt.\ \citep{nobari2025openTO} & 1024--10000+ & 2 (compliance, volume) & Live re-runnable solver confirmed (\S\ref{sec:topodiff-selto}) \\
+RCM40 optimal power flow \citep{kumar2021rwcmop,biswas2020opf} & 34 & 2 (active/reactive loss) & Closed-form, verified vs.\ source (\S\ref{sec:rcm40}) \\
+RCM17 bulk carrier design \citep{kumar2021rwcmop} & 6 & 3 (cost, weight, capacity) & Closed-form, verified vs.\ source (\S\ref{sec:rcm17}) \\
+IDAES process flowsheets \citep{lee2021idaes} & 5--50 & 2 (yield, cost) & Real \& open; not yet run ourselves (\S\ref{sec:idaes}) \\
+TopoDiff \citep{maze2023topodiff} & 4096 & 2 (compliance, manufacturability) & Fixed dataset only; solver unconfirmed (\S\ref{sec:topodiff-selto}) \\
+SELTO \citep{dittmer2022selto,erzmann2023dl4to} & $\sim$$10^5$ & 2 (compliance, volume) & Fixed dataset; generator is licensed software (\S\ref{sec:topodiff-selto}) \\
+Airfoil CFD / UniFoil & $\sim$4--5 & 2 (lift, drag) & Real, composite, but low-dimensional \\
+Battery microstructure \citep{kench2024battery} & 7 & 1 (energy density) & Real, composite, but low-dimensional \\
+Battery pouch cell \citep{ma2024battery} & 4--5 & 4 (energy, charge, life) & Real, partial composite, low-dimensional \\
+LensAI / Optiland \citep{kramer2020lensai,kramer2020optiland} & 5--20 & 2 (spot size, aberration) & Composite but cheap (ray tracing) \\
+EvoXBench \citep{lu2023evoxbench} & discrete & 2 (accuracy, latency) & Real but tabular lookup, not expensive \\
+HPOBench \citep{eggensperger2021hpobench} & $\le$20 & 2 (accuracy, time) & Real but tabular lookup, not expensive \\
+MosPro \citep{luo2025mospro} & $\sim$238 & 2 (fluorescence, stability) & Weak composite (predictor score only) \\
+Jha et al.\ materials MOBO \citep{jha2018materials} & 5--20 & varies & No composite structure exposed \\
+QM9 / MatBench \citep{ramakrishnan2014qm9,dunn2020matbench} & $\sim$5--20 & varies & No/weak composite structure exposed \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Candidate benchmark: RCM17 Bulk Carrier Design}
+\label{sec:rcm17}
+
+Logged here (not yet implemented; tracked as a future-work item in
+Section~\ref{sec:tr-shape-future}) since this is a genuinely composite
+real-world problem: its three final objectives are computed from a chain of
+physically meaningful intermediate quantities (ship weights, deadweight,
+transport time, cost components) rather than directly from the six design
+variables, so exposing that chain -- instead of only the already-reduced
+final objectives -- gives a genuine raw-response/reduction-function
+composite structure, in the same spirit as this repo's own
+\texttt{composite\_penicillin.py}. All formulas below were verified directly
+against the reference implementation's source code
+\citep{kumar2021rwcmop} (\texttt{CEC2021\_func.m}, \texttt{case 17}, and
+bounds cross-checked against \texttt{Cal\_par.m}'s \texttt{xmin17}/
+\texttt{xmax17}; both files are in
+\url{https://github.com/P-N-Suganthan/2021-RW-MOP/raw/main/CEC2021-RWCMOP.zip}),
+not transcribed from the published PDF's typeset formulas
+directly, since OCR extraction of those was ambiguous in several exponents --
+confirmed against source, e.g.\ $F_c$'s coefficient is
+$0.19 \times 24 / 1000 = 0.00456$, not the $4.56\times10^{-5}$ a naive
+PDF-text reading suggests, and $C_c$'s grouping is
+$0.26\,(2000 W_s^{0.85} + 3500 W_o + 2400 P^{0.8})$, not three separate terms.
+
+Design variables (ship principal dimensions), with bounds:
+\begin{align}
+L &\in [150.00, 274.32] \quad \text{(length, m)} \\
+B &\in [20.00, 32.31] \quad \text{(beam, m)} \\
+D &\in [13.00, 25.00] \quad \text{(depth, m)} \\
+T &\in [10.00, 11.71] \quad \text{(draft, m)} \\
+V_k &\in [14.00, 18.00] \quad \text{(speed, knots)} \\
+C_B &\in [0.63, 0.75] \quad \text{(block coefficient)}
+\end{align}
+
+Intermediate quantities -- the natural raw composite response:
+\begin{align}
+a &= 4977.06\,C_B^2 - 8105.61\,C_B + 4456.51 \\
+b &= -10847.2\,C_B^2 + 12817\,C_B - 6960.32 \\
+F_n &= \frac{0.5144}{\sqrt{9.8065\,L}} \quad \text{(Froude number)} \\
+P &= \frac{(1.025\,L\,B\,T\,C_B)^{2/3}\,V_k^3}{a + b\,F_n} \quad \text{(propulsion power)} \\
+W_s &= 0.034\,L^{1.7}\,B^{0.6}\,D^{0.4}\,C_B^{0.5} \quad \text{(steel weight)} \\
+W_o &= L^{0.8}\,B^{0.6}\,D^{0.3}\,C_B^{0.1} \quad \text{(outfit weight)} \\
+W_m &= 0.17\,P^{0.9} \quad \text{(machinery weight)} \\
+l_s &= W_s + W_o + W_m \quad \text{(light ship weight)} \\
+D_{wt} &= 1.025\,L\,B\,T\,C_B - l_s \quad \text{(deadweight)} \\
+F_c &= 0.00456\,P + 0.2 \quad \text{(fuel consumption rate)} \\
+D_{cwt} &= D_{wt} - F_c\!\left(\frac{5000\,V_k}{24} + 5\right) - 2\,D_{wt}^{0.5} \quad \text{(cargo deadweight)} \\
+R_{trp} &= \frac{350}{\dfrac{5000\,V_k}{24} + 2\!\left(\dfrac{D_{cwt}}{8000} + 0.5\right)} \quad \text{(round trips per year)} \\
+a_c &= D_{cwt}\,R_{trp} \quad \text{(annual cargo capacity)} \\
+S_d &= \frac{5000\,V_k}{24} \quad \text{(sea days per year)} \\
+C_c &= 0.26\left(2000\,W_s^{0.85} + 3500\,W_o + 2400\,P^{0.8}\right) \quad \text{(capital cost)} \\
+C_r &= 40000\,D_{wt}^{0.3} \quad \text{(running cost)} \\
+C_v &= \left(105\,F_c\,S_d + 6.3\,D_{wt}^{0.8}\right) R_{trp} \quad \text{(voyage cost)}
+\end{align}
+
+Objectives (minimize all three):
+\begin{align}
+f_1 &= \frac{C_c + C_r + C_v}{a_c} \quad \text{(transportation cost per unit cargo capacity)} \\
+f_2 &= l_s \quad \text{(light ship weight)} \\
+f_3 &= -a_c \quad \text{(negated annual cargo capacity, i.e.\ maximize capacity)}
+\end{align}
+
+Nine inequality constraints $g_i(x) \le 0$ complete the problem (beam/depth,
+length/depth, and length/draft ratio bounds; a Froude-number cap; a
+hull-girder-strength margin; and deadweight bounds); reproduced verbatim in
+\texttt{CEC2021\_func.m} (\texttt{case 17}) and omitted here since our own
+implementation is expected to follow the composite/reduction split above
+rather than the constrained-NLP formulation directly.
+
+\subsection{Candidate benchmark: RCM40 Optimal Power Flow}
+\label{sec:rcm40}
+
+Also logged here (not yet implemented; same future-work item,
+Section~\ref{sec:tr-shape-future}), from the same RWCMOP suite but a
+different domain and a structurally cleaner composite pattern than RCM17:
+both objectives are literal \emph{sums over a per-bus raw response vector},
+computed by solving the power grid's admittance (Kirchhoff current law)
+equations -- the electrical-network analogue of this repo's own
+checkpointed-trajectory (Rover) and checkpointed-state (Penicillin)
+composite patterns. Verified against \texttt{CEC2021\_func.m}
+(\texttt{case 40}) and \texttt{Cal\_par.m}'s \texttt{xmin40}/\texttt{xmax40}
+in \citep{kumar2021rwcmop}'s reference code (same source as
+Section~\ref{sec:rcm17}); the underlying problem is a real IEEE 14-bus
+test-system optimal power flow instance, cited to
+\citet{biswas2020opf}.
+
+The system (bus 1 is the fixed slack/reference bus) is described by a
+$14\times14$ complex admittance matrix $Y = G + jB$ and fixed per-bus
+real/reactive load demands $P_k, Q_k$ -- all hardcoded numeric constants
+from the reference IEEE 14-bus test case, reproduced verbatim in
+\texttt{CEC2021\_func.m} rather than restated here.
+
+Design variables, 34-dimensional, all in per-unit (p.u.):
+\begin{align}
+V_{r,k}, V_{m,k} &\in [-1, 1], \quad k = 2, \ldots, 14 \quad \text{(real/imag. voltage, non-slack buses)} \\
+P_{g,k}, Q_{g,k} &\in [0, 1], \quad k \in \{2, 3, 6, 8\} \quad \text{(active/reactive generation, generator buses)}
+\end{align}
+
+Intermediate quantities -- the natural raw composite response:
+\begin{align}
+V &= \big[\,1,\; V_{r,2}{+}jV_{m,2},\; \ldots,\; V_{r,14}{+}jV_{m,14}\,\big]^\top \quad \text{(complex bus voltages, bus 1 fixed)} \\
+I &= Y V \quad \text{(complex current injections)} \\
+S &= V \odot \bar{I} \quad \text{(complex power injection at each bus, elementwise)} \\
+P_{sp} &= \operatorname{Re}(S), \quad Q_{sp} = \operatorname{Im}(S) \quad \text{(per-bus active/reactive injection -- the raw response)}
+\end{align}
+
+Objectives (minimize both):
+\begin{align}
+f_1 &= \operatorname{Re}\!\big(V_1 \bar{I}_1\big) + \textstyle\sum_{k=2}^{14} P_{sp,k} \quad \text{(total active power loss)} \\
+f_2 &= \operatorname{Im}\!\big(V_1 \bar{I}_2\big) + \textstyle\sum_{k=2}^{14} Q_{sp,k} \quad \text{(total reactive power loss)}
+\end{align}
+
+An honest discrepancy in the reference implementation, worth flagging rather
+than silently ``correcting'': $f_1$'s slack-bus term uses $I_1$ (consistent
+with $V_1 \bar{I}_1$ being the slack bus's own complex power), but $f_2$'s
+uses $I_2$ (a different bus's current) rather than $I_1$ -- dimensionally
+inconsistent with $f_1$'s pattern and, on inspection, most likely an
+unintentional index slip in \citep{kumar2021rwcmop}'s published code rather
+than a deliberate design choice. Reproduced above exactly as implemented
+(matching what the paper's own baseline results were computed with), not
+silently fixed, since any comparison against their reported numbers needs
+the same formula they actually used.
+
+Twenty-six equality constraints (power balance at each of the 13 non-slack
+buses, real and reactive) complete the problem, $\Delta P_k = P_{sp,k} -
+P_{g,k} + P_k = 0$ and $\Delta Q_k = Q_{sp,k} - Q_{g,k} + Q_k = 0$ for
+$k = 2, \ldots, 14$; omitted here for the same reason as RCM17's
+constraints above.
+
+\subsection{Candidate benchmark: PyBaMM battery-aging design}
+\label{sec:pybamm}
+
+Also logged here (not yet implemented; same future-work item,
+Section~\ref{sec:tr-shape-future}), from a different source than the
+RWCMOP suite -- unlike Sections~\ref{sec:rcm17}--\ref{sec:rcm40}, this one
+was checked by directly installing and running the real simulator
+(\texttt{pip install pybamm}, version 26.7.0.0), not by reading source
+code or a paper, so the numbers below are measured, not transcribed.
+PyBaMM \citep{sulzer2021pybamm} is a real, open-source, actively
+maintained (NumFOCUS-fiscally-sponsored) electrochemical battery
+simulator, \url{https://github.com/pybamm-team/PyBaMM}.
+
+Design variables: instantiating the Doyle--Fuller--Newman (DFN) model
+exposes 104 physical parameters in total, of which $\sim$28 are
+continuous electrode/separator/electrolyte design quantities in the sense
+relevant here -- electrode thickness, porosity, and particle radius (both
+electrodes), electrode and current-collector electronic conductivity,
+particle and electrolyte diffusivity, and electrolyte conductivity --
+comfortably enough for a high-dimensional ($>$30) instance without
+contriving additional variables.
+
+Composite structure -- verified directly, not assumed: a single 1C
+discharge simulation (\texttt{pybamm.lithium\_ion.DFN()}, default
+parameters, solved over $[0, 3600]$s) returns a 139-point discretized
+terminal-voltage trajectory $V(t)$ ranging 3.17--3.77\,V over the
+discharge, plus a discharge-capacity trace; running a 5-cycle
+charge/discharge/rest experiment with an SEI-growth degradation submodel
+enabled (\texttt{options={\textquotesingle}SEI{\textquotesingle}:
+{\textquotesingle}solvent-diffusion limited{\textquotesingle}}) returns a
+3405-point trajectory spanning all cycles. This discretized
+voltage/capacity/temperature trajectory -- not the single scalar
+objectives eventually of interest -- is the natural raw composite
+response, in the same checkpointed-trajectory spirit as this repo's own
+Penicillin and (candidate) Rover composites.
+
+Objectives, drawn from that trajectory by known reductions: initial
+capacity or energy (from the first cycle), end-of-life capacity retention
+or degradation rate (from the capacity trace's decay across all cycles),
+and peak cell temperature (from the temperature trace) -- a genuine,
+well-documented physical trade-off (thicker/denser electrodes increase
+capacity but worsen thermal behavior and accelerate degradation), not an
+artificial split of one quantity.
+
+Expense -- measured, and the reason a multi-cycle experiment matters here:
+a single discharge solves in $\sim$0.6--0.7\,s, too cheap on its own to
+motivate BO; the 5-cycle aging run above took $\sim$4.2\,s, and scaling
+linearly to a realistic aging study (100--500 cycles, standard in real
+battery-degradation research) puts one design evaluation at roughly
+1.5--7 minutes -- genuinely expensive, and it is specifically the
+multi-cycle degradation version (not a single discharge) that both
+crosses into that regime and produces the real capacity-vs-degradation
+trade-off described above.
+
+\subsection{Additional composite-benchmark candidates surveyed}
+\label{sec:more-candidates}
+
+A broader survey (aerodynamics, topology optimization, materials/molecular
+design, battery design, chemical process engineering, optics, neural
+architecture search/hyperparameter optimization, and protein design) was
+checked against the same four criteria as
+Sections~\ref{sec:rcm17}--\ref{sec:pybamm} above -- real, high-dimensional,
+composite, and genuinely expensive -- rather than accepted at face value.
+A sample of the most specific claims was independently verified, catching
+one broken citation (\citet{lu2023evoxbench}'s suite is real but is hosted
+at \texttt{EMI-Group/evoxbench}, not the URL originally reported). Table
+\ref{tab:candidate-survey} summarizes the full set; brief notes on the
+standout cases follow.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Composite-benchmark candidates surveyed but not (yet) pursued. ``Composite'' reflects whether raw intermediate structure is genuinely exposed or extractable from the underlying simulator (not merely whether the source literature markets it as such); ``Expense'' reflects the cost of a live evaluation, not a precomputed/tabular lookup.}
+\label{tab:candidate-survey}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}p{1.9cm}>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+Candidate & Dim.\ & Composite & Expense \\
+\midrule
+OC20 / OC22 \citep{chanussot2021oc20,tran2022oc22} & high (atomic coords.) & yes, via IS2RS relaxation trajectory & yes (DFT) \\
+TopoDiff \citep{maze2023topodiff} & 4096 (64$\times$64 grid) & yes, if FE solver re-run for new designs & moderate (FE) \\
+SELTO \citep{dittmer2022selto} & $\sim$$10^5$ voxels & partial (no stress field shipped) & moderate (FE) \\
+Airfoil CFD (NREL 2k/9k) & $\sim$4 shape params & yes (full RANS flow field) & yes (RANS) \\
+UniFoil & $\sim$4--5 latent dims & yes & yes (RANS) \\
+IDAES process flowsheets & 5--50 (flexible) & yes (per-unit stream states) & yes (equation-oriented NLP) \\
+Battery microstructure \citep{kench2024battery} & 7 & yes & yes \\
+Battery pouch cell \citep{ma2024battery} & 4--5 & partial & yes \\
+LensAI / Optiland \citep{kramer2020lensai,kramer2020optiland} & 5--20 & yes (ray-traced fields) & no (ray tracing is cheap) \\
+EvoXBench \citep{lu2023evoxbench} & discrete arch.\ space & partial (learning curves) & no (tabular lookup) \\
+HPOBench \citep{eggensperger2021hpobench} & $\le$20 & partial (learning curves) & no (tabular lookup) \\
+MosPro \citep{luo2025mospro} & $\sim$238 (sequence) & weak (predictor score only) & no (ML inference) \\
+Jha et al.\ materials MOBO \citep{jha2018materials} & 5--20 & no & variable \\
+QM9 \citep{ramakrishnan2014qm9} / MatBench \citep{dunn2020matbench} & $\sim$5--20 & no / weak & cheap once precomputed \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Four candidates were promising enough to warrant the same depth of
+treatment as Sections~\ref{sec:rcm17}--\ref{sec:pybamm}; each below states
+plainly what is and is not actually verified, since (as the correction in
+Section~\ref{sec:topodiff-selto} shows) the honest caveats matter as much
+as the promising parts.
+
+\subsubsection{OC20/OC22 catalyst relaxation}
+\label{sec:oc20}
+
+The Open Catalyst datasets \citep{chanussot2021oc20,tran2022oc22} (OC20:
+1.28M DFT relaxations, $\sim$264.9M single-point evaluations; OC22: 62,331
+relaxations on oxide surfaces, $\sim$9.85M single-point evaluations) are
+composite regardless of objective count. Design variables here are not a
+fixed-length continuous vector like RCM17/RCM40 above -- $x$ is a
+variable-size atomic structure (an adsorbate molecule placed on a
+catalyst surface slab, typically tens to a couple hundred atoms), so
+``high-dimensional'' means the raw per-atom 3D-coordinate representation
+rather than a hand-picked small set of design knobs. Three tasks are
+defined on this data \citep{chanussot2021oc20}: \emph{S2EF} (structure
+$\to$ energy and per-atom forces), \emph{IS2RS} (initial, unrelaxed
+structure $\to$ final DFT-relaxed structure), and \emph{IS2RE} (initial
+structure $\to$ relaxed total/adsorption energy). IS2RS is the
+composite-structure link: it exposes the full sequence of intermediate
+atomic configurations along the relaxation trajectory -- a checkpointed
+trajectory in exactly the sense \texttt{composite\_penicillin.py} already
+builds composite structure from (and Rover, Section~\ref{sec:tr-shape-future},
+plans to), except this one is a physically real intermediate state
+already present in the released data rather than something we would need
+to add.
+
+In our own $x \to g(x) \to L(g)$ notation (Section~\ref{sec:rcm17}
+onward), with $N$ the (variable, system-dependent) atom count:
+\begin{align}
+x &= \{(z_i, r_i^{(0)})\}_{i=1}^{N} \quad \text{(species $z_i$, initial 3D position $r_i^{(0)}$, per atom)} \\
+g(x) &= \{r_i^{(t)}\}_{i=1,\ldots,N}^{t=0,\ldots,T} \quad \text{(relaxation trajectory -- IS2RS)} \\
+E_{\text{ads}} &= E\big(r^{(T)}\big) - E_{\text{slab}} - E_{\text{adsorbate}} \quad \text{(adsorption energy -- IS2RE)} \\
+F_{\text{res}} &= \max_i \big\| F_i(r^{(T)}) \big\| \quad \text{(residual per-atom force at convergence)}
+\end{align}
+A second objective (e.g.\ $E_{\text{ads}}$ alongside $F_{\text{res}}$ as
+a stability/convergence-quality proxy -- both computable from the same
+relaxation trajectory $g(x)$, and both already reported in various OC20
+follow-up papers) would make this genuinely bi-objective without
+inventing anything not already in the data. Unlike RCM17/RCM40's fixed
+6- and 34-dimensional continuous vectors, $x$ here has no single fixed
+dimensionality -- it scales with $N$, the number of atoms in a given
+adsorbate+surface system (typically tens to a couple hundred).
+
+Honest caveat: OC20/OC22 as released are fixed datasets of already-run
+DFT relaxations, not a live oracle you can query on an arbitrary new
+candidate structure -- getting a true live simulator would mean running
+DFT (VASP, Quantum ESPRESSO) ourselves, which is a heavy dependency. The
+practical middle ground, not yet tried by us: \texttt{facebookresearch/fairchem}
+(formerly \texttt{ocp}) ships pretrained GemNet-OC graph-neural-network
+potentials trained on OC20/OC22, runnable for fast inference as an
+approximate but genuinely open, live-queryable proxy for the true DFT
+relaxation -- at the cost of the evaluation then being fast ML inference
+rather than genuinely expensive DFT, the same expense trade-off already
+flagged for the tabular NAS/HPO benchmarks below. (One more citation
+correction, same pattern as EvoXBench's link and Optiland's author
+above: a follow-up survey pass attributed OC20 to ``Montoya et al.\ 2021,
+\emph{JACS}''; no such author appears on the actual paper, which is
+\citet{chanussot2021oc20} in \emph{ACS Catalysis} -- already the citation
+used throughout this section.)
+
+\subsubsection{TopoDiff and SELTO: a correction}
+\label{sec:topodiff-selto}
+
+An earlier pass through this survey described TopoDiff and SELTO as
+composite ``if the underlying FE solve is re-run ourselves for new
+candidate designs.'' On closer inspection this was too optimistic and is
+corrected here: both are released as \emph{fixed, precomputed} sample
+sets, not live queryable solvers, and the caveats differ in ways that
+matter for whether ``re-run it ourselves'' is actually feasible.
+
+\textbf{TopoDiff} \citep{maze2023topodiff}: 33,000 samples, each a
+$64{\times}64$ grid (4096 binary density variables) with 6 channels --
+optimal topology, prescribed volume fraction, von Mises stress, strain
+energy density, and $x$-/$y$-direction boundary loads -- generated for
+diverse load/boundary-condition combinations (the project page does not
+state the exact ranges or how many distinct conditions were sampled, so
+this is not fully pinned down). The stress and strain-energy fields
+\emph{are} shipped per sample -- genuinely composite as data -- but only
+for the 33,000 precomputed conditions; the FE solver used to generate
+them is not confirmed to be separately released as a standalone,
+re-runnable tool (only the diffusion-model training/inference code is
+confirmed public). Using this as a live composite BO benchmark would
+most likely mean writing our own topology-optimization FE solver in
+their channel convention (density $\to$ stress/strain-energy fields
+$\to$ compliance) rather than reusing theirs directly -- the classic,
+fully open, freely reimplementable 88-line SIMP MATLAB code
+\citep{andreassen2011topopt88} is the natural starting point for that,
+not TopoDiff's own (unconfirmed) generation pipeline.
+
+\textbf{SELTO} \citep{dittmer2022selto} (library: \texttt{dl4to}
+\citep{erzmann2023dl4to}): voxelized 3D topology optimization
+($\mathcal{O}(10^5)$ voxels across four subsets: disc/sphere domains,
+simple/complex loading), solved via Altair OptiStruct's SIMP
+implementation. This is a materially worse ``build it ourselves''
+candidate than TopoDiff: Altair OptiStruct is commercial, licensed
+software, not something we could freely re-run to generate new samples
+even if we wanted to. SELTO's own release ships geometry, loads, and the
+final density solution, but not the stress field -- matching this
+survey's original ``partial'' rating, now with the added caveat that
+closing that gap requires software we don't have access to, not just
+engineering effort.
+
+\textbf{OpenTO} \citep{nobari2025openTO} -- found in a follow-up survey
+pass, from the same MIT lab as TopoDiff (Faez Ahmed is senior author on
+both) -- changes this picture for the better and supersedes the
+``reimplement our own solver'' fallback above. It is a 2.2-million-sample
+2D/3D topology-optimization dataset (2 million unique boundary-condition
+configurations, arbitrary resolutions and aspect ratios, used to train
+the OAT foundation model), released alongside \emph{a re-runnable
+FEA+topology-optimization solver} -- confirmed directly in the repo,
+not merely claimed: \texttt{ahnobari/OptimizeAnyTopology} states outright
+``we also provide the FEA solver and TO Optimizer that we use to generate
+the data,'' a fork of the open \texttt{pyEDGE} solver, with named scripts
+(\texttt{RunComplianceTest.py}) for evaluating new designs. This is the
+one topology-optimization candidate in this whole survey that is
+\emph{actually} a live, open, re-runnable oracle rather than a fixed
+dataset -- exactly what TopoDiff and SELTO turned out not to be. Not yet
+installed and run by us, so treat the same way as IDAES below until
+verified directly.
+
+\subsubsection{IDAES process flowsheets}
+\label{sec:idaes}
+
+IDAES \citep{lee2021idaes} is a real, DOE/NETL-funded, fully open-source
+(Pyomo-based, \texttt{pip install idaes-pse}) process-systems-engineering
+framework -- unlike proprietary process simulators (Aspen Plus, gPROMS),
+it is actually installable without a license. Its documented HDA
+(hydrodealkylation) flowsheet tutorial is a concrete, representative
+instance: toluene and hydrogen react at high temperature to form benzene
+(plus methane and diphenyl byproducts), through a reactor, a flash
+separator, and a distillation column, targeting at least 370 tons/year of
+benzene product.
+
+In our own $x \to g(x) \to L(g)$ notation, with $K$ the number of unit
+operations in the flowsheet ($K \approx 5$--$8$ for HDA: reactor, flash,
+distillation, plus mixers/heaters):
+\begin{align}
+x &= (T_r, \, r_{\text{recycle}}, \, r_{\text{purge}}, \, r_{\text{reflux}}, \, \ldots) \quad \text{(reactor temp., recycle/purge/reflux ratios)} \\
+g(x) &= \{(T_k, \, \mathbf{y}_k, \, F_k)\}_{k=1}^{K} \quad \text{(per-unit stream temperature, composition, flow rate)} \\
+\text{Yield} &= F_{\text{benzene}}^{(\text{product stream})} \big/ F_{\text{toluene}}^{(\text{feed})} \\
+\text{Cost} &= C_{\text{capital}}(g) + C_{\text{operating}}(g) \quad \text{(via IDAES's own Process Costing Framework)}
+\end{align}
+$g(x)$ -- the per-unit-operation stream state -- is what the
+equation-oriented NLP solver (IPOPT) actually computes en route to
+Yield and Cost above; IDAES's costing framework is a real, shipped
+reduction function $L(g)$, not something we would need to write
+ourselves.
+
+Honest caveat, matching this section's own standard: unlike PyBaMM
+(Section~\ref{sec:pybamm}), IDAES has not yet been installed and run by
+us -- the flowsheet structure above is read from IDAES's own
+documentation and tutorials, not measured directly, so treat the exact
+unit count and solve time as approximate until verified the same way.
+
+\textbf{Deprioritized}: Airfoil CFD (NREL 2k/9k, UniFoil) and the two
+non-PyBaMM battery papers \citep{kench2024battery,ma2024battery} are
+genuinely composite and real but low-dimensional (4--7 design variables)
+despite expensive simulators -- the dimensionality trap this survey was
+specifically checking for. LensAI/Optiland
+\citep{kramer2020lensai,kramer2020optiland} is composite but cheap (ray
+tracing, not full CFD/FEA) for the same reason XFOIL was deprioritized in
+Section~\ref{sec:tr-shape-future}'s earlier discussion -- and a second
+citation-accuracy note: both LensAI and Optiland are maintained by
+Harrison Kramer, not the ``P. Salmon'' attribution the original survey
+gave for Optiland, another corrected transcription error alongside
+EvoXBench's link (Section~\ref{sec:more-candidates}, above). EvoXBench
+and HPOBench are real and correctly downloadable but query a
+precomputed/tabular lookup by design -- the expensive part (training) was
+already paid once by the benchmark's creators, so using them as-is is not
+a genuinely expensive evaluation regardless of how expensive live NAS/HPO
+training can be in general. MosPro's ``intermediate'' output is a
+pretrained predictor network's own score rather than a physically
+distinct simulation state, and inference against it is cheap -- weak on
+both composite structure and expense. Jha et al.'s materials MOBO study
+\citep{jha2018materials}, QM9 \citep{ramakrishnan2014qm9}, and MatBench
+\citep{dunn2020matbench} were included in the survey for completeness but
+have no genuine raw-response/reduction-function structure exposed
+(MatBench's underlying Materials Project DFT provenance
+\citep{jain2013materialsproject} is composite in principle, but the
+benchmark itself distributes only final computed properties). Finally,
+AlphaFold \citep{jumper2021alphafold} is not itself an optimization
+benchmark, but is worth naming as the state of the art in computing the
+$g(x)$ side of a hypothetical protein-design composite problem (sequence
+$\to$ predicted structure $\to$ binding affinity/stability) more
+faithfully than MosPro's own predictor network does -- nascent, not a
+ready-made benchmark today.
+
+\subsubsection{Chemistry and electrochemistry candidates, gathered in one place}
+\label{sec:chemistry-candidates}
+
+Several candidates already discussed above are chemistry or
+electrochemistry problems scattered across this survey by domain
+(catalysis, batteries, materials); Table~\ref{tab:chemistry-candidates}
+regroups them alongside three new ones found in a follow-up pass over a
+collaborator's own benchmark-survey memo, each checked against a real
+source before inclusion: \textbf{Summit's SnAr plug-flow reactor}
+\citep{felton2021summit} (4D: residence time, reagent equivalents, inlet
+concentration, temperature; objectives maximize space-time yield and
+minimize E-factor; composite via five outlet species concentrations
+feeding those two metrics); \textbf{Cantera}
+\citep{goodwin2024cantera}, a real, open-source (Caltech-originated)
+chemical-kinetics/thermodynamics/transport toolkit, usable for a
+zero-dimensional combustor problem (mixture ratio, inlet temperature,
+pressure, residence time, dilution -- objectives negative
+efficiency/heat vs.\ emissions, composite via per-species outlet
+concentrations computed in the same call); and \textbf{BioSTEAM}
+\citep{cortespena2020biosteam}, a real, open-source biorefinery
+design/techno-economic-analysis package (unit-operation settings as
+design variables, composite via stream/utility/cost states, objectives
+cost vs.\ global-warming potential or yield). \textbf{CheMixHub}
+\citep{rajaonson2025chemixhub} (NeurIPS 2025) is also real and chemistry-relevant
+(11 chemical-mixture property-prediction tasks, $\sim$500K points,
+including a new ILThermo-derived ionic-liquid dataset), but per its own
+2D composition/temperature grid it distributes only final property
+values with no native raw-response decomposition -- included in the
+table for completeness, not as a composite candidate.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Chemistry and electrochemistry composite-benchmark candidates, gathered from across this survey plus three newly verified additions.}
+\label{tab:chemistry-candidates}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.2cm}>{\raggedright\arraybackslash}p{1.5cm}>{\raggedright\arraybackslash}p{3.2cm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+Candidate & Dim.\ & Objectives & Status \\
+\midrule
+PyBaMM battery aging \citep{sulzer2021pybamm} & $\sim$28 & 2--3 (energy, retention, temp.) & Strongest confirmed; installed \& run (\S\ref{sec:pybamm}) \\
+OC20/OC22 catalysis \citep{chanussot2021oc20,tran2022oc22} & high (atom coords.) & 2 (energy, stability) & Fixed dataset; live proxy via fairchem (\S\ref{sec:oc20}) \\
+IDAES process flowsheets \citep{lee2021idaes} & 5--50 & 2 (yield, cost) & Real \& open; not yet run ourselves (\S\ref{sec:idaes}) \\
+Summit SnAr reactor \citep{felton2021summit} & 4 & 2 (space-time yield, E-factor) & Real, composite via outlet species; not yet run ourselves \\
+Cantera combustor \citep{goodwin2024cantera} & 5 & 2 (efficiency/heat, emissions) & Real, composite via species/temperature; not yet run ourselves \\
+BioSTEAM biorefinery \citep{cortespena2020biosteam} & 6--15 & 2 (cost, GWP/energy/yield) & Real, composite via streams/costs; not yet run ourselves \\
+Battery microstructure \citep{kench2024battery} & 7 & 1 (energy density) & Real, composite, but low-dimensional \\
+Battery pouch cell \citep{ma2024battery} & 4--5 & 4 (energy, charge, life) & Real, partial composite, low-dimensional \\
+Jha et al.\ materials MOBO \citep{jha2018materials} & 5--20 & varies & No composite structure exposed \\
+QM9 \citep{ramakrishnan2014qm9} / MatBench \citep{dunn2020matbench} & $\sim$5--20 & varies & No/weak composite structure exposed \\
+CheMixHub \citep{rajaonson2025chemixhub} & 2 (grid) & 2 (conductivity, viscosity) & Real, but no native composite decomposition \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+None of the three newly-added candidates (Summit, Cantera, BioSTEAM) has
+been installed and run by us yet -- same honest-caveat standard as
+IDAES (\S\ref{sec:idaes}) and OpenTO (\S\ref{sec:topodiff-selto}) above.
 
 \section{Discussion}
 
@@ -2278,6 +2810,141 @@ H. Zhang, K. K. Choong, and S. Ozawa.
 Q. Liang and L. Lai.
 \newblock Penicillin fed-batch fermentation simulator.
 \newblock NeurIPS 2021 Workshop; implementation: \url{https://github.com/HarryQL/TuRBO-Penicillin}.
+
+\bibitem{kumar2021rwcmop}
+A. Kumar, G. Wu, M. Z. Ali, R. Mallipeddi, P. N. Suganthan, and S. Das.
+\newblock A Benchmark-Suite of Real-World Constrained Multi-Objective Optimization Problems and Some Baseline Results.
+\newblock \emph{Swarm and Evolutionary Computation}, 2021; suite: \url{https://github.com/P-N-Suganthan/2021-RW-MOP}.
+
+\bibitem{biswas2020opf}
+P. P. Biswas, P. N. Suganthan, R. Mallipeddi, and G. A. J. Amaratunga.
+\newblock Multi-objective optimal power flow solutions using a constraint handling technique of evolutionary algorithms.
+\newblock \emph{Soft Computing}, 24 (2020) 2999--3023.
+
+\bibitem{sulzer2021pybamm}
+V. Sulzer, S. G. Marquis, R. Timms, M. Robinson, and S. J. Chapman.
+\newblock Python Battery Mathematical Modelling (PyBaMM).
+\newblock \emph{Journal of Open Research Software}, 9(1), 2021; \url{https://github.com/pybamm-team/PyBaMM}.
+
+\bibitem{chanussot2021oc20}
+L. Chanussot, A. Das, S. Goyal, T. Lavril, M. Shuaibi, M. Riviere, K. Tran, J. Heras-Domingo, C. Ho, W. Hu, A. Palizhati, A. Sriram, B. Wood, J. Yoon, D. Parikh, C. L. Zitnick, and Z. Ulissi.
+\newblock Open Catalyst 2020 (OC20) Dataset and Community Challenges.
+\newblock \emph{ACS Catalysis}, 11(10), 2021; \url{https://opencatalystproject.org}.
+
+\bibitem{tran2022oc22}
+R. Tran, J. Lan, M. Shuaibi, S. Goyal, B. M. Wood, A. Das, J. Heras-Domingo, A. Kolluru, A. Rizvi, N. Shoghi, A. Sriram, Z. Ulissi, and C. L. Zitnick.
+\newblock The Open Catalyst 2022 (OC22) Dataset and Challenges for Oxide Electrocatalysts.
+\newblock \emph{arXiv:2206.08917}, 2022.
+
+\bibitem{maze2023topodiff}
+F. Maz\'e and F. Ahmed.
+\newblock Diffusion Models Beat GANs on Topology Optimization.
+\newblock \emph{AAAI Conference on Artificial Intelligence}, 2023; dataset: \url{https://decode.mit.edu/projects/topodiff/}.
+
+\bibitem{dittmer2022selto}
+S. Dittmer, D. Erzmann, H. Harms, and R. Vieth.
+\newblock SELTO: Sample-Efficient Learned Topology Optimization.
+\newblock \emph{arXiv:2209.05098}, 2022; dataset DOI: 10.5281/zenodo.7781392; code: \url{https://github.com/dl4to/dl4to}.
+
+\bibitem{lee2021idaes}
+A. Lee, J. H. Ghouse, J. C. Eslick, C. D. Laird, J. D. Siirola, M. A. Zamarripa, D. Gunter, J. H. Shinn, A. W. Dowling, D. Bhattacharyya, L. T. Biegler, D. C. Miller.
+\newblock The IDAES Process Modeling Framework and Model Library -- Flexibility for Process Simulation and Optimization.
+\newblock \emph{Journal of Advanced Manufacturing and Processing}, 3(3), 2021; code: \url{https://github.com/IDAES/idaes-pse}.
+
+\bibitem{kench2024battery}
+S. Kench, I. Squires, A. Dahari, F. Brosa Planella, S. A. Roberts, and S. J. Cooper.
+\newblock Li-ion battery design through microstructural optimization using generative AI.
+\newblock \emph{Matter}, 2024.
+
+\bibitem{ma2024battery}
+Y. Ma, et al.
+\newblock Multi-objective optimization of lithium-ion battery designs considering the dilemma between energy density and rate capability.
+\newblock \emph{Energy and AI}, 17, 100393, 2024.
+
+\bibitem{lu2023evoxbench}
+Z. Lu, R. Cheng, Y. Jin, K. C. Tan, and K. Deb.
+\newblock Neural Architecture Search as Multiobjective Optimization Benchmarks: Problem Formulation and Performance Assessment.
+\newblock \emph{IEEE Transactions on Evolutionary Computation}, 2023; code: \url{https://github.com/EMI-Group/evoxbench}.
+
+\bibitem{eggensperger2021hpobench}
+K. Eggensperger, P. M\"uller, N. Mallik, M. Feurer, R. Sass, A. Klein, N. Awad, M. Lindauer, and F. Hutter.
+\newblock HPOBench: A Collection of Reproducible Multi-Fidelity Benchmark Problems for HPO.
+\newblock \emph{NeurIPS Datasets and Benchmarks Track}, 2021; code: \url{https://github.com/automl/HPOBench}.
+
+\bibitem{luo2025mospro}
+J. Luo, K. Ding, and Y. Luo.
+\newblock Pareto-optimal sampling for multi-objective protein sequence design.
+\newblock \emph{iScience}, 28, 112119, 2025; code: \url{https://github.com/luo-group/MosPro}.
+
+\bibitem{jha2018materials}
+A. Jha, et al.
+\newblock Multi-objective Optimization for Materials Discovery via Adaptive Design.
+\newblock \emph{Scientific Reports}, 8, 4129, 2018.
+
+\bibitem{kramer2020lensai}
+H. Kramer.
+\newblock LensAI: Integrated Machine and Deep Learning for Optical Design.
+\newblock GitHub repository; \url{https://github.com/HarrisonKramer/LensAI}.
+
+\bibitem{kramer2020optiland}
+H. Kramer.
+\newblock Optiland: optical design, optimization, and analysis in Python.
+\newblock GitHub repository; \url{https://github.com/HarrisonKramer/optiland}.
+
+\bibitem{ramakrishnan2014qm9}
+R. Ramakrishnan, P. O. Dral, M. Rupp, and O. A. von Lilienfeld.
+\newblock Quantum chemistry structures and properties of 134 kilo molecules.
+\newblock \emph{Scientific Data}, 1, 140022, 2014.
+
+\bibitem{dunn2020matbench}
+A. Dunn, Q. Wang, A. Ganose, D. Dopp, and A. Jain.
+\newblock Benchmarking materials property prediction methods: the Matbench test set and Automatminer reference algorithm.
+\newblock \emph{npj Computational Materials}, 6, 138, 2020; \url{https://github.com/materialsproject/matbench}.
+
+\bibitem{jain2013materialsproject}
+A. Jain, S. P. Ong, G. Hautier, W. Chen, W. D. Richards, S. Dacek, S. Cholia, D. Gunter, D. Skinner, G. Ceder, and K. A. Persson.
+\newblock Commentary: The Materials Project: A materials genome approach to accelerating materials innovation.
+\newblock \emph{APL Materials}, 1(1), 011002, 2013; \url{https://materialsproject.org}.
+
+\bibitem{jumper2021alphafold}
+J. Jumper, R. Evans, A. Pritzel, T. Green, M. Figurnov, O. Ronneberger, et al.
+\newblock Highly accurate protein structure prediction with AlphaFold.
+\newblock \emph{Nature}, 596, 583--589, 2021.
+
+\bibitem{andreassen2011topopt88}
+E. Andreassen, A. Clausen, M. Schevenels, B. S. Lazarov, and O. Sigmund.
+\newblock Efficient topology optimization in MATLAB using 88 lines of code.
+\newblock \emph{Structural and Multidisciplinary Optimization}, 43(1), 1--16, 2011.
+
+\bibitem{erzmann2023dl4to}
+D. Erzmann, S. Dittmer, H. Harms, and P. Maa\ss.
+\newblock DL4TO: A Deep Learning Library for Sample-Efficient Topology Optimization.
+\newblock \emph{Geometric Science of Information (GSI)}, 2023; code: \url{https://github.com/dl4to/dl4to}.
+
+\bibitem{nobari2025openTO}
+A. Heyrani Nobari, L. Regenwetter, C. Picard, L. Han, and F. Ahmed.
+\newblock Optimize Any Topology: A Foundation Model for Shape- and Resolution-Free Structural Topology Optimization.
+\newblock \emph{NeurIPS}, 2025; \emph{arXiv:2510.23667}; code: \url{https://github.com/ahnobari/OptimizeAnyTopology}.
+
+\bibitem{felton2021summit}
+K. C. Felton, J. G. Rittig, and A. A. Lapkin.
+\newblock Summit: Benchmarking Machine Learning Methods for Reaction Optimisation.
+\newblock \emph{Chemistry-Methods}, 2021; code: \url{https://github.com/sustainable-processes/summit}.
+
+\bibitem{goodwin2024cantera}
+D. G. Goodwin, H. K. Moffat, I. Schoegl, R. L. Speth, and B. W. Weber.
+\newblock Cantera: An Object-oriented Software Toolkit for Chemical Kinetics, Thermodynamics, and Transport Processes.
+\newblock Version 3.1.0, 2024; \url{https://www.cantera.org}.
+
+\bibitem{cortespena2020biosteam}
+Y. R. Cort\'es-Pe\~na, D. Kumar, V. Singh, and J. S. Guest.
+\newblock BioSTEAM: A Fast and Flexible Platform for the Design, Simulation, and Techno-Economic Analysis of Biorefineries Under Uncertainty.
+\newblock \emph{ACS Sustainable Chemistry \& Engineering}, 8, 3302--3310, 2020; code: \url{https://github.com/BioSTEAMDevelopmentGroup/biosteam}.
+
+\bibitem{rajaonson2025chemixhub}
+E. M. Rajaonson, M. R. Kochi, L. M. Mejia Mendoza, S. M. Moosavi, and B. Sanchez-Lengeling.
+\newblock CheMixHub: Datasets and Benchmarks for Chemical Mixture Property Prediction.
+\newblock \emph{NeurIPS Datasets and Benchmarks Track}, 2025; \emph{arXiv:2506.12231}; code: \url{https://github.com/chemcognition-lab/chemixhub}.
 
 \end{thebibliography}
 

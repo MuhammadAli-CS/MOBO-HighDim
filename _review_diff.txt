@@ -1,0 +1,879 @@
+diff --git a/morbo/problems/lasso_bench_mo.py b/morbo/problems/lasso_bench_mo.py
+new file mode 100644
+index 0000000..5ac9040
+--- /dev/null
++++ b/morbo/problems/lasso_bench_mo.py
+@@ -0,0 +1,107 @@
++#!/usr/bin/env python3
++r"""Bi-objective LassoBench: validation loss vs. coefficient sparsity.
++
++LassoBench (Sehic et al., AutoML 2022, arXiv:2111.02790,
++github.com/ksehic/LassoBench) tunes per-feature Lasso regularization
++weights in [-1, 1]^d. Its synthetic benchmarks have KNOWN, tunable
++effective dimensionality (synt_simple d=60/de=3, synt_medium d=100/de=5,
++synt_high d=300/de=15, synt_hard d=1000/de=50) -- the closest available
++real(istic)-problem bridge to this project's SparseDTLZ2 result that
++effective dimension relative to budget, not nominal dimension, governs
++when trust-region shape adaptation helps. Real-world variants (e.g. DNA:
++d=180/de=43) ground it further.
++
++LassoBench itself is single-objective (validation loss). This wrapper adds
++the natural second objective its own machinery already computes: the
++FRACTION OF ACTIVE (nonzero) Lasso coefficients of the fitted solution --
++accuracy vs. model sparsity, a genuine tradeoff every Lasso practitioner
++cares about. Objective 1 remains exactly LassoBench's own `evaluate()`
++loss, so best-loss-so-far from our saved histories is directly comparable
++to the single-objective numbers in their paper (Table 2: 30 repetitions,
++1000 evals for synt_simple/synt_medium/RCV1/DNA-scale, 5000 for
++synt_high/synt_hard).
++
++Requires `LassoBench` to be installed (not a default dependency of this
++repo -- see cluster/setup_env.sh's optional section):
++    git clone https://github.com/ksehic/LassoBench.git && pip install -e LassoBench/
++"""
++from typing import Tuple
++
++import numpy as np
++import torch
++from torch import Tensor
++
++_INSTALL_MSG = (
++    "LassoBench is not installed. Install it with:\n"
++    "  git clone https://github.com/ksehic/LassoBench.git\n"
++    "  pip install -e LassoBench/\n"
++    "(on the cluster: run inside the morbo-env conda env; see cluster/setup_env.sh)"
++)
++
++_SYNT_BENCH_NAMES = {"synt_simple", "synt_medium", "synt_high", "synt_hard"}
++
++
++def get_lasso_bench_mo_fn(
++    bench_name: str, dtype=torch.double, device=None
++) -> Tuple[callable, Tensor, int]:
++    r"""Construct the bi-objective LassoBench function.
++
++    Args:
++        bench_name: a LassoBench benchmark name -- one of the synthetic
++            benchmarks ("synt_simple", "synt_medium", "synt_high",
++            "synt_hard") or a real-world dataset name for
++            `RealBenchmark(pick_data=...)` (e.g. "DNA", "Leukemia", "RCV1",
++            "Breast_cancer", "Diabetes").
++        dtype: dtype for the returned bounds.
++        device: device for the returned bounds.
++
++    Returns:
++        A tuple `(f, bounds, dim)`:
++            f: callable mapping a `n x dim` tensor in [-1, 1]^dim to a
++                `n x 2` tensor of MINIMIZATION objectives
++                `[validation_loss, active_coefficient_fraction]` -- meant
++                to be wrapped via `BenchmarkFunction(..., negate=True)`
++                like every other raw-minimization evalfn here.
++            bounds: `2 x dim` tensor, [-1, 1]^dim.
++            dim: the benchmark's own dimensionality (`n_features`) --
++                callers should validate their configured dim against this.
++    """
++    try:
++        import LassoBench
++    except ImportError as e:
++        raise ImportError(_INSTALL_MSG) from e
++
++    if bench_name in _SYNT_BENCH_NAMES:
++        bench = LassoBench.SyntheticBenchmark(pick_bench=bench_name)
++    else:
++        try:
++            bench = LassoBench.RealBenchmark(pick_data=bench_name)
++        except Exception:
++            # Dataset naming differs across LassoBench versions
++            # (e.g. "DNA" vs "dna") -- retry lowercased before giving up.
++            bench = LassoBench.RealBenchmark(pick_data=bench_name.lower())
++    dim = int(bench.n_features)
++
++    def f(X: Tensor) -> Tensor:
++        X_np = X.detach().cpu().numpy()
++        if X_np.ndim == 1:
++            X_np = X_np[None, :]
++        out = np.empty((X_np.shape[0], 2))
++        for i, cfg in enumerate(X_np):
++            # LassoBench raises on configs epsilon-outside [-1, 1].
++            cfg = np.clip(cfg.astype(np.float64), -1.0, 1.0)
++            loss = float(bench.evaluate(cfg))
++            # `test()` fits the same Lasso and stores the coefficient
++            # vector on the benchmark object -- the only public path to
++            # the fitted coefficients. Its test-set MSE output is unused.
++            bench.test(cfg)
++            coef = np.asarray(bench.reg_coef)
++            active_frac = float(np.count_nonzero(coef)) / dim
++            out[i, 0] = loss
++            out[i, 1] = active_frac
++        return torch.tensor(out, dtype=X.dtype, device=X.device)
++
++    bounds = torch.empty(2, dim, dtype=dtype, device=device)
++    bounds[0] = -1.0
++    bounds[1] = 1.0
++    return f, bounds, dim
+diff --git a/morbo/problems/rotated_sparse_dtlz2.py b/morbo/problems/rotated_sparse_dtlz2.py
+new file mode 100644
+index 0000000..8afa1f0
+--- /dev/null
++++ b/morbo/problems/rotated_sparse_dtlz2.py
+@@ -0,0 +1,71 @@
++#!/usr/bin/env python3
++r"""SparseDTLZ2 with a rotated (non-axis-aligned) effective subspace.
++
++Closes the most important logical gap in the SparseDTLZ2 study: there, the
++informative dimensions are AXIS-ALIGNED -- the one geometry `ard_box`
++could in principle exploit, and where rotation buys nothing beyond
++per-axis rescaling. Applying a fixed random rotation to the inputs before
++evaluating makes the effective subspace a random linear subspace instead,
++cleanly separating two hypotheses the axis-aligned version can't:
++
++  - "shape adaptation finds the informative SUBSPACE" -- rotation-based
++    shapes (pca/ard_pca/cma) should be nearly invariant to this change,
++    since PCA/CMA never privileged the coordinate axes to begin with;
++  - "shape adaptation finds the informative AXES" -- `ard_box` (axis-
++    aligned by construction) should get strictly worse, and `isotropic`
++    should be unaffected (a hypercube is rotation-blind in distribution).
++
++Construction: y = clamp(R (x - 0.5) + 0.5, 0, 1), then standard
++SparseDTLZ2(y). The rotation R is a fixed orthogonal matrix drawn once
++from a seeded generator (seed depends only on `dim`, NOT the run seed --
++every method and every run seed faces the identical rotated problem, so
++cross-method comparisons stay controlled). Rotating about the domain
++center keeps the optimum region (informative distance dims at 0.5, i.e.
++y = x = center) interior and reachable; the clamp only distorts far
++corners of the cube, away from the optimum.
++"""
++import math
++from typing import Tuple
++
++import torch
++from torch import Tensor
++
++from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
++
++_ROTATION_BASE_SEED = 20260712  # fixed: same rotation for every run seed
++
++
++def _random_rotation(dim: int, dtype, device) -> Tensor:
++    """Deterministic random orthogonal matrix via QR of a seeded Gaussian."""
++    gen = torch.Generator().manual_seed(_ROTATION_BASE_SEED + dim)
++    A = torch.randn(dim, dim, generator=gen, dtype=torch.double)
++    Q, R = torch.linalg.qr(A)
++    # Fix QR sign ambiguity so the result is deterministic and det(Q)=+1-ish
++    Q = Q * torch.sign(torch.diagonal(R)).unsqueeze(0)
++    return Q.to(dtype=dtype, device=device)
++
++
++def get_rotated_sparse_dtlz2_fn(
++    dim: int,
++    num_objectives: int,
++    k_eff: int,
++    dtype=torch.double,
++    device=None,
++) -> Tuple[callable, Tensor]:
++    r"""Rotated-input SparseDTLZ2. Same signature/convention as
++    `get_sparse_dtlz2_fn` (raw minimization values; wrap with
++    `BenchmarkFunction(..., negate=True)`)."""
++    base_f, bounds = get_sparse_dtlz2_fn(
++        dim=dim,
++        num_objectives=num_objectives,
++        k_eff=k_eff,
++        dtype=dtype,
++        device=device,
++    )
++    Q = _random_rotation(dim, dtype=dtype, device=device)
++
++    def f(X: Tensor) -> Tensor:
++        Y = (X - 0.5) @ Q.to(X).T + 0.5
++        return base_f(Y.clamp(0.0, 1.0))
++
++    return f, bounds
+diff --git a/morbo/problems/sparse_dtlz2.py b/morbo/problems/sparse_dtlz2.py
+new file mode 100644
+index 0000000..a6f0901
+--- /dev/null
++++ b/morbo/problems/sparse_dtlz2.py
+@@ -0,0 +1,88 @@
++#!/usr/bin/env python3
++r"""DTLZ2 variant with a controllable gap between nominal and effective dimension.
++
++Standard DTLZ2 already has low *effective* dimensionality relative to its
++nominal `dim`: only the first `num_objectives - 1` "position" dims and the
++scalar `g(x) = sum_{i in distance dims} (x_i - 0.5)^2` (a sum over the
++remaining `k = dim - num_objectives + 1` "distance" dims) matter -- but every
++one of those `k` distance dims contributes to `g`, so `k` itself still grows
++with nominal `dim`.
++
++This variant masks all but `k_eff` of the `k` distance dims out of `g`
++entirely -- the masked-out dims are literal no-ops on every objective, not
++merely "less informative" -- so nominal dimension can be scaled up while
++holding the true number of informative dims fixed at
++`(num_objectives - 1) + k_eff`. This directly tests whether trust-region
++shape adaptation's benefit tracks the *gap* between nominal and effective
++dimension (the mechanism this project's dimension sweep implicated), as
++opposed to nominal dimension alone: standard DTLZ2 confounds the two, since
++`k` (and hence the amount of "unused" volume an isotropic box wastes)
++necessarily grows in lockstep with nominal `dim` there.
++"""
++import math
++from typing import Tuple
++
++import torch
++from torch import Tensor
++
++
++def get_sparse_dtlz2_fn(
++    dim: int,
++    num_objectives: int,
++    k_eff: int,
++    dtype=torch.double,
++    device=None,
++) -> Tuple[callable, Tensor]:
++    r"""Construct the raw (un-negated, minimization-convention) objective
++    function and bounds for sparse/partial-effective-dimension DTLZ2.
++
++    Args:
++        dim: nominal input dimension.
++        num_objectives: number of objectives `M`.
++        k_eff: number of the `k = dim - num_objectives + 1` distance
++            dimensions that actually affect `g` (and hence every objective).
++            The remaining `k - k_eff` distance dims are literal no-ops.
++            Must satisfy `0 <= k_eff <= k`.
++        dtype: dtype for the returned bounds.
++        device: device for the returned bounds.
++
++    Returns:
++        A tuple `(f, bounds)`:
++            f: a callable mapping a `... x dim`-dim tensor in `[0, 1]^dim`
++                to a `... x num_objectives`-dim tensor of raw (positive,
++                un-negated) DTLZ2-convention objective values -- same
++                convention as `botorch.test_functions.multi_objective.DTLZ2`,
++                so it is meant to be wrapped the same way (via
++                `BenchmarkFunction(..., negate=True)`).
++            bounds: a `2 x dim`-dim tensor, `[0, 1]^dim`.
++    """
++    if dim <= num_objectives:
++        raise ValueError(
++            f"dim must be > num_objectives, got {dim} and {num_objectives}."
++        )
++    k = dim - num_objectives + 1
++    if not (0 <= k_eff <= k):
++        raise ValueError(f"k_eff must be in [0, {k}], got {k_eff}.")
++
++    mask = torch.zeros(k, dtype=dtype, device=device)
++    mask[:k_eff] = 1.0
++    pi_over_2 = math.pi / 2
++
++    def f(X: Tensor) -> Tensor:
++        X_m = X[..., -k:]
++        g = ((X_m - 0.5).pow(2) * mask.to(X_m)).sum(dim=-1)
++        g_plus1 = 1 + g
++        fs = []
++        for i in range(num_objectives):
++            idx = num_objectives - 1 - i
++            f_i = g_plus1.clone()
++            if idx > 0:
++                f_i = f_i * torch.cos(X[..., :idx] * pi_over_2).prod(dim=-1)
++            if i > 0:
++                f_i = f_i * torch.sin(X[..., idx] * pi_over_2)
++            fs.append(f_i)
++        return torch.stack(fs, dim=-1)
++
++    bounds = torch.zeros(2, dim, dtype=dtype, device=device)
++    bounds[1] = 1.0
++    return f, bounds
+diff --git a/morbo/problems/sparse_rover.py b/morbo/problems/sparse_rover.py
+new file mode 100644
+index 0000000..8724c1c
+--- /dev/null
++++ b/morbo/problems/sparse_rover.py
+@@ -0,0 +1,67 @@
++#!/usr/bin/env python3
++r"""Rover with dummy dimensions: a REAL problem with a controllable
++nominal-vs-effective dimension gap.
++
++Plain Rover (d=60, all dims genuinely matter) is this project's canonical
++"no low-dimensional structure to exploit" problem -- trust-region shape
++adaptation shows no robust effect there (near-coin-flip win rates across
++seeds). SparseDTLZ2 established, synthetically, that effective dimension
++relative to budget governs when shape adaptation helps. This problem
++bridges the two: the SAME real Rover trajectory objective, embedded in a
++larger nominal space where the extra dimensions are literal no-ops (the
++trajectory only reads the first `base_dim` coordinates).
++
++Prediction from the SparseDTLZ2 mechanism: at base_dim=60 real dims inside
++nominal d=120/180, the effective-dimension story says shape adaptation
++should now HELP on Rover -- the isotropic box wastes volume on the dummy
++half of the space, and a PCA/CMA shape can discover that the data only
++varies meaningfully in the real half. If it still shows no effect, the
++"all real dims matter" property dominates and the mechanism is more
++subtle than "effective dim relative to budget" alone.
++
++Budget/protocol matches tr_shape_rover (2000 evals, batch 50, 5 seeds).
++"""
++from typing import Tuple
++
++import torch
++from torch import Tensor
++
++from morbo.problems.rover import get_rover_fn
++
++
++def get_sparse_rover_fn(
++    dim: int,
++    base_dim: int = 60,
++    dtype=torch.double,
++    device=None,
++    **rover_kwargs,
++) -> Tuple[callable, Tensor]:
++    r"""Rover reading only the first `base_dim` of `dim` nominal dims.
++
++    Args:
++        dim: nominal input dimension (must be > base_dim).
++        base_dim: how many leading dimensions the rover trajectory actually
++            uses (must be even, matching rover's own constraint).
++        dtype, device: for the returned bounds.
++        rover_kwargs: forwarded to `get_rover_fn` (force_goal, force_start).
++
++    Returns:
++        `(f, bounds)` with f mapping `n x dim` -> `n x 2` (same raw
++        convention as `get_rover_fn`), bounds `2 x dim`.
++    """
++    if dim <= base_dim:
++        raise ValueError(f"dim must be > base_dim, got {dim} <= {base_dim}.")
++    if base_dim % 2 != 0:
++        raise ValueError(f"base_dim must be even, got {base_dim}.")
++    rover_f, rover_bounds = get_rover_fn(
++        base_dim, device=device, dtype=dtype, **rover_kwargs
++    )
++
++    def f(X: Tensor) -> Tensor:
++        return rover_f(X[..., :base_dim])
++
++    # Real dims keep rover's own bounds; dummy dims get [0, 1].
++    bounds = torch.zeros(2, dim, dtype=dtype, device=device)
++    bounds[1] = 1.0
++    bounds[:, :base_dim] = rover_bounds
++    return f, bounds
+diff --git a/morbo/problems/time_varying_sparse_dtlz2.py b/morbo/problems/time_varying_sparse_dtlz2.py
+new file mode 100644
+index 0000000..c790d73
+--- /dev/null
++++ b/morbo/problems/time_varying_sparse_dtlz2.py
+@@ -0,0 +1,100 @@
++#!/usr/bin/env python3
++r"""SparseDTLZ2 whose informative dimensions CHANGE partway through the run.
++
++Probes the one regime no current benchmark tests: re-adaptation. The
++informative distance-dimension subset switches from the FIRST k_eff
++distance dims to the LAST k_eff (disjoint) at a configured fraction of the
++eval budget. Predictions per method:
++
++  - `pca_ellipsoid` (memoryless, recomputed from scratch each iteration):
++    should re-adapt within a few iterations of the switch.
++  - `cma_ellipsoid` (persistent covariance, temporally smoothed): its
++    memory -- the exact property that made it the only method to break
++    through at d=200/600ev -- should now HURT, since it must first
++    un-learn the stale subspace at its decay rate.
++  - `mab_shape`: gets to re-learn which arm suits the new landscape.
++  - `morbo` (isotropic): blind to the switch by construction; a useful
++    control for how much raw difficulty the switch itself adds.
++
++METRIC CAVEAT (important, deliberate): this is a dynamic benchmark. The
++saved `objective_history` records each point's value AT EVALUATION TIME --
++pre-switch evaluations were scored under mask A, post-switch under mask B,
++so a post-hoc hypervolume over the full mixed history is not a statement
++about any single fixed function. The meaningful comparison is the
++HV-trajectory recovery AFTER the switch (slope/level of `true_hv` past the
++switch point, per-method), not the final mixed-history number. Analysis
++should slice histories at the switch eval index.
++
++Note the achievable Pareto front itself is IDENTICAL under both masks
++(g=0 is reachable either way, at informative-dims=0.5), so the switch
++changes which coordinates matter without moving the target front.
++"""
++from typing import Tuple
++
++import math
++
++import torch
++from torch import Tensor
++
++
++def get_time_varying_sparse_dtlz2_fn(
++    dim: int,
++    num_objectives: int,
++    k_eff: int,
++    switch_at_eval: int,
++    dtype=torch.double,
++    device=None,
++) -> Tuple[callable, Tensor]:
++    r"""Stateful SparseDTLZ2 with a mid-run informative-subset switch.
++
++    Args:
++        dim, num_objectives, k_eff: as in `get_sparse_dtlz2_fn`; requires
++            `2 * k_eff <= k = dim - num_objectives + 1` so the pre- and
++            post-switch informative subsets can be disjoint.
++        switch_at_eval: total evaluation count after which the informative
++            subset flips from the first `k_eff` distance dims to the last
++            `k_eff`. The function COUNTS ITS OWN CALLS (row count), so this
++            wrapper is stateful and must be constructed fresh per run.
++
++    Returns:
++        `(f, bounds)`, raw minimization convention (wrap with
++        `BenchmarkFunction(..., negate=True)`).
++    """
++    if dim <= num_objectives:
++        raise ValueError(f"dim must be > num_objectives, got {dim} and {num_objectives}.")
++    k = dim - num_objectives + 1
++    if 2 * k_eff > k:
++        raise ValueError(
++            f"need 2*k_eff <= k for disjoint pre/post subsets, got k_eff={k_eff}, k={k}."
++        )
++
++    mask_pre = torch.zeros(k, dtype=dtype, device=device)
++    mask_pre[:k_eff] = 1.0
++    mask_post = torch.zeros(k, dtype=dtype, device=device)
++    mask_post[-k_eff:] = 1.0
++    pi_over_2 = math.pi / 2
++    n_evals_seen = 0
++
++    def f(X: Tensor) -> Tensor:
++        nonlocal n_evals_seen
++        n = X.shape[0] if X.dim() > 1 else 1
++        mask = mask_pre if n_evals_seen < switch_at_eval else mask_post
++        n_evals_seen += n
++
++        X_m = X[..., -k:]
++        g = ((X_m - 0.5).pow(2) * mask.to(X_m)).sum(dim=-1)
++        g_plus1 = 1 + g
++        fs = []
++        for i in range(num_objectives):
++            idx = num_objectives - 1 - i
++            f_i = g_plus1.clone()
++            if idx > 0:
++                f_i = f_i * torch.cos(X[..., :idx] * pi_over_2).prod(dim=-1)
++            if i > 0:
++                f_i = f_i * torch.sin(X[..., idx] * pi_over_2)
++            fs.append(f_i)
++        return torch.stack(fs, dim=-1)
++
++    bounds = torch.zeros(2, dim, dtype=dtype, device=device)
++    bounds[1] = 1.0
++    return f, bounds
+diff --git a/morbo/run_one_replication.py b/morbo/run_one_replication.py
+index 62dd5ed..f4ed5e4 100644
+--- a/morbo/run_one_replication.py
++++ b/morbo/run_one_replication.py
+@@ -21,14 +21,20 @@ from botorch.test_functions.multi_objective import (
+     DH4,
+     DTLZ1,
+     DTLZ2,
++    DTLZ3,
++    DTLZ5,
++    DTLZ7,
+     MW7,
++    Penicillin,
+     VehicleSafety,
+     WeldedBeam,
+ )
+ from botorch.utils.multi_objective.box_decompositions.dominated import (
+     DominatedPartitioning,
+ )
++from botorch.utils.multi_objective.pareto import is_non_dominated
+ from botorch.utils.sampling import draw_sobol_samples
++from torch.quasirandom import SobolEngine
+ from morbo.gen import (
+     TS_select_batch_MORBO,
+ )
+@@ -37,11 +43,55 @@ from morbo.trust_region import TurboHParams
+ from torch import Tensor
+ 
+ from morbo.problems.rover import get_rover_fn
++from morbo.problems.composite_dtlz2 import (
++    composite_dtlz2_reduction,
++    get_composite_dtlz2_fn,
++)
++from morbo.problems.composite_dtlz2_curve import (
++    composite_dtlz2_curve_reduction,
++    get_composite_dtlz2_curve_fn,
++)
++from morbo.problems.composite_penicillin import (
++    composite_penicillin_reduction,
++    get_composite_penicillin_fn,
++)
++from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
++from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
++from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
++from morbo.problems.sparse_rover import get_sparse_rover_fn
++from morbo.problems.lasso_bench_mo import get_lasso_bench_mo_fn
++from morbo.problems.bbob_style import get_bbob_biobj_fn
+ from morbo.benchmark_function import (
+     BenchmarkFunction,
+ )
+ 
+-supported_labels = ["morbo"]
++supported_labels = [
++    "morbo",
++    "turbo_scalarized",
++    "composite_morbo",
++    "llm_morbo",
++    "independent_gp_composite",
++    "kronecker_gp_composite",
++    "composite_penicillin",
++    "ard_box",
++    "pca_ellipsoid",
++    "ard_pca_ellipsoid",
++    "composite_penicillin_ard_pca",
++    "composite_penicillin_pca",
++    "cma_ellipsoid",
++    "linear_gp",
++    "linear_gp_pca",
++    "linear_gp_cma",
++    "ard_box_dimprior",
++    "ard_pca_dimprior",
++    "mab_shape",
++    "sobol",
++    "composite_dtlz2_pca",
++    "composite_dtlz2_ard_pca",
++    "mab_shape_ducb",
++    "mab_shape_ducb_shared",
++    "labcat_style",
++]
+ 
+ BASE_SEED = 12346
+ 
+@@ -74,6 +124,7 @@ def run_one_replication(
+     track_history: bool = TurboHParams.track_history,
+     sample_subset_d: bool = TurboHParams.sample_subset_d,
+     fixed_scalarization: bool = TurboHParams.fixed_scalarization,
++    scalarization_type: str = TurboHParams.scalarization_type,
+     winsor_pct: float = TurboHParams.winsor_pct,
+     trunc_normal_perturb: bool = TurboHParams.trunc_normal_perturb,
+     switch_strategy_freq: Optional[int] = TurboHParams.switch_strategy_freq,
+@@ -87,6 +138,32 @@ def run_one_replication(
+     approximate_hv_alpha: Optional[float] = TurboHParams.approximate_hv_alpha,
+     recompute_all_hvs: bool = True,
+     restart_hv_scalarizations: bool = True,
++    use_llm_candidates: bool = TurboHParams.use_llm_candidates,
++    llm_candidates_per_tr: int = TurboHParams.llm_candidates_per_tr,
++    llm_problem_description: str = TurboHParams.llm_problem_description,
++    use_kronecker_gp: bool = TurboHParams.use_kronecker_gp,
++    tr_shape: str = TurboHParams.tr_shape,
++    cma_c_mu: float = TurboHParams.cma_c_mu,
++    cma_c1: float = TurboHParams.cma_c1,
++    cma_c_p: float = TurboHParams.cma_c_p,
++    use_linear_kernel: bool = TurboHParams.use_linear_kernel,
++    use_dim_scaled_ls_prior: bool = TurboHParams.use_dim_scaled_ls_prior,
++    mab_epsilon: float = TurboHParams.mab_epsilon,
++    mab_reward_ema_alpha: float = TurboHParams.mab_reward_ema_alpha,
++    mab_arms: tuple = TurboHParams.mab_arms,
++    mab_policy: str = TurboHParams.mab_policy,
++    mab_ducb_gamma: float = TurboHParams.mab_ducb_gamma,
++    mab_ducb_c: float = TurboHParams.mab_ducb_c,
++    mab_shared_cma: bool = TurboHParams.mab_shared_cma,
++    n_curve_points: int = 8,
++    n_penicillin_checkpoints: int = 10,
++    sparse_dtlz2_k_eff: int = 5,
++    lasso_bench_name: str = "synt_medium",
++    sparse_rover_base_dim: int = 60,
++    tv_switch_frac: float = 0.5,
++    bbob_f1: str = "sphere",
++    bbob_f2: str = "sphere",
++    bbob_k_eff: Optional[int] = None,
+     dtype: torch.device = torch.double,
+     device: Optional[torch.device] = None,
+     save_callback: Optional[Callable[[Tensor], None]] = None,
+@@ -117,6 +194,7 @@ def run_one_replication(
+     bounds = torch.empty((2, dim), dtype=dtype, device=device)
+     constraints = None
+     objective = None
++    composite_reduction = None
+ 
+     if evalfn == "ackley":
+         f = Ackley(dim=dim, negate=False)
+@@ -192,6 +270,104 @@ def run_one_replication(
+         objective = IdentityMCMultiOutputObjective(
+             outcomes=[0, 1], num_outcomes=num_outputs
+         )
++    elif evalfn == "CompositeDTLZ2":
++        f, bounds = get_composite_dtlz2_fn(
++            dim=dim, num_objectives=num_objectives, dtype=dtype, device=device
++        )
++        bounds = bounds.to(**tkwargs)
++        num_outputs = 3
++        composite_reduction = composite_dtlz2_reduction
++    elif evalfn == "CompositeDTLZ2Curve":
++        f, bounds = get_composite_dtlz2_curve_fn(
++            dim=dim,
++            num_objectives=num_objectives,
++            n_curve_points=n_curve_points,
++            dtype=dtype,
++            device=device,
++        )
++        bounds = bounds.to(**tkwargs)
++        num_outputs = n_curve_points
++        composite_reduction = composite_dtlz2_curve_reduction
++    elif evalfn == "SparseDTLZ2":
++        # NOTE: must be special-cased ahead of the generic `"DTLZ" in evalfn`
++        # branch below, which would otherwise misroute this name (it isn't in
++        # that branch's `constructor_map`).
++        f, bounds = get_sparse_dtlz2_fn(
++            dim=dim,
++            num_objectives=num_objectives,
++            k_eff=sparse_dtlz2_k_eff,
++            dtype=dtype,
++            device=device,
++        )
++        bounds = bounds.to(**tkwargs)
++        num_outputs = num_objectives
++    elif evalfn == "RotatedSparseDTLZ2":
++        # Same ahead-of-generic-DTLZ placement requirement as SparseDTLZ2.
++        f, bounds = get_rotated_sparse_dtlz2_fn(
++            dim=dim,
++            num_objectives=num_objectives,
++            k_eff=sparse_dtlz2_k_eff,
++            dtype=dtype,
++            device=device,
++        )
++        bounds = bounds.to(**tkwargs)
++        num_outputs = num_objectives
++    elif evalfn == "TimeVaryingSparseDTLZ2":
++        # Same ahead-of-generic-DTLZ placement requirement as SparseDTLZ2.
++        f, bounds = get_time_varying_sparse_dtlz2_fn(
++            dim=dim,
++            num_objectives=num_objectives,
++            k_eff=sparse_dtlz2_k_eff,
++            switch_at_eval=int(tv_switch_frac * max_evals),
++            dtype=dtype,
++            device=device,
++        )
++        bounds = bounds.to(**tkwargs)
++        num_outputs = num_objectives
++    elif evalfn == "SparseRover":
++        num_objectives, num_outputs = 2, 2
++        f, bounds = get_sparse_rover_fn(
++            dim=dim,
++            base_dim=sparse_rover_base_dim,
++            device=device,
++            dtype=dtype,
++            force_goal=False,
++            force_start=True,
++        )
++    elif evalfn == "LassoBenchMO":
++        f, bounds, bench_dim = get_lasso_bench_mo_fn(
++            bench_name=lasso_bench_name, dtype=dtype, device=device
++        )
++        if bench_dim != dim:
++            raise ValueError(
++                f"config dim={dim} does not match LassoBench "
++                f"'{lasso_bench_name}' n_features={bench_dim}."
++            )
++        bounds = bounds.to(**tkwargs)
++        num_outputs = num_objectives
++    elif evalfn == "BBOBBiObj":
++        f, bounds = get_bbob_biobj_fn(
++            dim=dim,
++            f1_name=bbob_f1,
++            f2_name=bbob_f2,
++            k_eff=bbob_k_eff,
++            dtype=dtype,
++            device=device,
++        )
++        bounds = bounds.to(**tkwargs)
++        num_outputs = num_objectives
++    elif evalfn == "Penicillin":
++        problem = Penicillin(negate=False)
++        f = problem
++        bounds = problem.bounds.to(**tkwargs)
++        num_outputs = problem.num_objectives
++    elif evalfn == "CompositePenicillin":
++        f, bounds = get_composite_penicillin_fn(
++            n_checkpoints=n_penicillin_checkpoints, dtype=dtype, device=device
++        )
++        bounds = bounds.to(**tkwargs)
++        num_outputs = 5 * n_penicillin_checkpoints + 1
++        composite_reduction = composite_penicillin_reduction
+     elif evalfn != "ackley":
+         # Handle the non-constrained botorch test functions here.
+         constructor_map = {
+@@ -200,6 +376,9 @@ def run_one_replication(
+             "DH4": DH4,
+             "DTLZ1": DTLZ1,
+             "DTLZ2": DTLZ2,
++            "DTLZ3": DTLZ3,
++            "DTLZ5": DTLZ5,
++            "DTLZ7": DTLZ7,
+             "BraninCurrin": BraninCurrin,
+             "VehicleSafety": VehicleSafety,
+         }
+@@ -220,11 +399,94 @@ def run_one_replication(
+         ref_point=torch.tensor(max_reference_point, **tkwargs),
+         dim=dim,
+         tkwargs=tkwargs,
+-        negate=True,
++        # CompositeDTLZ2's raw response isn't in the maximize/negated
++        # convention the other evalfns use -- `composite_dtlz2_reduction`
++        # performs that negation itself as part of the reduction.
++        negate=(evalfn not in ("CompositeDTLZ2", "CompositeDTLZ2Curve")),
+         observation_noise_std=observation_noise_std,
+         observation_noise_bias=observation_noise_bias,
+     )
+ 
++    if label == "sobol":
++        # Pure random-search baseline: no trust regions, no GP, no model
++        # fitting at all -- just a single continuous Sobol low-discrepancy
++        # sequence over the full [0, 1]^dim search space, evaluated
++        # batch_size points at a time up to max_evals. Exists to answer
++        # "is TuRBO/MORBO's local-modeling machinery earning its keep at
++        # all", independent of any tr_shape question. Deliberately
++        # self-contained (bypasses TRBOState/TurboHParams entirely) rather
++        # than threaded through the TS_select_batch_MORBO loop, since that
++        # loop has no code path that skips GP fitting.
++        if constraints is not None:
++            raise ValueError(
++                "label='sobol' does not support constrained evalfns yet "
++                f"(got evalfn={evalfn!r} with constraints set)."
++            )
++        sobol_engine = SobolEngine(dimension=dim, scramble=True, seed=seed)
++        lb, ub = bounds[0], bounds[1]
++        true_ref_point = torch.tensor(max_reference_point, dtype=dtype, device=device)
++
++        n_evals = []
++        true_hv = []
++        pareto_X = []
++        pareto_Y = []
++        gen_times = []
++        X_history = torch.empty(0, dim, **tkwargs)
++        Y_raw_history = torch.empty(0, num_outputs, **tkwargs)
++        partitioning = None
++        n_evals_so_far = 0
++        while n_evals_so_far < max_evals:
++            start_gen = time.time()
++            n = min(batch_size, max_evals - n_evals_so_far)
++            X_batch = lb + (ub - lb) * sobol_engine.draw(n).to(**tkwargs)
++            Y_batch = f(X_batch)
++            gen_times.append(time.time() - start_gen)
++
++            X_history = torch.cat([X_history, X_batch], dim=0)
++            Y_raw_history = torch.cat([Y_raw_history, Y_batch], dim=0)
++            n_evals_so_far += n
++            n_evals.append(n_evals_so_far)
++
++            obj_history = (
++                composite_reduction(Y_raw_history)
++                if composite_reduction is not None
++                else Y_raw_history
++            )
++            better_than_ref = (obj_history > true_ref_point).all(dim=-1)
++            if better_than_ref.any():
++                Y_better = obj_history[better_than_ref]
++                pareto_mask = is_non_dominated(Y_better)
++                partitioning = DominatedPartitioning(
++                    ref_point=true_ref_point, Y=Y_better[pareto_mask]
++                )
++                hv = partitioning.compute_hypervolume().item()
++                pareto_X.append(X_history[better_than_ref][pareto_mask].tolist())
++                pareto_Y.append(Y_better[pareto_mask].tolist())
++            else:
++                hv = 0.0
++                pareto_X.append([])
++                pareto_Y.append([])
++            true_hv.append(hv)
++            if verbose:
++                print(f"{n_evals_so_far}) Current hypervolume: {hv:.3f}")
++
++            output = {
++                "n_evals": n_evals,
++                "X_history": X_history.cpu(),
++                "metric_history": Y_raw_history.cpu(),
++                "objective_history": obj_history.cpu(),
++                "true_pareto_X": pareto_X,
++                "true_pareto_Y": pareto_Y,
++                "true_hv": true_hv,
++                "fit_times": [],
++                "gen_times": gen_times,
++            }
++            if save_during_opt is not None:
++                save_callback(output)
++
++        save_callback(output)
++        return
++
+     # Automatically set the failure streak if it isn't specified
+     failure_streak = max(dim // 3, 10) if failure_streak is None else failure_streak
+ 
+@@ -245,6 +507,7 @@ def run_one_replication(
+         sample_subset_d=sample_subset_d,
+         track_history=track_history,
+         fixed_scalarization=fixed_scalarization,
++        scalarization_type=scalarization_type,
+         n_initial_points=n_initial_points,
+         n_restart_points=n_restart_points,
+         raw_samples=raw_samples,
+@@ -260,6 +523,23 @@ def run_one_replication(
+         use_approximate_hv_computations=use_approximate_hv_computations,
+         approximate_hv_alpha=approximate_hv_alpha,
+         restart_hv_scalarizations=restart_hv_scalarizations,
++        use_llm_candidates=use_llm_candidates,
++        llm_candidates_per_tr=llm_candidates_per_tr,
++        llm_problem_description=llm_problem_description,
++        use_kronecker_gp=use_kronecker_gp,
++        tr_shape=tr_shape,
++        cma_c_mu=cma_c_mu,
++        cma_c1=cma_c1,
++        cma_c_p=cma_c_p,
++        use_linear_kernel=use_linear_kernel,
++        use_dim_scaled_ls_prior=use_dim_scaled_ls_prior,
++        mab_epsilon=mab_epsilon,
++        mab_reward_ema_alpha=mab_reward_ema_alpha,
++        mab_arms=tuple(mab_arms),
++        mab_policy=mab_policy,
++        mab_ducb_gamma=mab_ducb_gamma,
++        mab_ducb_c=mab_ducb_c,
++        mab_shared_cma=mab_shared_cma,
+     )
+ 
+     trbo_state = TRBOState(
+@@ -271,6 +551,7 @@ def run_one_replication(
+         tr_hparams=tr_hparams,
+         constraints=constraints,
+         objective=objective,
++        composite_reduction=composite_reduction,
+     )
+ 
+     # For saving outputs
+@@ -410,8 +691,12 @@ def run_one_replication(
+         # Save state at this evaluation and move to cpu
+         n_evals.append(trbo_state.n_evals.item())
+         if trbo_state.hv is not None:
+-            # The objective is None if there are no constraints
+-            obj = objective if objective else lambda x: x
++            # `trbo_state.objective` is what the optimization itself used
++            # throughout (already composed with `composite_reduction` when
++            # applicable) -- reuse it here rather than reconstructing a
++            # separate objective from the local `objective` variable, which
++            # would silently skip the composite reduction.
++            obj = trbo_state.objective
+             partitioning = DominatedPartitioning(
+                 ref_point=true_ref_point, Y=obj(trbo_state.pareto_Y)
+             )
+@@ -437,6 +722,10 @@ def run_one_replication(
+             "n_evals": n_evals,
+             "X_history": trbo_state.X_history.cpu(),
+             "metric_history": trbo_state.Y_history.cpu(),
++            # Always in objective space (post-reduction for composite runs),
++            # unlike `metric_history` which is the raw model-output space --
++            # downstream consumers (e.g. plotting) should prefer this field.
++            "objective_history": trbo_state.objective(trbo_state.Y_history).cpu(),
+             "true_pareto_X": pareto_X,
+             "true_pareto_Y": pareto_Y,
+             "true_hv": true_hv,
+@@ -466,6 +755,7 @@ def run_one_replication(
+         "n_evals": n_evals,
+         "X_history": trbo_state.X_history.cpu(),
+         "metric_history": trbo_state.Y_history.cpu(),
++        "objective_history": trbo_state.objective(trbo_state.Y_history).cpu(),
+         "true_pareto_X": pareto_X,
+         "true_pareto_Y": pareto_Y,
+         "true_hv": true_hv,
