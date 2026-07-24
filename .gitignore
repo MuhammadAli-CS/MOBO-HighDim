@@ -130,3 +130,9 @@ dmypy.json
 
 # SLURM job logs
 cluster/logs/
+
+# Cloned dependency (composite_ablation/run_from_tau_repo.py), not vendored --
+# each environment (local, cluster) clones its own copy directly from
+# https://github.com/tau315/composite-mobo instead.
+composite_ablation/tau315_repo/
+
