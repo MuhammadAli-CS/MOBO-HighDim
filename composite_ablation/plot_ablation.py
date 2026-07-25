@@ -30,6 +30,7 @@ _COLORS = {
     "standard_mobo / composite_mobo": "#1f77b4",
     "chebyshev_bo / composite_chebyshev_bo": "#ff7f0e",
     "spherical_chebyshev_bo / composite_spherical_chebyshev_bo": "#2ca02c",
+    "batched_morbo / composite_batched_morbo": "#9467bd",
 }
 
 
