@@ -1,0 +1,5 @@
+Saved /home/ma2379/MOBO-HighDim/experiments/gri_mech_composite/comparison_aggregate.png
+
+method                       n  final HV mean      std
+morbo                        5      2500.0000   0.0000
+composite_gri_mech           5      2500.0000   0.0000
