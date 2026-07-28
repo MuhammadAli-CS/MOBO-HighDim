@@ -84,6 +84,8 @@ e.g.
     python run_comparison.py penicillin_composite composite_penicillin 0
     python run_comparison.py snar_composite morbo 0
     python run_comparison.py snar_composite composite_snar 0
+    python run_comparison.py gri_mech_composite morbo 0
+    python run_comparison.py gri_mech_composite composite_gri_mech 0
     python run_comparison.py tr_shape_dtlz2_100d ard_box 0
     python run_comparison.py tr_shape_dtlz2_100d pca_ellipsoid 0
     python run_comparison.py tr_shape_dtlz2_100d ard_pca_ellipsoid 0
@@ -171,6 +173,20 @@ LABEL_OVERRIDES = {
     "composite_snar_ard_pca": {
         "evalfn": "CompositeSnAr",
         "tr_shape": "ard_pca_ellipsoid",
+    },
+    # Composite modeling on a 64-dim GRI-Mech 3.0 rate-constant calibration
+    # (Smith et al.; kinetics via Cantera, Goodwin et al. 2024): the GP
+    # models the 48-dim raw checkpointed-ignition-trajectory response
+    # (`morbo/problems/composite_gri_mech.py`) instead of the 2 final
+    # ignition-delay-error objectives directly. Compare against "morbo" on
+    # the same experiment dir (`evalfn: "GriMechCalib"` in the base config).
+    # No _pca/_ard_pca variant here (yet): those trust-region shapes hit a
+    # pre-existing crash in morbo/run_one_replication.py's TR-index-logging
+    # assertion (`assert len(tr_inds) == len(tr.X)`, a duplicate-point
+    # matching bug against X_history) found while running the SnAr
+    # composite x shape ablation -- not re-run here until that's fixed.
+    "composite_gri_mech": {
+        "evalfn": "CompositeGriMechCalib",
     },
     # CMA-ES-style covariance adaptation (AS-SMEA, Wang et al. 2026):
     # persistent per-TR covariance updated from Pareto-elite points plus an
@@ -286,6 +302,15 @@ if __name__ == "__main__":
     if experiment_name == "penicillin_composite":
         torch.set_num_threads(8)
         torch.set_num_interop_threads(4)
+    # gri_mech_composite: torch/MKL's default full-core thread pool
+    # intermittently segfaulted when running concurrently with Cantera's own
+    # native ignition-simulation calls (observed directly: identical runs
+    # crashed under full threading but not under a capped thread count) --
+    # same class of native-library thread contention as the penicillin fix
+    # above, capped defensively here rather than diagnosed further.
+    elif experiment_name == "gri_mech_composite":
+        torch.set_num_threads(4)
+        torch.set_num_interop_threads(2)
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     exp_dir = os.path.join(current_dir, "experiments", experiment_name)

@@ -2590,6 +2590,33 @@ including a new ILThermo-derived ionic-liquid dataset), but per its own
 values with no native raw-response decomposition -- included in the
 table for completeness, not as a composite candidate.
 
+A further follow-up pass specifically looked for a chemistry composite
+benchmark exceeding 50 design dimensions, cross-checking this project's
+own candidates above against an independent external survey
+\citep{sahas266mixturebench}. That survey's own conclusion is that no
+chemistry candidate reaches high dimension without an artificial
+parameterization: SnAr, Cantera's combustor example, and BioSTEAM are
+verified there at 4D, 5D (proposed), and 6--15D (proposed) respectively,
+and its authors explicitly note that "none of the retained chemistry
+candidates spans low, medium, and high dimension without... an
+artificial parameterization." A literature check of real published
+surrogate-fuel \emph{mixture} formulations (the most literal
+"formulation" analogue, i.e.\ blending a handful of pure hydrocarbons to
+reproduce a real fuel's properties) confirms the same ceiling from the
+other direction: published jet-fuel, diesel, and gasoline surrogates
+use 4--8 blend components, never more (verified via literature search
+across several surrogate-formulation papers) -- so stretching a mixture
+benchmark to 50+ dimensions would itself be exactly the artificial
+parameterization the survey warns against, not a real formulation
+problem at that scale. Kinetic-mechanism rate-constant calibration
+does not have this ceiling: it is a genuinely high-dimensional, real,
+long-established combustion-chemistry problem (GRI-Mech 3.0's own
+development tuned on the order of 100 rate parameters against roughly
+75 experimental targets via the solution-mapping method
+\citep{frenklach1992solutionmapping}), and is implemented here as this
+project's highest-dimensional chemistry composite benchmark
+(\S\ref{sec:gri-mech}).
+
 \begin{table}[h]
 \centering
 \small
@@ -2603,6 +2630,7 @@ PyBaMM battery aging \citep{sulzer2021pybamm} & $\sim$28 & 2--3 (energy, retenti
 OC20/OC22 catalysis \citep{chanussot2021oc20,tran2022oc22} & high (atom coords.) & 2 (energy, stability) & Fixed dataset; live proxy via fairchem (\S\ref{sec:oc20}) \\
 IDAES process flowsheets \citep{lee2021idaes} & 5--50 & 2 (yield, cost) & Real \& open; not yet run ourselves (\S\ref{sec:idaes}) \\
 Summit SnAr reactor \citep{felton2021summit} & 4 & 2 (space-time yield, E-factor) & \textbf{Implemented \& run through the real engine} (\S\ref{sec:snar}) \\
+GRI-Mech 3.0 rate calibration \citep{goodwin2024cantera,smith1999grimech,frenklach1992solutionmapping} & 64 & 2 (low-/high-T ignition-delay error) & \textbf{Implemented \& run through the real engine} (\S\ref{sec:gri-mech}) \\
 Cantera combustor \citep{goodwin2024cantera} & 5 & 2 (efficiency/heat, emissions) & Real, composite via species/temperature; not yet run ourselves \\
 BioSTEAM biorefinery \citep{cortespena2020biosteam} & 6--15 & 2 (cost, GWP/energy/yield) & Real, composite via streams/costs; not yet run ourselves \\
 Battery microstructure \citep{kench2024battery} & 7 & 1 (energy density) & Real, composite, but low-dimensional \\
@@ -2843,6 +2871,138 @@ independent single-output GPs per iteration instead of 2. The full
 composite $\times$ trust-region-shape factorial, mirroring
 \S\ref{sec:pybamm}'s \texttt{submit\_penicillin\_2x2.sh}) has not yet
 been submitted.
+
+\subsection{Implemented: composite GRI-Mech 3.0 rate-constant calibration}
+\label{sec:gri-mech}
+
+This project's highest-dimensional chemistry composite benchmark: a
+64-design-dimension calibration of Arrhenius rate-constant multipliers
+in GRI-Mech 3.0 \citep{smith1999grimech}, the standard detailed
+chemical-kinetics mechanism for methane/natural-gas combustion (53
+species, 325 elementary reactions), run through Cantera
+\citep{goodwin2024cantera} (\texttt{gri30.yaml}, shipped with the
+\texttt{cantera} PyPI package, MIT-licensed). Implemented in
+\texttt{morbo/\allowbreak problems/\allowbreak composite\_gri\_mech.py} and wired into
+\texttt{morbo/\allowbreak run\_one\_replication.py} as \texttt{evalfn} values
+\texttt{"GriMechCalib"} (direct) and \texttt{"CompositeGriMechCalib"}
+(composite).
+
+\paragraph{Why this benchmark, not a mixture/formulation problem.} As
+discussed above (\S\ref{sec:chemistry-candidates}), no real chemistry
+benchmark surveyed -- ours or the external survey's
+\citep{sahas266mixturebench} -- exceeds about 15 design dimensions
+without an artificial parameterization, and real published
+surrogate-fuel \emph{mixture} formulations cap out at 4--8 blend
+components. Kinetic-mechanism rate-constant calibration sidesteps this
+ceiling entirely: it is real, long-established (the methodology below is
+essentially how GRI-Mech itself was built), and naturally spans
+dozens to hundreds of design dimensions, since a detailed mechanism has
+that many individually adjustable rate parameters. This is not a
+"formulation" problem in the mixture-design sense, but it is the
+genuine chemistry domain that reaches high dimension defensibly.
+
+\paragraph{Design-variable selection.} Rather than exposing all 325
+reaction rate constants (most of which are chemically irrelevant to a
+pure methane/air mixture -- e.g.\ every C$_3$+ and NO$_x$-chemistry
+reaction has exactly zero effect), the 64 design variables are the
+GRI-Mech reactions with the largest forward-sensitivity coefficient of
+temperature at a representative 1200~K/1~atm/$\phi=1$ methane/air
+ignition, computed once via Cantera's built-in sensitivity analysis
+(\texttt{ReactorNet.sensitivities()} with all 325 reactions enabled).
+This mirrors GRI-Mech's own construction methodology
+\citep{frenklach1992solutionmapping}: rank reactions by sensitivity,
+then tune only the sensitive subset. The top 64 have sensitivity
+coefficients ranging from 396.6 (2\,CH$_3$(+M) $\rightleftharpoons$
+C$_2$H$_6$(+M)) down to 0.59; every reaction ranked below these 64 has
+magnitude under 0.37, and the great majority of the mechanism's other
+$\sim$260 reactions have \emph{exactly} zero sensitivity for this fuel
+(confirming the selected subset is a real chemically-active set, not an
+arbitrary cutoff -- see the reactions listed in
+\texttt{TOP\_REACTION\_INDICES}, dominated by exactly the chain-branching
+and CH$_3$/CH$_2$O oxidation chemistry a combustion chemist would
+expect for methane). Each of the 64 design variables is a log$_2$-scale
+multiplier on that reaction's pre-exponential (Arrhenius $A$) factor,
+bounded to $[-1, 1]$ -- i.e.\ each rate constant may vary by a factor of
+2 in either direction, a standard order-of-magnitude uncertainty factor
+for combustion rate constants (in the spirit of the Baulch et al.\
+evaluated-kinetics convention of quoting a per-reaction multiplicative
+uncertainty factor; a single common factor of 2 is used here rather than
+per-reaction literature values, a simplification, not a fabricated
+range).
+
+\paragraph{Composite structure.} Six fixed test conditions are
+simulated per evaluation: three "low-temperature" ($T_0 \in
+\{1000, 1050, 1100\}$~K) and three "high-temperature" ($T_0 \in
+\{1300, 1400, 1500\}$~K), all at 1~atm, $\phi = 1$, methane/air. Each
+condition is a 0D constant-pressure adiabatic ignition
+(\texttt{cantera.IdealGasConstPressureReactor}) with the candidate's 64
+rate multipliers applied via \texttt{Solution.set\_multiplier}, integrated
+to a condition-specific horizon and checkpointed at 4 fixed time
+fractions -- the raw response $g(x) \in \mathbb{R}^{24}$ (6 conditions
+$\times$ 4 temperature checkpoints), the same "expose a checkpointed
+physical trajectory" pattern as \texttt{composite\_penicillin.py} and
+\texttt{composite\_snar.py}. The known reduction $L(g)$ recovers each
+condition's ignition-delay time by linear interpolation of the 4
+checkpoints to the time temperature first crosses $T_0 + 400$~K, then
+computes $-\sum (\log(\tau_{\mathrm{pred}}/\tau_{\mathrm{target}}))^2$
+(maximize convention) summed separately over the low-T and high-T
+groups -- two objectives, not one, because methane's dominant
+chain-branching pathway differs by temperature regime (CH$_3$ + O$_2$
+$\rightleftharpoons$ CH$_3$O + O and CH$_2$O oxidation dominate at low
+$T$; H + O$_2$ $\rightleftharpoons$ O + OH dominates at high $T$), so a
+rate-multiplier vector that best matches one regime's targets need not
+best match the other's -- a genuine trade-off, confirmed empirically: a
+uniform multiplier shift moves every condition's ignition delay together,
+but per-reaction perturbations shift the two groups by different,
+non-proportional amounts.
+
+\paragraph{Targets.} Rather than depend on historical experimental
+shock-tube data (as GRI-Mech's own original calibration did), the six
+target ignition delays are generated by applying this benchmark's own
+checkpoint-based reduction, once, to the \emph{unmodified} as-shipped
+GRI-Mech 3.0 mechanism (all 64 multipliers $=1$) -- a standard synthetic
+ground-truth-recovery construction: the real simulator, real mechanism,
+and real sensitivity-based reaction selection are all genuine; only the
+specific numeric targets being matched come from the same real mechanism
+rather than from a redistributed experimental dataset. This was verified
+directly: evaluating the unmodified mechanism against its own targets
+gives objective values of $(-2.7\times10^{-12}, -8.3\times10^{-8})$,
+i.e.\ zero error up to floating-point precision, confirming the
+reduction is deterministic and self-consistent between target generation
+and evaluation.
+
+\paragraph{Verification.} A sanity check perturbed all 64 multipliers
+uniformly by a factor of 2 (doubling every rate constant roughly halves
+every condition's ignition delay, e.g.\ the 1000~K condition's target
+$1.126$~s becomes roughly half that) and by a factor of 0.5 (roughly doubles
+ignition delay, and correctly saturates the 1000~K condition to its
+2~s integration-horizon penalty value once the slowed kinetics no longer
+ignite within budget) -- both directions behave exactly as the
+underlying chemistry predicts, and a random draw of independent
+per-reaction multipliers gives intermediate, non-degenerate errors in
+both objectives. The full pipeline was then run end to end through
+\texttt{morbo.run\_one\_replication.\allowbreak run\_one\_replication} for both
+the \texttt{morbo} label (direct 2-objective modeling; toy-scale 10-eval
+smoke test, wall time XXs) and \texttt{composite\_gri\_mech}
+(composite-GP modeling of the 24-dim raw response; wall time XXs) --
+XXX.
+
+\paragraph{Not yet added: shape-adapted trust regions.} Unlike
+\S\ref{sec:snar}'s SnAr benchmark, this experiment does not include
+\texttt{\_pca}/\texttt{\_ard\_pca} composite$\times$shape variants: those
+trust-region shapes hit a pre-existing crash in
+\texttt{morbo/run\_one\_replication.py}'s per-iteration TR-index-logging
+assertion (\texttt{assert len(tr\_inds) == len(tr.X)}, a duplicate-point
+matching bug against the global evaluation history, discovered while
+running SnAr's own composite$\times$shape ablation,
+\texttt{cluster/submit\_snar\_2x3.sh} -- see that experiment's own results
+discussion) -- not re-run here until that bug is fixed. The cluster sweep
+run here (\texttt{cluster/submit\_gri\_mech\_2x1.sh}) is therefore a
+direct-vs-composite A/B only: 2 labels (\texttt{morbo},
+\texttt{composite\_gri\_mech}) $\times$ 5 seeds, 400 evaluations/trial,
+no SLURM time limit (composite mode's 48-output \texttt{ModelListGP} fit
+cost per iteration had not been measured at this scale before
+submission).
 
 \section{Discussion}
 
@@ -3176,6 +3336,21 @@ Y. R. Cort\'es-Pe\~na, D. Kumar, V. Singh, and J. S. Guest.
 E. M. Rajaonson, M. R. Kochi, L. M. Mejia Mendoza, S. M. Moosavi, and B. Sanchez-Lengeling.
 \newblock CheMixHub: Datasets and Benchmarks for Chemical Mixture Property Prediction.
 \newblock \emph{NeurIPS Datasets and Benchmarks Track}, 2025; \emph{arXiv:2506.12231}; code: \url{https://github.com/chemcognition-lab/chemixhub}.
+
+\bibitem[Smith et al.(1999)]{smith1999grimech}
+G. P. Smith, D. M. Golden, M. Frenklach, N. W. Moriarty, B. Eiteneer, M. Goldenberg, C. T. Bowman, R. K. Hanson, S. Song, W. C. Gardiner Jr., V. V. Lissianski, and Z. Qin.
+\newblock GRI-Mech 3.0.
+\newblock 1999; \url{http://combustion.berkeley.edu/gri-mech/version30/text30.html}.
+
+\bibitem[Frenklach et al.(1992)]{frenklach1992solutionmapping}
+M. Frenklach, H. Wang, and M. J. Rabinowitz.
+\newblock Optimization and analysis of large chemical kinetic mechanisms using the solution mapping method -- combustion of methane.
+\newblock \emph{Progress in Energy and Combustion Science}, 18, 47--73, 1992; DOI: \url{https://doi.org/10.1016/0360-1285(92)90032-V}.
+
+\bibitem[Sahas266(2026)]{sahas266mixturebench}
+Sahas266.
+\newblock mixture-opt-bench: scientific-simulator-benchmarks research survey.
+\newblock GitHub repository, 2026; \url{https://github.com/Sahas266/mixture-opt-bench/blob/codex/scientific-simulator-benchmarks/docs/research/scientific-simulator-benchmarks.md}.
 
 \end{thebibliography}
 

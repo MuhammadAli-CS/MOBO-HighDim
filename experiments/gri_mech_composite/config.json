@@ -1,0 +1,14 @@
+{
+    "dim": 64,
+    "evalfn": "GriMechCalib",
+    "max_evals": 400,
+    "n_initial_points": 128,
+    "batch_size": 32,
+    "n_trust_regions": 3,
+    "min_tr_size": 128,
+    "max_reference_point": [
+      -50.0,
+      -50.0
+    ],
+    "verbose": true
+  }

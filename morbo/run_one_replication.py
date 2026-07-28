@@ -59,6 +59,10 @@ from morbo.problems.composite_snar import (
     composite_snar_reduction,
     get_composite_snar_fn,
 )
+from morbo.problems.composite_gri_mech import (
+    composite_gri_mech_reduction,
+    get_composite_gri_mech_fn,
+)
 from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
 from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
 from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
@@ -85,6 +89,9 @@ supported_labels = [
     "composite_snar",
     "composite_snar_pca",
     "composite_snar_ard_pca",
+    "composite_gri_mech",
+    "composite_gri_mech_pca",
+    "composite_gri_mech_ard_pca",
     "cma_ellipsoid",
     "linear_gp",
     "linear_gp_pca",
@@ -442,6 +449,27 @@ def run_one_replication(
         bounds = bounds.to(**tkwargs)
         num_outputs = 6
         composite_reduction = composite_snar_reduction
+    elif evalfn == "GriMechCalib":
+        # Direct-objective baseline for the composite A/B, same pattern as
+        # "SnAr" above: identical simulator/reduction as "CompositeGriMechCalib",
+        # but the GP models the final 2 ignition-delay-error objectives
+        # directly rather than the 48-dim checkpointed-temperature raw
+        # response. `composite_gri_mech_reduction` returns the
+        # maximize-convention pair directly, so negate it back to the
+        # minimize-convention `f` here and let `negate=True` restore the sign.
+        # (24-dim raw response: 6 conditions x 4 checkpoints.)
+        _gri_raw_response, bounds = get_composite_gri_mech_fn(dtype=dtype, device=device)
+
+        def f(X: Tensor) -> Tensor:
+            return -composite_gri_mech_reduction(_gri_raw_response(X))
+
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 2
+    elif evalfn == "CompositeGriMechCalib":
+        f, bounds = get_composite_gri_mech_fn(dtype=dtype, device=device)
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 24
+        composite_reduction = composite_gri_mech_reduction
     elif evalfn != "ackley":
         # Handle the non-constrained botorch test functions here.
         constructor_map = {
@@ -479,7 +507,7 @@ def run_one_replication(
         # deal for evalfn="Callable" whenever a composite_reduction was
         # built above (raw_evaluate_components + raw_compose path).
         negate=not (
-            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr")
+            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib")
             or (evalfn == "Callable" and composite_reduction is not None)
         ),
         observation_noise_std=observation_noise_std,
