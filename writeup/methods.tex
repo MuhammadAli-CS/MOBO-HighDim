@@ -3258,68 +3258,93 @@ structure, so the two findings are not in direct tension.
 The two chemistry composite benchmarks implemented in this work
 (Sections~\ref{sec:snar} and~\ref{sec:gri-mech}) are restated here in a
 compact, equations-only form for quick reference, alongside their full
-derivations above.
+derivations above. Every composite benchmark in this work follows the
+same three-step pipeline from design input to objective:
+\begin{align}
+x \;\longrightarrow\; g(x) \;\longrightarrow\; f(x) = L(g(x)),
+\end{align}
+where $g: \mathcal{X} \to \mathbb{R}^k$ is the \emph{raw (composite)
+response} -- the real simulator's intermediate physical state, run once
+per evaluation of $x$ -- and $L: \mathbb{R}^k \to \mathbb{R}^M$ is the
+\emph{known reduction}, a fixed, closed-form (not learned, not
+re-simulated) formula mapping that raw state to the $M$ final
+objectives. The \textbf{direct} evalfn (\texttt{SnAr},
+\texttt{GriMechCalib}) evaluates $x \mapsto f(x)$ end to end and lets
+the GP model $f(x) \in \mathbb{R}^M$ directly; the \textbf{composite}
+evalfn (\texttt{CompositeSnAr}, \texttt{CompositeGriMechCalib}) instead
+lets the GP model the intermediate $g(x) \in \mathbb{R}^k$, applying the
+same fixed $L$ afterward to reconstruct $f(x)$ -- so both evalfns are
+computing the identical function $x \mapsto f(x)$, differing only in
+what the surrogate model is asked to predict.
 
 \subsection{Summit SnAr reaction}
 
-The design variables and their physical bounds are
+\paragraph{Input $x$.} Four design variables, bounded
 \begin{align}
 \tau \in [0.5, 2], \quad e \in [1.0, 5.0], \quad C_0 \in [0.1, 0.5],
-\quad T \in [30, 120].
+\quad T \in [30, 120]
 \end{align}
+(residence time, pyrrolidine equivalents, inlet DNFB concentration,
+temperature).
 
-The benchmark integrates a five-species kinetic model
-(\S\ref{sec:snar}). Let $C_p$ denote the outlet concentration of the
-desired product, $q$ the total flow rate, $V$ the reactor volume, and
-$M_p$ the product molecular weight. Space-time yield is
+\paragraph{Raw response $g(x)$.} A five-species kinetic ODE
+(\S\ref{sec:snar}) integrated over $[0,\tau]$ from $x$ gives the final
+concentrations plus the flow rate $q = 5\,\mathrm{mL}/\tau$ implied by
+$\tau$:
 \begin{align}
-\mathrm{STY} = \frac{6\times10^4\, M_p\, C_p\, q}{1000\, V}.
+g(x) = \big(C_{\mathrm{dfnb}},\, C_{\mathrm{pldn}},\, C_p,\,
+C_{\mathrm{regio}},\, C_{\mathrm{bis}},\, q\big) \in \mathbb{R}^6.
 \end{align}
-The E-factor is the mass of solvent and non-product species relative to
-product mass:
+This one vector is shared: both objectives below are computed from the
+\emph{same} $g(x)$, rather than each objective exposing its own separate
+raw response.
+
+\paragraph{Known reduction $L(g)$ and objectives $f(x) = L(g(x))$.}
+Writing $C_p, q$ as the relevant components of $g(x)$, $V$ the reactor
+volume, and $M_p$ the product molecular weight, space-time yield is
 \begin{align}
-E = \frac{q\,\rho_{\mathrm{eth}} + 10^{-3} q \sum_{j \ne p} M_j C_j}{10^{-3} M_p C_p q}.
+\mathrm{STY}(g) = \frac{6\times10^4\, M_p\, C_p\, q}{1000\, V},
 \end{align}
-We maximize
+and the E-factor (mass of solvent and non-product species relative to
+product mass) is
 \begin{align}
-f_1 = \mathrm{STY}
+E(g) = \frac{q\,\rho_{\mathrm{eth}} + 10^{-3} q \sum_{j \ne p} M_j C_j}{10^{-3} M_p C_p q}.
 \end{align}
-and
+We maximize both final objectives:
 \begin{align}
-f_2 = -E.
+f_1(x) = \mathrm{STY}(g(x)), \qquad f_2(x) = -E(g(x)).
 \end{align}
-The composite raw response is the shared 6-dim vector $g(x) =
-(C_{\mathrm{dfnb}}, C_{\mathrm{pldn}}, C_p, C_{\mathrm{regio}}, C_{\mathrm{bis}}, q)$
--- both $f_1$ and $f_2$ are computed from this one decomposition, rather
-than each objective exposing its own separate raw response (see
-\S\ref{sec:snar} for why).
 
 \subsection{GRI-Mech 3.0 rate-constant calibration}
 
-The design point is $x = (x_1, \ldots, x_{64}) \in [-1,1]^{64}$, one
-log$_2$-scale rate multiplier per selected reaction $r_1, \ldots, r_{64}$:
+\paragraph{Input $x$.} 64 log$_2$-scale rate multipliers, one per
+selected reaction $r_1, \ldots, r_{64}$ (\S\ref{sec:gri-mech}):
 \begin{align}
-k_{r_i}(x_i) = 2^{x_i}\, k_{r_i}^{(0)}, \qquad i = 1, \ldots, 64.
+x = (x_1, \ldots, x_{64}) \in [-1,1]^{64}, \qquad
+k_{r_i}(x_i) = 2^{x_i}\, k_{r_i}^{(0)}.
 \end{align}
-For each of 6 fixed conditions $c$ (initial temperature $T_{0,c}$,
-horizon $t_{\max,c}$), the raw response is a 4-point checkpointed
-temperature trajectory:
+
+\paragraph{Raw response $g(x)$.} For each of 6 fixed conditions $c$
+(initial temperature $T_{0,c}$, horizon $t_{\max,c}$), a 0D
+constant-pressure ignition run under rate constants $k(x)$ gives a
+4-point checkpointed temperature trajectory:
 \begin{align}
 g_c(x) = \big(T_c(x; t_{c,1}), \ldots, T_c(x; t_{c,4})\big),
-\qquad t_{c,j} = \tfrac{j}{4}\, t_{\max,c}.
+\qquad t_{c,j} = \tfrac{j}{4}\, t_{\max,c},
 \end{align}
-Ignition delay $\tau_c(x)$ is recovered by linear interpolation of
-$g_c(x)$ to the crossing $T_{0,c}+400$ (\S\ref{sec:gri-mech}). Writing
-$\mathcal{C}_{\mathrm{low}} = \{1000,1050,1100\}$~K,
+and $g(x) = (g_1(x), \ldots, g_6(x)) \in \mathbb{R}^{24}$.
+
+\paragraph{Known reduction $L(g)$ and objectives $f(x) = L(g(x))$.}
+Ignition delay $\tau_c(x)$ is recovered from $g_c(x)$ by linear
+interpolation to the crossing $T_{0,c}+400$ (\S\ref{sec:gri-mech}).
+Writing $\mathcal{C}_{\mathrm{low}} = \{1000,1050,1100\}$~K,
 $\mathcal{C}_{\mathrm{high}} = \{1300,1400,1500\}$~K, and
 $\tau_c^{\mathrm{target}}$ for the fixed \texttt{gri30\_highT.yaml}
 targets, we maximize
 \begin{align}
-f_{\mathrm{low}} = -\!\!\sum_{c \,\in\, \mathcal{C}_{\mathrm{low}}} \Big(\log \tfrac{\tau_c(x)}{\tau_c^{\mathrm{target}}}\Big)^{\!2}
-\end{align}
-and
-\begin{align}
-f_{\mathrm{high}} = -\!\!\sum_{c \,\in\, \mathcal{C}_{\mathrm{high}}} \Big(\log \tfrac{\tau_c(x)}{\tau_c^{\mathrm{target}}}\Big)^{\!2}.
+f_{\mathrm{low}}(x) = -\!\!\sum_{c \,\in\, \mathcal{C}_{\mathrm{low}}} \Big(\log \tfrac{\tau_c(x)}{\tau_c^{\mathrm{target}}}\Big)^{\!2},
+\qquad
+f_{\mathrm{high}}(x) = -\!\!\sum_{c \,\in\, \mathcal{C}_{\mathrm{high}}} \Big(\log \tfrac{\tau_c(x)}{\tau_c^{\mathrm{target}}}\Big)^{\!2}.
 \end{align}
 
 \bibliographystyle{plainnat}
