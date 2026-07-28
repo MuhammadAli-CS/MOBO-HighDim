@@ -2981,11 +2981,25 @@ ignite within budget) -- both directions behave exactly as the
 underlying chemistry predicts, and a random draw of independent
 per-reaction multipliers gives intermediate, non-degenerate errors in
 both objectives. The full pipeline was then run end to end through
-\texttt{morbo.run\_one\_replication.\allowbreak run\_one\_replication} for both
-the \texttt{morbo} label (direct 2-objective modeling; toy-scale 10-eval
-smoke test, wall time XXs) and \texttt{composite\_gri\_mech}
-(composite-GP modeling of the 24-dim raw response; wall time XXs) --
-XXX.
+\texttt{morbo.run\_one\_replication.\allowbreak run\_one\_replication} at a
+single seed of the real experiment config
+(\texttt{experiments/gri\_mech\_composite/config.json}, capped to 160
+evaluations -- 128 initial + one 32-point batch -- for this local timing
+check rather than the full 400) for both the \texttt{morbo} label (direct
+2-objective modeling, $346.5$~s, final hypervolume $2500.000$) and
+\texttt{composite\_gri\_mech} (composite-GP modeling of the 24-dim raw
+response, $3666.3$~s, final hypervolume $2500.000$) -- both complete
+successfully and reach the same hypervolume, as expected at $n=1$ seed
+(a pipeline check, not yet a real comparison, same caveat as
+\S\ref{sec:snar}'s SnAr check). Composite modeling took about
+$10.6\times$ longer per run here, a larger multiplier than SnAr's
+$2.3\times$ (6 raw outputs) -- consistent with fitting roughly 4$\times$
+as many independent single-output GPs per iteration (24 vs.\ 6). This
+cost is per-iteration model-refit overhead, not a hang or bug: local
+testing confirmed steady progress (increasing hypervolume) throughout,
+just at a real, measured, higher wall-clock cost -- expected to be
+substantially faster on the cluster's 32 CPUs (and available GPU) than
+this single-machine CPU-only timing check.
 
 \paragraph{Not yet added: shape-adapted trust regions.} Unlike
 \S\ref{sec:snar}'s SnAr benchmark, this experiment does not include
@@ -3000,9 +3014,48 @@ discussion) -- not re-run here until that bug is fixed. The cluster sweep
 run here (\texttt{cluster/submit\_gri\_mech\_2x1.sh}) is therefore a
 direct-vs-composite A/B only: 2 labels (\texttt{morbo},
 \texttt{composite\_gri\_mech}) $\times$ 5 seeds, 400 evaluations/trial,
-no SLURM time limit (composite mode's 48-output \texttt{ModelListGP} fit
+no SLURM time limit (composite mode's 24-output \texttt{ModelListGP} fit
 cost per iteration had not been measured at this scale before
 submission).
+
+\paragraph{Results.} All 10 jobs completed on the cluster without error
+(\texttt{morbo}: 7.5 min/seed; \texttt{composite\_gri\_mech}: 13 min/seed
+-- both far faster than this project's own single-machine CPU-only
+timing check above, consistent with cluster GPU acceleration of GP
+fitting). Both labels converge to the same final hypervolume to four
+decimal places (mean $2500.0000$, std $0.0000$ across 5 seeds, relative
+to \texttt{max\_reference\_point}$=[-50,-50]$) -- the two methods are
+empirically indistinguishable at this eval budget on this benchmark.
+Inspecting the raw per-condition log-ratio errors directly (not just
+hypervolume) confirms this is a genuine tie, not a plotting artifact:
+by the final evaluations both labels recover the exact calibration
+target to within $10^{-4}$--$10^{-6}$ log-ratio-squared error in both
+objectives, for every seed. This differs from every other composite
+result in this work (SnAr, Section~\ref{sec:snar}; Penicillin,
+Section~\ref{sec:penicillin}) -- both of which also showed no
+detectable HV difference at $n=1$--$5$ seeds, but for a different,
+already-suspected reason (a generous eval budget relative to problem
+difficulty lets any reasonable method converge before the budget runs
+out, leaving no headroom for composite modeling's efficiency advantage
+to show, discussed at length in \S\ref{sec:snar}'s own results
+paragraph and the SnAr plot analysis). Here that same generic budget
+effect is compounded by something specific to this benchmark's own
+construction: the calibration target is the \emph{exact}, exactly
+achievable value of the unmodified mechanism itself (all 64 multipliers
+$=1$, see this section's own "Targets" paragraph), so there is a single
+known global optimum with no genuine multimodality or competing local
+optima to distinguish a better-informed search strategy from a worse one
+-- 400 evaluations in 64D is evidently enough budget for TuRBO's local
+trust regions to find that optimum by either route. A harder version of
+this benchmark -- targets from a genuinely different mechanism (not
+recoverable exactly), or a substantially tighter eval budget -- would be
+needed to test whether composite modeling's per-iteration cost
+($10.6\times$ locally, per the Verification paragraph above) buys any
+compensating sample-efficiency advantage here; this is logged as a
+concrete follow-up rather than claimed as a finding, since the current
+result cannot distinguish "composite modeling doesn't help on this
+problem" from "this problem is too easy at this budget for either
+method to be distinguishable."
 
 \section{Discussion}
 
