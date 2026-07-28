@@ -79,16 +79,31 @@ different amounts -- see this module's own verification script, not
 committed, referenced in methods.tex).
 
 Targets: rather than depend on historical experimental shock-tube data
-(as GRI-Mech's own original calibration did), targets are the SAME
-checkpoint-based ignition-delay reduction applied ONCE to the unmodified,
-as-shipped GRI-Mech 3.0 mechanism (`TARGET_IGNITION_DELAYS` below) -- a
-standard "synthetic ground truth recovery" benchmark-construction
-convention (the real simulator, the real mechanism, and the real
-sensitivity-based reaction selection are all genuine; only the specific
-target values being matched are generated from the same real mechanism
-rather than from historical experiments). This keeps the benchmark
+(as GRI-Mech's own original calibration did) or on a trivially-recoverable
+synthetic target (an earlier version of this benchmark generated targets
+from GRI-Mech 3.0 itself with all 64 multipliers left at 1 -- exactly
+reachable by construction, which let both direct and composite modeling
+converge to the identical, essentially-exact optimum by 400 evaluations,
+making the two indistinguishable; see methods.tex's Results paragraph for
+that finding), targets here come from `gri30_highT.yaml` -- a genuinely
+different, independently-documented mechanism also shipped with Cantera:
+identical 325 reactions and rate constants to `gri30.yaml`, but with
+high-temperature-range NASA-9-derived thermodynamic polynomials added by
+Joseph Shepherd (Caltech) from McBride et al.'s NASA TM-4513, replacing
+`gri30.yaml`'s standard NASA-7 polynomials. Because this benchmark's 64
+design variables only perturb rate CONSTANTS (never thermodynamic data),
+no combination of them can exactly reproduce `gri30_highT.yaml`'s
+predictions -- the discrepancy is structural, not a numerical artifact,
+so a genuine residual error necessarily remains at the true optimum.
+Verified directly: evaluating unmodified `gri30.yaml` (all 64
+multipliers $=1$) against these targets gives nonzero, condition-dependent
+error (e.g.\ log-ratio-squared error $0.338$ at 1000~K vs.\ $9\times10^{-7}$
+at 1100~K -- the two mechanisms' thermo differences do not affect every
+condition equally), unlike the previous self-consistency check (which
+gave exactly zero by construction). This keeps the benchmark
 self-contained and reproducible without redistributing third-party
-experimental datasets.
+experimental datasets, while giving both labels a real optimization
+target neither can trivially solve.
 """
 from typing import Tuple
 
@@ -138,17 +153,19 @@ FUEL = "CH4"
 OXIDIZER = "O2:1.0, N2:3.76"
 
 # Ignition-delay targets (s), computed ONCE via this module's own
-# checkpoint-based reduction applied to the unmodified `gri30.yaml`
-# mechanism (multiplier = 1.0 for all 64 reactions) -- see module
-# docstring's "Targets" paragraph for why these are the target values
-# rather than historical experimental data.
+# checkpoint-based reduction applied to `gri30_highT.yaml`'s OWN
+# unperturbed prediction (no rate multipliers applied -- that mechanism
+# is only ever used to generate these fixed targets, never as the
+# search mechanism) -- see module docstring's "Targets" paragraph for
+# why a genuinely different mechanism is used instead of historical
+# experimental data or a trivially-recoverable self-target.
 TARGET_IGNITION_DELAYS = {
-    1000.0: 1.125788,
-    1050.0: 0.315814,
-    1100.0: 0.158438,
-    1300.0: 0.011382,
-    1400.0: 0.002605,
-    1500.0: 0.001297,
+    1000.0: 0.629352,
+    1050.0: 0.315682,
+    1100.0: 0.158286,
+    1300.0: 0.010010,
+    1400.0: 0.002600,
+    1500.0: 0.001259,
 }
 
 
