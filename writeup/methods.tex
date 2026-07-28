@@ -3083,9 +3083,34 @@ result cannot distinguish "composite modeling doesn't help on this
 problem" from "this problem is too easy at this budget for either
 method to be distinguishable." This motivated exactly the harder,
 \texttt{gri30\_highT.yaml}-based target revision described in the
-"Targets (revised)" paragraph above; a rerun with the new targets is
-submitted to the cluster and its own results paragraph will be added
-once complete.
+"Targets (revised)" paragraph above.
+
+\paragraph{Results (v2, gri30\_highT.yaml targets).} All 10 jobs again
+completed on the cluster without error (\texttt{morbo}: 7.5 min/seed;
+\texttt{composite\_gri\_mech}: 12.5 min/seed). With a genuinely
+non-recoverable target, the two labels are no longer indistinguishable:
+mean final hypervolume is $2499.9885$ (std $0.0148$) for
+\texttt{composite\_gri\_mech} versus $2499.9693$ (std $0.0255$) for
+\texttt{morbo} (relative to the same
+\texttt{max\_reference\_point}$=[-50,-50]$) -- composite modeling wins on
+\emph{every} seed (paired difference positive $5/5$ times, mean
+$+0.019$, range $+0.002$ to $+0.038$), a paired $t$-test on the 5 paired
+final hypervolumes gives $p=0.040$, and the two curves visibly separate
+from roughly evaluation 200 onward with mostly non-overlapping
+$\pm$SEM bands (\texttt{experiments/gri\_mech\_composite/
+comparison\_aggregate.png}). The Wilcoxon signed-rank test on the same 5
+pairs gives $p=0.0625$ -- just above the conventional 0.05 threshold,
+expected given the test's limited power at $n=5$ (the smallest possible
+non-trivial two-sided Wilcoxon $p$-value at $n=5$ is exactly $0.0625$,
+achieved here since the sign is unanimous) rather than evidence against
+the effect. This is the first result in this project's chemistry
+composite benchmarks (SnAr, v1 GRI-Mech) where composite modeling shows
+a measurable, consistent advantage over direct modeling, and it required
+exactly the design change the v1 discussion called for: a target that
+cannot be driven to exactly zero error, preserving genuine optimization
+difficulty (and therefore headroom for a better-informed surrogate to
+matter) all the way to the eval budget's end, rather than saturating
+before it.
 
 \section{Discussion}
 
