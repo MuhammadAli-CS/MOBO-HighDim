@@ -2134,7 +2134,7 @@ SELTO \citep{dittmer2022selto,erzmann2023dl4to} & $\sim$$10^5$ & 2 (compliance, 
 Airfoil CFD / UniFoil & $\sim$4--5 & 2 (lift, drag) & Real, composite, but low-dimensional \\
 Battery microstructure \citep{kench2024battery} & 7 & 1 (energy density) & Real, composite, but low-dimensional \\
 Battery pouch cell \citep{ma2024battery} & 4--5 & 4 (energy, charge, life) & Real, partial composite, low-dimensional \\
-LensAI / Optiland \citep{kramer2020lensai,kramer2020optiland} & 5--20 & 2 (spot size, aberration) & Composite but cheap (ray tracing) \\
+LensAI / Optiland \citep{kramer2024lensai,kramer2024optiland} & 5--20 & 2 (spot size, aberration) & Composite but cheap (ray tracing) \\
 EvoXBench \citep{lu2023evoxbench} & discrete & 2 (accuracy, latency) & Real but tabular lookup, not expensive \\
 HPOBench \citep{eggensperger2021hpobench} & $\le$20 & 2 (accuracy, time) & Real but tabular lookup, not expensive \\
 MosPro \citep{luo2025mospro} & $\sim$238 & 2 (fluorescence, stability) & Weak composite (predictor score only) \\
@@ -2359,7 +2359,7 @@ UniFoil & $\sim$4--5 latent dims & yes & yes (RANS) \\
 IDAES process flowsheets & 5--50 (flexible) & yes (per-unit stream states) & yes (equation-oriented NLP) \\
 Battery microstructure \citep{kench2024battery} & 7 & yes & yes \\
 Battery pouch cell \citep{ma2024battery} & 4--5 & partial & yes \\
-LensAI / Optiland \citep{kramer2020lensai,kramer2020optiland} & 5--20 & yes (ray-traced fields) & no (ray tracing is cheap) \\
+LensAI / Optiland \citep{kramer2024lensai,kramer2024optiland} & 5--20 & yes (ray-traced fields) & no (ray tracing is cheap) \\
 EvoXBench \citep{lu2023evoxbench} & discrete arch.\ space & partial (learning curves) & no (tabular lookup) \\
 HPOBench \citep{eggensperger2021hpobench} & $\le$20 & partial (learning curves) & no (tabular lookup) \\
 MosPro \citep{luo2025mospro} & $\sim$238 (sequence) & weak (predictor score only) & no (ML inference) \\
@@ -2532,7 +2532,7 @@ non-PyBaMM battery papers \citep{kench2024battery,ma2024battery} are
 genuinely composite and real but low-dimensional (4--7 design variables)
 despite expensive simulators -- the dimensionality trap this survey was
 specifically checking for. LensAI/Optiland
-\citep{kramer2020lensai,kramer2020optiland} is composite but cheap (ray
+\citep{kramer2024lensai,kramer2024optiland} is composite but cheap (ray
 tracing, not full CFD/FEA) for the same reason XFOIL was deprioritized in
 Section~\ref{sec:tr-shape-future}'s earlier discussion -- and a second
 citation-accuracy note: both LensAI and Optiland are maintained by
@@ -2937,242 +2937,242 @@ structure, so the two findings are not in direct tension.
 \bibliographystyle{plainnat}
 \begin{thebibliography}{9}
 
-\bibitem{daulton2022morbo}
+\bibitem[Daulton et al.(2022)]{daulton2022morbo}
 S. Daulton, D. Eriksson, M. Balandat, and E. Bakshy.
 \newblock Multi-Objective Bayesian Optimization over High-Dimensional Search Spaces.
 \newblock \emph{Uncertainty in Artificial Intelligence (UAI)}, 2022.
 
-\bibitem{eriksson2019turbo}
+\bibitem[Eriksson et al.(2019)]{eriksson2019turbo}
 D. Eriksson, M. Pearce, J. Gardner, R. D. Turner, and M. Poloczek.
 \newblock Scalable Global Optimization via Local Bayesian Optimization.
 \newblock \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2019.
 
-\bibitem{wang2026assmea}
+\bibitem[Wang et al.(2026)]{wang2026assmea}
 Y. Wang, et al.
 \newblock Surrogate-assisted evolutionary algorithm with adaptive local region search.
 \newblock \emph{Swarm and Evolutionary Computation}, 2026.
 
-\bibitem{visser2023labcat}
+\bibitem[Visser et al.(2023)]{visser2023labcat}
 E. Visser, C. van Daalen, and J. Schoeman.
 \newblock LABCAT: Locally adaptive Bayesian optimization using principal-component-aligned trust regions.
 \newblock \emph{arXiv:2311.11328}, 2023.
 
-\bibitem{hansen2021coco}
+\bibitem[Hansen et al.(2021)]{hansen2021coco}
 N. Hansen, A. Auger, R. Ros, O. Mersmann, T. Tu\v{s}ar, and D. Brockhoff.
 \newblock COCO: A platform for comparing continuous optimizers in a black-box setting.
 \newblock \emph{Optimization Methods and Software}, 36:114--144, 2021.
 
-\bibitem{tusar2016bbobbiobj}
+\bibitem[Tu\v{s}ar et al.(2016)]{tusar2016bbobbiobj}
 T. Tu\v{s}ar, D. Brockhoff, N. Hansen, and A. Auger.
 \newblock COCO: The bi-objective black box optimization benchmarking (bbob-biobj) test suite.
 \newblock \emph{arXiv:1604.00359}, 2016.
 
-\bibitem{ngo2024cmabo}
+\bibitem[Ngo et al.(2024)]{ngo2024cmabo}
 D. Ngo, B. Ha, T. Chan, B. Nguyen, and M. Zhang.
 \newblock High-dimensional Bayesian optimization via covariance matrix adaptation strategy.
 \newblock \emph{Transactions on Machine Learning Research (TMLR)}, 2024.
 
-\bibitem{doumont2026linearbo}
+\bibitem[Doumont et al.(2026)]{doumont2026linearbo}
 N. Doumont, et al.
 \newblock We Still Don't Understand High-Dimensional Bayesian Optimization.
 \newblock \emph{International Conference on Artificial Intelligence and Statistics (AISTATS)}, 2026.
 
-\bibitem{garivier2011ducb}
+\bibitem[Garivier and Moulines(2011)]{garivier2011ducb}
 A. Garivier and E. Moulines.
 \newblock On Upper-Confidence Bound Policies for Switching Bandit Problems.
 \newblock \emph{Algorithmic Learning Theory (ALT)}, 2011.
 
-\bibitem{sehic2022lassobench}
+\bibitem[\v{S}ehi\'{c} et al.(2022)]{sehic2022lassobench}
 K. \v{S}ehi\'c, A. Gramfort, J. Salmon, and L. Nardi.
 \newblock LassoBench: A High-Dimensional Hyperparameter Optimization Benchmark Suite for Lasso.
 \newblock \emph{AutoML Conference}, 2022.
 
-\bibitem{hvarfner2024vanilla}
+\bibitem[Hvarfner et al.(2024)]{hvarfner2024vanilla}
 C. Hvarfner, E. O. Hellsten, and L. Nardi.
 \newblock Vanilla Bayesian Optimization Performs Great in High Dimensions.
 \newblock \emph{International Conference on Machine Learning (ICML)}, 2024.
 
-\bibitem{astudillo2019composite}
+\bibitem[Astudillo and Frazier(2019)]{astudillo2019composite}
 R. Astudillo and P. Frazier.
 \newblock Bayesian Optimization of Composite Functions.
 \newblock \emph{International Conference on Machine Learning (ICML)}, 2019.
 
-\bibitem{botier2025}
+\bibitem[Haddadnia et al.(2025)]{botier2025}
 S. Haddadnia, J. Grashoff, and F. Strieth-Kalthoff.
 \newblock BoTier: Multi-Objective Bayesian Optimization with Tiered Composite Objectives.
 \newblock \emph{arXiv:2501.15554}, 2025.
 
-\bibitem{deb2002dtlz}
+\bibitem[Deb et al.(2002)]{deb2002dtlz}
 K. Deb, L. Thiele, M. Laumanns, and E. Zitzler.
 \newblock Scalable Multi-Objective Optimization Test Problems.
 \newblock \emph{Congress on Evolutionary Computation (CEC)}, 2002.
 
-\bibitem{maddox2021hogp}
+\bibitem[Maddox et al.(2021)]{maddox2021hogp}
 W. J. Maddox, Q. Feng, and M. Balandat.
 \newblock Optimizing High-Dimensional Physics Simulations via Composite Bayesian Optimization.
 \newblock \emph{Fourth Workshop on Machine Learning and the Physical Sciences, NeurIPS}, 2021.
 
-\bibitem{zhe2019hogp}
+\bibitem[Zhe et al.(2019)]{zhe2019hogp}
 S. Zhe, W. Xing, and R. M. Kirby.
 \newblock Scalable High-Order Gaussian Process Regression.
 \newblock \emph{22nd International Conference on Artificial Intelligence and Statistics (AISTATS)}, pages 2611--2620, 2019.
 
-\bibitem{bonilla2007mtgp}
+\bibitem[Bonilla et al.(2007)]{bonilla2007mtgp}
 E. V. Bonilla, K. M. Chai, and C. Williams.
 \newblock Multi-task Gaussian Process Prediction.
 \newblock \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2007.
 
-\bibitem{trustaware2026}
+\bibitem[Zhou et al.(2026)]{trustaware2026}
 Y. Zhou, X. Wang, J. Gu, and Y. Tan.
 \newblock Trust-Aware LLM-Assisted Bayesian Optimization.
 \newblock \emph{Integration, the VLSI Journal}, 2026.
 
-\bibitem{autolead2025}
+\bibitem[Zhang et al.(2025)]{autolead2025}
 H. Zhang, K. K. Choong, and S. Ozawa.
 \newblock AutoLead: LLM-Guided Bayesian Optimization for Multi-Objective Lead Optimization.
 \newblock \emph{bioRxiv 2025.08.19.671029}, 2025.
 
-\bibitem{liang2021penicillin}
+\bibitem[Liang and Lai(2021)]{liang2021penicillin}
 Q. Liang and L. Lai.
 \newblock Penicillin fed-batch fermentation simulator.
 \newblock NeurIPS 2021 Workshop; implementation: \url{https://github.com/HarryQL/TuRBO-Penicillin}.
 
-\bibitem{kumar2021rwcmop}
+\bibitem[Kumar et al.(2021)]{kumar2021rwcmop}
 A. Kumar, G. Wu, M. Z. Ali, R. Mallipeddi, P. N. Suganthan, and S. Das.
 \newblock A Benchmark-Suite of Real-World Constrained Multi-Objective Optimization Problems and Some Baseline Results.
 \newblock \emph{Swarm and Evolutionary Computation}, 2021; suite: \url{https://github.com/P-N-Suganthan/2021-RW-MOP}.
 
-\bibitem{biswas2020opf}
+\bibitem[Biswas et al.(2020)]{biswas2020opf}
 P. P. Biswas, P. N. Suganthan, R. Mallipeddi, and G. A. J. Amaratunga.
 \newblock Multi-objective optimal power flow solutions using a constraint handling technique of evolutionary algorithms.
 \newblock \emph{Soft Computing}, 24 (2020) 2999--3023.
 
-\bibitem{sulzer2021pybamm}
+\bibitem[Sulzer et al.(2021)]{sulzer2021pybamm}
 V. Sulzer, S. G. Marquis, R. Timms, M. Robinson, and S. J. Chapman.
 \newblock Python Battery Mathematical Modelling (PyBaMM).
 \newblock \emph{Journal of Open Research Software}, 9(1), 2021; \url{https://github.com/pybamm-team/PyBaMM}.
 
-\bibitem{chanussot2021oc20}
+\bibitem[Chanussot et al.(2021)]{chanussot2021oc20}
 L. Chanussot, A. Das, S. Goyal, T. Lavril, M. Shuaibi, M. Riviere, K. Tran, J. Heras-Domingo, C. Ho, W. Hu, A. Palizhati, A. Sriram, B. Wood, J. Yoon, D. Parikh, C. L. Zitnick, and Z. Ulissi.
 \newblock Open Catalyst 2020 (OC20) Dataset and Community Challenges.
 \newblock \emph{ACS Catalysis}, 11(10), 2021; \url{https://opencatalystproject.org}.
 
-\bibitem{tran2022oc22}
+\bibitem[Tran et al.(2022)]{tran2022oc22}
 R. Tran, J. Lan, M. Shuaibi, S. Goyal, B. M. Wood, A. Das, J. Heras-Domingo, A. Kolluru, A. Rizvi, N. Shoghi, A. Sriram, Z. Ulissi, and C. L. Zitnick.
 \newblock The Open Catalyst 2022 (OC22) Dataset and Challenges for Oxide Electrocatalysts.
 \newblock \emph{arXiv:2206.08917}, 2022.
 
-\bibitem{maze2023topodiff}
+\bibitem[Maz\'e and Ahmed(2023)]{maze2023topodiff}
 F. Maz\'e and F. Ahmed.
 \newblock Diffusion Models Beat GANs on Topology Optimization.
 \newblock \emph{AAAI Conference on Artificial Intelligence}, 2023; dataset: \url{https://decode.mit.edu/projects/topodiff/}.
 
-\bibitem{dittmer2022selto}
+\bibitem[Dittmer et al.(2022)]{dittmer2022selto}
 S. Dittmer, D. Erzmann, H. Harms, and R. Vieth.
 \newblock SELTO: Sample-Efficient Learned Topology Optimization.
 \newblock \emph{arXiv:2209.05098}, 2022; dataset DOI: 10.5281/zenodo.7781392; code: \url{https://github.com/dl4to/dl4to}.
 
-\bibitem{lee2021idaes}
+\bibitem[Lee et al.(2021)]{lee2021idaes}
 A. Lee, J. H. Ghouse, J. C. Eslick, C. D. Laird, J. D. Siirola, M. A. Zamarripa, D. Gunter, J. H. Shinn, A. W. Dowling, D. Bhattacharyya, L. T. Biegler, D. C. Miller.
 \newblock The IDAES Process Modeling Framework and Model Library -- Flexibility for Process Simulation and Optimization.
 \newblock \emph{Journal of Advanced Manufacturing and Processing}, 3(3), 2021; code: \url{https://github.com/IDAES/idaes-pse}.
 
-\bibitem{kench2024battery}
+\bibitem[Kench et al.(2024)]{kench2024battery}
 S. Kench, I. Squires, A. Dahari, F. Brosa Planella, S. A. Roberts, and S. J. Cooper.
 \newblock Li-ion battery design through microstructural optimization using generative AI.
 \newblock \emph{Matter}, 2024.
 
-\bibitem{ma2024battery}
+\bibitem[Ma et al.(2024)]{ma2024battery}
 Y. Ma, et al.
 \newblock Multi-objective optimization of lithium-ion battery designs considering the dilemma between energy density and rate capability.
 \newblock \emph{Energy and AI}, 17, 100393, 2024.
 
-\bibitem{lu2023evoxbench}
+\bibitem[Lu et al.(2023)]{lu2023evoxbench}
 Z. Lu, R. Cheng, Y. Jin, K. C. Tan, and K. Deb.
 \newblock Neural Architecture Search as Multiobjective Optimization Benchmarks: Problem Formulation and Performance Assessment.
 \newblock \emph{IEEE Transactions on Evolutionary Computation}, 2023; code: \url{https://github.com/EMI-Group/evoxbench}.
 
-\bibitem{eggensperger2021hpobench}
+\bibitem[Eggensperger et al.(2021)]{eggensperger2021hpobench}
 K. Eggensperger, P. M\"uller, N. Mallik, M. Feurer, R. Sass, A. Klein, N. Awad, M. Lindauer, and F. Hutter.
 \newblock HPOBench: A Collection of Reproducible Multi-Fidelity Benchmark Problems for HPO.
 \newblock \emph{NeurIPS Datasets and Benchmarks Track}, 2021; code: \url{https://github.com/automl/HPOBench}.
 
-\bibitem{luo2025mospro}
+\bibitem[Luo et al.(2025)]{luo2025mospro}
 J. Luo, K. Ding, and Y. Luo.
 \newblock Pareto-optimal sampling for multi-objective protein sequence design.
 \newblock \emph{iScience}, 28, 112119, 2025; code: \url{https://github.com/luo-group/MosPro}.
 
-\bibitem{jha2018materials}
+\bibitem[Jha et al.(2018)]{jha2018materials}
 A. Jha, et al.
 \newblock Multi-objective Optimization for Materials Discovery via Adaptive Design.
 \newblock \emph{Scientific Reports}, 8, 4129, 2018.
 
-\bibitem{kramer2020lensai}
+\bibitem[Kramer(2024)]{kramer2024lensai}
 H. Kramer.
 \newblock LensAI: Integrated Machine and Deep Learning for Optical Design.
-\newblock GitHub repository; \url{https://github.com/HarrisonKramer/LensAI}.
+\newblock GitHub repository, 2024; \url{https://github.com/HarrisonKramer/LensAI}.
 
-\bibitem{kramer2020optiland}
+\bibitem[Kramer(2024)]{kramer2024optiland}
 H. Kramer.
 \newblock Optiland: optical design, optimization, and analysis in Python.
-\newblock GitHub repository; \url{https://github.com/HarrisonKramer/optiland}.
+\newblock GitHub repository, 2024; \url{https://github.com/HarrisonKramer/optiland}.
 
-\bibitem{ramakrishnan2014qm9}
+\bibitem[Ramakrishnan et al.(2014)]{ramakrishnan2014qm9}
 R. Ramakrishnan, P. O. Dral, M. Rupp, and O. A. von Lilienfeld.
 \newblock Quantum chemistry structures and properties of 134 kilo molecules.
 \newblock \emph{Scientific Data}, 1, 140022, 2014.
 
-\bibitem{dunn2020matbench}
+\bibitem[Dunn et al.(2020)]{dunn2020matbench}
 A. Dunn, Q. Wang, A. Ganose, D. Dopp, and A. Jain.
 \newblock Benchmarking materials property prediction methods: the Matbench test set and Automatminer reference algorithm.
 \newblock \emph{npj Computational Materials}, 6, 138, 2020; \url{https://github.com/materialsproject/matbench}.
 
-\bibitem{jain2013materialsproject}
+\bibitem[Jain et al.(2013)]{jain2013materialsproject}
 A. Jain, S. P. Ong, G. Hautier, W. Chen, W. D. Richards, S. Dacek, S. Cholia, D. Gunter, D. Skinner, G. Ceder, and K. A. Persson.
 \newblock Commentary: The Materials Project: A materials genome approach to accelerating materials innovation.
 \newblock \emph{APL Materials}, 1(1), 011002, 2013; \url{https://materialsproject.org}.
 
-\bibitem{jumper2021alphafold}
+\bibitem[Jumper et al.(2021)]{jumper2021alphafold}
 J. Jumper, R. Evans, A. Pritzel, T. Green, M. Figurnov, O. Ronneberger, et al.
 \newblock Highly accurate protein structure prediction with AlphaFold.
 \newblock \emph{Nature}, 596, 583--589, 2021.
 
-\bibitem{andreassen2011topopt88}
+\bibitem[Andreassen et al.(2011)]{andreassen2011topopt88}
 E. Andreassen, A. Clausen, M. Schevenels, B. S. Lazarov, and O. Sigmund.
 \newblock Efficient topology optimization in MATLAB using 88 lines of code.
 \newblock \emph{Structural and Multidisciplinary Optimization}, 43(1), 1--16, 2011.
 
-\bibitem{erzmann2023dl4to}
+\bibitem[Erzmann et al.(2023)]{erzmann2023dl4to}
 D. Erzmann, S. Dittmer, H. Harms, and P. Maa\ss.
 \newblock DL4TO: A Deep Learning Library for Sample-Efficient Topology Optimization.
 \newblock \emph{Geometric Science of Information (GSI)}, 2023; code: \url{https://github.com/dl4to/dl4to}.
 
-\bibitem{nobari2025openTO}
+\bibitem[Heyrani Nobari et al.(2025)]{nobari2025openTO}
 A. Heyrani Nobari, L. Regenwetter, C. Picard, L. Han, and F. Ahmed.
 \newblock Optimize Any Topology: A Foundation Model for Shape- and Resolution-Free Structural Topology Optimization.
 \newblock \emph{NeurIPS}, 2025; \emph{arXiv:2510.23667}; code: \url{https://github.com/ahnobari/OptimizeAnyTopology}.
 
-\bibitem{felton2021summit}
+\bibitem[Felton et al.(2021)]{felton2021summit}
 K. C. Felton, J. G. Rittig, and A. A. Lapkin.
 \newblock Summit: Benchmarking Machine Learning Methods for Reaction Optimisation.
 \newblock \emph{Chemistry-Methods}, 2021; code: \url{https://github.com/sustainable-processes/summit}.
 
-\bibitem{hone2017snar}
+\bibitem[Hone et al.(2017)]{hone2017snar}
 C. A. Hone, N. Holmes, G. R. Akien, R. A. Bourne, and F. L. Muller.
 \newblock Rapid multistep kinetic model generation from transient flow data.
 \newblock \emph{React. Chem. Eng.}, 2017, 2, 103--108; DOI: \url{https://doi.org/10.1039/C6RE00109B}.
 
-\bibitem{goodwin2024cantera}
+\bibitem[Goodwin et al.(2024)]{goodwin2024cantera}
 D. G. Goodwin, H. K. Moffat, I. Schoegl, R. L. Speth, and B. W. Weber.
 \newblock Cantera: An Object-oriented Software Toolkit for Chemical Kinetics, Thermodynamics, and Transport Processes.
 \newblock Version 3.1.0, 2024; \url{https://www.cantera.org}.
 
-\bibitem{cortespena2020biosteam}
+\bibitem[Cort\'es-Pe\~na et al.(2020)]{cortespena2020biosteam}
 Y. R. Cort\'es-Pe\~na, D. Kumar, V. Singh, and J. S. Guest.
 \newblock BioSTEAM: A Fast and Flexible Platform for the Design, Simulation, and Techno-Economic Analysis of Biorefineries Under Uncertainty.
 \newblock \emph{ACS Sustainable Chemistry \& Engineering}, 8, 3302--3310, 2020; code: \url{https://github.com/BioSTEAMDevelopmentGroup/biosteam}.
 
-\bibitem{rajaonson2025chemixhub}
+\bibitem[Rajaonson et al.(2025)]{rajaonson2025chemixhub}
 E. M. Rajaonson, M. R. Kochi, L. M. Mejia Mendoza, S. M. Moosavi, and B. Sanchez-Lengeling.
 \newblock CheMixHub: Datasets and Benchmarks for Chemical Mixture Property Prediction.
 \newblock \emph{NeurIPS Datasets and Benchmarks Track}, 2025; \emph{arXiv:2506.12231}; code: \url{https://github.com/chemcognition-lab/chemixhub}.
