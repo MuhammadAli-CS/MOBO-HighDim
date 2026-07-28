@@ -2956,6 +2956,56 @@ uniform multiplier shift moves every condition's ignition delay together,
 but per-reaction perturbations shift the two groups by different,
 non-proportional amounts.
 
+\paragraph{Formal definitions.} Writing $x = (x_1, \ldots, x_{64}) \in
+[-1,1]^{64}$ for the design point and $r_1, \ldots, r_{64}$ for the
+indices in \texttt{TOP\_REACTION\_INDICES}, each selected reaction's
+Arrhenius pre-exponential factor is scaled multiplicatively in
+log$_2$-space,
+\begin{align}
+k_{r_i}(x_i) &= 2^{x_i}\, k_{r_i}^{(0)}, \qquad i = 1, \ldots, 64,
+\end{align}
+where $k_{r_i}^{(0)}$ is that reaction's as-shipped GRI-Mech 3.0 rate
+constant and every non-selected reaction is left at $k_j^{(0)}$
+unchanged. For condition $c \in \{1,\ldots,6\}$ with initial temperature
+$T_{0,c}$ and integration horizon $t_{\max,c}$
+(\texttt{MAX\_TIME}), the raw response is the checkpointed temperature
+trajectory
+\begin{align}
+g_c(x) &= \big(T_c(x; t_{c,1}), \ldots, T_c(x; t_{c,4})\big), \qquad
+t_{c,j} = \frac{j}{4}\, t_{\max,c},
+\end{align}
+where $T_c(x; t)$ is the 0D constant-pressure reactor's temperature at
+time $t$ under rate constants $k(x)$, and $g(x) = (g_1(x), \ldots,
+g_6(x)) \in \mathbb{R}^{24}$. The known reduction recovers an
+ignition-delay estimate per condition by linearly interpolating $g_c(x)$
+(prepending the initial condition $t_{c,0}=0,\ T_c(x;0) = T_{0,c}$) to
+the first crossing of the threshold $T_{0,c} + 400$:
+\begin{align}
+j^*_c(x) &= \min\{\, j : T_c(x; t_{c,j}) \ge T_{0,c} + 400 \,\}, \\
+\tau_c(x) &= t_{c,\,j^*_c-1} + \frac{(T_{0,c}+400) - T_c(x; t_{c,j^*_c-1})}
+{T_c(x; t_{c,j^*_c}) - T_c(x; t_{c,j^*_c-1})}
+\Big(t_{c,j^*_c} - t_{c,j^*_c-1}\Big),
+\end{align}
+saturating to $\tau_c(x) = t_{\max,c}$ if no checkpoint reaches the
+threshold (i.e.\ $j^*_c$ undefined, or $j^*_c = 0$). Writing
+$\mathcal{C}_{\mathrm{low}} = \{1000, 1050, 1100\}$~K and
+$\mathcal{C}_{\mathrm{high}} = \{1300, 1400, 1500\}$~K for the two
+condition groups and $\tau_c^{\mathrm{target}}$ for the fixed targets
+(\texttt{TARGET\_IGNITION\_DELAYS}), the two objectives (both
+maximized) are
+\begin{align}
+f_{\mathrm{low}}(x) &= -\!\!\sum_{c \,\in\, \mathcal{C}_{\mathrm{low}}}
+\Big(\log \tfrac{\tau_c(x)}{\tau_c^{\mathrm{target}}}\Big)^{\!2},
+\qquad
+f_{\mathrm{high}}(x) = -\!\!\sum_{c \,\in\, \mathcal{C}_{\mathrm{high}}}
+\Big(\log \tfrac{\tau_c(x)}{\tau_c^{\mathrm{target}}}\Big)^{\!2}.
+\end{align}
+The direct evalfn (\texttt{"GriMechCalib"}) models
+$\big(f_{\mathrm{low}}(x), f_{\mathrm{high}}(x)\big) \in \mathbb{R}^2$
+directly; the composite evalfn (\texttt{"CompositeGriMechCalib"}) models
+the 24-dim $g(x)$ and applies the same $f_{\mathrm{low}}, f_{\mathrm{high}}$
+formulas above as the known reduction $L(g)$.
+
 \paragraph{Targets (revised).} An earlier version of this benchmark
 generated targets by applying this benchmark's own checkpoint-based
 reduction, once, to the \emph{unmodified} as-shipped GRI-Mech 3.0
