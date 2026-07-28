@@ -2602,7 +2602,7 @@ Candidate & Dim.\ & Objectives & Status \\
 PyBaMM battery aging \citep{sulzer2021pybamm} & $\sim$28 & 2--3 (energy, retention, temp.) & Strongest confirmed; installed \& run (\S\ref{sec:pybamm}) \\
 OC20/OC22 catalysis \citep{chanussot2021oc20,tran2022oc22} & high (atom coords.) & 2 (energy, stability) & Fixed dataset; live proxy via fairchem (\S\ref{sec:oc20}) \\
 IDAES process flowsheets \citep{lee2021idaes} & 5--50 & 2 (yield, cost) & Real \& open; not yet run ourselves (\S\ref{sec:idaes}) \\
-Summit SnAr reactor \citep{felton2021summit} & 4 & 2 (space-time yield, E-factor) & Real, composite via outlet species; not yet run ourselves \\
+Summit SnAr reactor \citep{felton2021summit} & 4 & 2 (space-time yield, E-factor) & \textbf{Implemented \& run through the real engine} (\S\ref{sec:snar}) \\
 Cantera combustor \citep{goodwin2024cantera} & 5 & 2 (efficiency/heat, emissions) & Real, composite via species/temperature; not yet run ourselves \\
 BioSTEAM biorefinery \citep{cortespena2020biosteam} & 6--15 & 2 (cost, GWP/energy/yield) & Real, composite via streams/costs; not yet run ourselves \\
 Battery microstructure \citep{kench2024battery} & 7 & 1 (energy density) & Real, composite, but low-dimensional \\
@@ -2614,9 +2614,235 @@ CheMixHub \citep{rajaonson2025chemixhub} & 2 (grid) & 2 (conductivity, viscosity
 \end{tabularx}
 \end{table}
 
-None of the three newly-added candidates (Summit, Cantera, BioSTEAM) has
-been installed and run by us yet -- same honest-caveat standard as
-IDAES (\S\ref{sec:idaes}) and OpenTO (\S\ref{sec:topodiff-selto}) above.
+Of the three newly-added candidates, Cantera and BioSTEAM have not been
+installed and run by us yet -- same honest-caveat standard as IDAES
+(\S\ref{sec:idaes}) and OpenTO (\S\ref{sec:topodiff-selto}) above.
+Summit's SnAr reactor has since been implemented and run through this
+project's actual MORBO engine, described next.
+
+\subsubsection{Implemented: composite SnAr plug-flow reactor}
+\label{sec:snar}
+
+Following the same "fork the real simulator's state, expose it as
+$g(x)$, apply the known reduction $L(g)$ separately" pattern already
+used for Penicillin (\S\ref{sec:pybamm}'s composite counterpart,
+\texttt{morbo/\allowbreak problems/\allowbreak composite\_penicillin.py}), the SnAr benchmark's
+kinetic model and STY/E-factor reduction were ported into
+\texttt{morbo/\allowbreak problems/\allowbreak composite\_snar.py} and wired into
+\texttt{morbo/\allowbreak run\_one\_replication.py} as a new \texttt{evalfn}
+(\texttt{"CompositeSnAr"}), rather than depending on the \texttt{summit}
+PyPI package directly.
+
+\paragraph{Why not depend on \texttt{summit} directly.} \texttt{pip
+install summit} (version 0.8.4, the latest on PyPI as of 2026-07-28)
+fails during the build of one of its pinned dependencies,
+\texttt{scikit-learn<0.25.0,>=0.24.1}: that sdist's build backend calls
+\texttt{pkg\_resources}, which modern \texttt{setuptools} no longer
+ships by default, so the wheel build step errors out
+(\texttt{ModuleNotFoundError: No module named 'pkg\_resources'}) before
+\texttt{summit} itself is ever imported. Rather than fighting an
+unrelated dependency's abandoned pin, the \texttt{summit-0.8.4-py3-none-any.whl}
+was downloaded directly (\texttt{pip download summit --no-deps}) and
+\texttt{summit/benchmarks/snar.py} (the \texttt{SnarBenchmark} class)
+extracted from it without installing the package, matching how
+\S\ref{sec:pybamm}'s Penicillin fork already treats an upstream
+simulator's source as the ground truth to port from, not a package to
+depend on transitively.
+
+\paragraph{Kinetic model.} The reaction is a nucleophilic aromatic
+substitution (SnAr) of 2,4-dinitrofluorobenzene (species 0) with
+pyrrolidine (species 1) in a plug-flow reactor, run to a competing
+side reaction; the kinetics are those measured by
+\citet{hone2017snar}. Four design variables (Summit's own bounds):
+residence time $\tau \in [0.5, 2]$ min, pyrrolidine equivalents
+$e \in [1.0, 5.0]$, inlet 2,4-dinitrofluorobenzene concentration
+$c \in [0.1, 0.5]$ M, and reactor temperature $T \in [30, 120]^\circ$C.
+Initial concentrations $C_0 = (c,\, ec,\, 0, 0, 0)$ are integrated
+forward over $t \in [0, \tau]$ by
+\begin{align*}
+\dot C_0 &= -(k_a+k_b) C_0 C_1, \\
+\dot C_1 &= -(k_a+k_b) C_0 C_1 - k_c C_1 C_2 - k_d C_1 C_3, \\
+\dot C_2 &= k_a C_0 C_1 - k_c C_1 C_2, \\
+\dot C_3 &= k_a C_0 C_1 - k_d C_1 C_3, \\
+\dot C_4 &= k_c C_1 C_2 + k_d C_1 C_3,
+\end{align*}
+where $C_2$ is the desired product, $C_3$ an undesired regioisomer,
+$C_4$ a bis-alkylation side product, and the temperature-dependent
+rate constants follow an Arrhenius form
+$k(k_{\mathrm{ref}}, E_a, T) = 0.6\, k_{\mathrm{ref}}
+\exp\!\big(-\tfrac{E_a}{R}(\tfrac{1}{T+273.71} - \tfrac{1}{T_{\mathrm{ref}}})\big)$
+with $T_{\mathrm{ref}} = 90 + 273.71$ K, $R = 8.314\times10^{-3}$
+kJ/(K$\cdot$mol), and $(k_{\mathrm{ref}}, E_a)$ pairs
+$(57.9, 33.3)$, $(2.70, 35.3)$, $(0.865, 38.9)$, $(1.63, 44.8)$ for
+$k_a, k_b, k_c, k_d$ respectively.
+
+\paragraph{Derivation: why an ODE over $[0,\tau]$ models a plug-flow
+reactor, not a batch reactor.} The reactor is a continuous plug-flow
+reactor (PFR), not a batch vessel, so it may look surprising that the
+raw response is computed by integrating an ODE over a time interval
+$[0, \tau]$ as if it \emph{were} a batch reactor. This is the standard
+PFR/batch equivalence: for an ideal PFR at steady state (constant
+cross-section $A$, constant volumetric flow $q_{\mathrm{tot}}$, no
+axial dispersion), the steady-state species balance over an axial
+slice $dz$ is
+\[
+q_{\mathrm{tot}} \frac{dC_i}{dz} = A\, r_i(C, T), \qquad z \in [0, L],
+\]
+i.e.\ $A\, dz$ is the differential reactor volume the fluid element
+occupies. Substituting the space-time coordinate $t = zA/q_{\mathrm{tot}}$
+(the time since a fluid element entered the reactor, given constant
+flow) turns this into
+\[
+\frac{dC_i}{dt} = r_i(C, T), \qquad t \in [0, \tau], \qquad
+\tau = \frac{V}{q_{\mathrm{tot}}} = \frac{LA}{q_{\mathrm{tot}}},
+\]
+exactly the batch-reactor ODE integrated above, with $\tau$ the total
+residence time. This is the textbook statement that, under the ideal
+plug-flow assumption, \emph{every fluid element's composition history
+is identical to a batch reactor run for exactly $\tau$} -- the reactor's
+spatial outlet composition (at $z=L$) equals the batch-reactor solution
+evaluated at $t=\tau$. This is why $q_{\mathrm{tot}} = V/\tau$
+(with fixed $V=5$ mL) is the only place the flow rate enters the ODE
+integration at all: residence time $\tau$ is a design variable, and
+$q_{\mathrm{tot}}$ is carried through purely as a downstream quantity
+needed by the STY/E-factor reduction (the ``Composite structure''
+paragraph below), not as a term inside the kinetics themselves.
+
+\paragraph{Derivation: the Arrhenius rate law and where the $0.6$
+comes from.} The Arrhenius equation gives each rate constant as
+$k(T) = A\exp(-E_a/(RT))$ for an unknown pre-exponential factor $A$.
+Taking the ratio of this expression at two temperatures $T$ and
+$T_{\mathrm{ref}}$ eliminates $A$:
+\[
+\frac{k(T)}{k(T_{\mathrm{ref}})}
+= \frac{A\exp(-E_a/(RT))}{A\exp(-E_a/(RT_{\mathrm{ref}}))}
+= \exp\!\Big(-\frac{E_a}{R}\Big(\frac{1}{T} - \frac{1}{T_{\mathrm{ref}}}\Big)\Big),
+\]
+so, writing $k_{\mathrm{ref}} := k(T_{\mathrm{ref}})$, $k(T) =
+k_{\mathrm{ref}}\exp\!\big(-\tfrac{E_a}{R}(\tfrac1T - \tfrac1{T_{\mathrm{ref}}})\big)$
+-- exactly the form above, once $T$ is converted from Celsius to
+Kelvin ($T + 273.71$) and pinned at the reference temperature
+$90^\circ$C used in \citet{hone2017snar}'s own regression. The
+leading factor of $0.6$ is not a fitted parameter: \citet{hone2017snar}
+report $k_{\mathrm{ref}}$ in units of $10^{-2}\ \mathrm{M^{-1}s^{-1}}$,
+while every concentration and rate in this model (and in $\tau$,
+measured in minutes) needs $k$ in $\mathrm{M^{-1}min^{-1}}$. Since
+$1 \times 10^{-2}\ \mathrm{M^{-1}s^{-1}} = 10^{-2} \times 60\
+\mathrm{M^{-1}min^{-1}} = 0.6\ \mathrm{M^{-1}min^{-1}}$, multiplying
+the raw $k_{\mathrm{ref}}$ values from the paper's table by $0.6$
+converts them directly into the units the ODE above actually needs --
+a unit-system correction folded into the rate-constant closure, not an
+extra fitted quantity.
+
+\paragraph{Composite structure.} The raw response exposed to the
+composite GP is $g(x) = (C_0^{\mathrm{final}}, \ldots, C_4^{\mathrm{final}},
+q_{\mathrm{tot}}) \in \mathbb{R}^6$: the 5 final concentrations from
+the ODE solve, plus the total volumetric flow rate
+$q_{\mathrm{tot}} = 5\,\mathrm{mL}/\tau$ (carried through explicitly
+since it is a function of the design input $\tau$, not part of the
+reactor's chemical state, so it cannot be recovered from the
+concentrations alone). The known reduction $L(g)$ -- exactly Summit's
+own \texttt{SnarBenchmark.\_integrate\_equations} formula -- is
+\[
+\mathrm{STY} = \max\!\Big(10^{-6},\ \tfrac{6\times10^4}{1000}\, M_2\, C_2^{\mathrm{final}}\, q_{\mathrm{tot}} / V\Big), \qquad
+\mathrm{E} = \min\!\Big(10^3,\ \tfrac{q_{\mathrm{tot}}\,\rho_{\mathrm{eth}} + 10^{-3}\!\sum_{i\neq 2} M_i C_i^{\mathrm{final}} q_{\mathrm{tot}}}{10^{-3} M_2 C_2^{\mathrm{final}} q_{\mathrm{tot}}}\Big),
+\]
+with $V = 5$ mL, molecular weights
+$M = (159.09, 71.12, 210.21, 210.21, 261.33)$ g/mol, and ethanol
+density $\rho_{\mathrm{eth}} = 0.789$ g/mL; the two final objectives
+(maximize STY, minimize E) are $(\mathrm{STY}, -\mathrm{E})$ under this
+project's maximize-everything convention.
+
+\paragraph{Derivation: STY and E-factor from a mass balance.} Both
+objectives reduce to a mass-flow-rate ratio; the constants in the
+formula above are exactly the unit conversions that ratio requires,
+not free parameters. The molar flow rate of species $i$ out of the
+reactor is $C_i^{\mathrm{final}}\,q_{\mathrm{tot}}$ (mol/L times
+mL/min), so its \emph{mass} flow rate is
+\[
+\dot m_i = M_i\, C_i^{\mathrm{final}}\, q_{\mathrm{tot}} \times 10^{-3}\ \big[\mathrm{g/min}\big],
+\]
+where the $10^{-3}$ converts the mL/min flow into L/min so it matches
+$C_i^{\mathrm{final}}$'s mol/L units (g/mol $\times$ mol/L $\times$
+L/min $=$ g/min). Space-time yield is defined as product mass produced
+per unit reactor volume per unit time, i.e.\ $\dot m_2 / V$ in
+$\mathrm{g/(min\cdot mL)}$, which is then converted to the
+conventional $\mathrm{kg/(h\cdot m^3)}$ reporting units:
+\[
+1\ \frac{\mathrm g}{\mathrm{min}\cdot\mathrm{mL}}
+= \frac{10^{-3}\,\mathrm{kg}}{(1/60)\,\mathrm h \times 10^{-6}\,\mathrm m^3}
+= 6\times10^{4}\ \frac{\mathrm{kg}}{\mathrm h\cdot\mathrm m^3},
+\]
+so $\mathrm{STY} = 6\times10^{4}\, (\dot m_2/V) = 6\times10^4\times10^{-3}\,
+M_2 C_2^{\mathrm{final}} q_{\mathrm{tot}}/V = \tfrac{6\times10^4}{1000}\,
+M_2 C_2^{\mathrm{final}} q_{\mathrm{tot}}/V$ -- reproducing the
+prefactor above exactly as a $\mathrm{g/(min\cdot mL)} \to
+\mathrm{kg/(h\cdot m^3)}$ unit conversion, not an empirical constant.
+The floor at $10^{-6}$ only guards against a $\log(0)$/division
+degeneracy in downstream hypervolume bookkeeping when essentially no
+product forms.
+
+E-factor is, by its standard process-chemistry definition, the ratio
+of total waste mass to product mass leaving the reactor per unit time.
+The waste stream here is the ethanol carrier solvent (mass flow rate
+$q_{\mathrm{tot}}\,\rho_{\mathrm{eth}}$, since $q_{\mathrm{tot}}$ is
+already a volumetric rate in mL/min and $\rho_{\mathrm{eth}}$ is in
+g/mL) plus every non-product species' own mass flow rate
+$\dot m_i,\ i \neq 2$ (unreacted starting materials and the two side
+products, using the same $\dot m_i$ derived above):
+\[
+\mathrm{E} = \frac{\dot m_{\mathrm{ethanol}} + \sum_{i\neq 2}\dot m_i}{\dot m_2}
+= \frac{q_{\mathrm{tot}}\rho_{\mathrm{eth}} + 10^{-3}\sum_{i\neq2} M_i C_i^{\mathrm{final}} q_{\mathrm{tot}}}{10^{-3} M_2 C_2^{\mathrm{final}} q_{\mathrm{tot}}},
+\]
+which is exactly the formula above -- both numerator and denominator
+are mass flow rates in g/min, so E is correctly dimensionless (kg
+waste per kg product), and the $10^{-3}$ factors are the same
+mL$\to$L conversion as in the STY derivation, appearing in the
+numerator's second term and the denominator but not the solvent term
+(which needs no such conversion, since $q_{\mathrm{tot}}\rho_{\mathrm{eth}}$
+is already a mass rate directly in g/min). The cap at $10^3$ (and the
+corresponding cap when $C_2^{\mathrm{final}} \approx 0$) exists purely
+to keep the ratio finite when the reaction produces almost no product,
+where E would otherwise diverge.
+
+\paragraph{Verification.} The ported \texttt{\_snar\_integrand}/
+\texttt{\_integrate\_one} pair in
+\texttt{morbo/\allowbreak problems/\allowbreak composite\_snar.py} was checked against a
+second, independently re-typed copy of the extracted
+\texttt{summit/benchmarks/snar.py} logic on 6 random inputs spanning
+the full bounding box: STY and E-factor matched to within
+$10^{-15}$ (float64 machine epsilon) on every point, i.e.\ the port is
+bit-identical to the real Summit source, not merely similar to it.
+The full pipeline was then run end to end through
+\texttt{morbo.run\_one\_replication.\allowbreak run\_one\_replication} with
+\texttt{evalfn="CompositeSnAr"}, for both the \texttt{composite\_morbo}
+label (composite-GP modeling of the 6-dim raw response) and the plain
+\texttt{morbo} label (direct 2-objective modeling), at toy scale
+(30--40 evaluations, batch size 4); both completed without error and
+produced sensible, strictly-positive hypervolumes over the course of
+optimization. This toy-scale check caught a real integration bug: the
+new \texttt{composite\_snar}/\texttt{composite\_snar\_pca}/
+\texttt{composite\_snar\_ard\_pca} labels (added to
+\texttt{run\_comparison.py}'s \texttt{LABEL\_OVERRIDES} for the
+cluster-scale experiment below) were never added to
+\texttt{run\_one\_replication.py}'s own \texttt{supported\_labels}
+allowlist, so every cluster job using them would have failed
+immediately (\texttt{AssertionError: Label not supported!}) after
+consuming a GPU allocation slot -- fixed before any cluster submission.
+A single seed of the real experiment config
+(\texttt{experiments/snar\_composite/config.json}: 150 evaluations,
+batch size 10, 3 trust regions) was then run locally end to end for
+both the \texttt{morbo} baseline (551 s, final hypervolume
+$4.493\times10^6$) and \texttt{composite\_snar} ($1251$ s, final
+hypervolume $4.493\times10^6$) -- both complete successfully and reach
+essentially the same hypervolume, as expected at $n=1$ seed (this is a
+pipeline check, not yet a real comparison). Composite modeling took
+about $2.3\times$ longer per run, consistent with fitting 6
+independent single-output GPs per iteration instead of 2. The full
+5-seed, 5-label cluster sweep (\texttt{cluster/submit\_snar\_2x3.sh}: a
+composite $\times$ trust-region-shape factorial, mirroring
+\S\ref{sec:pybamm}'s \texttt{submit\_penicillin\_2x2.sh}) has not yet
+been submitted.
 
 \section{Discussion}
 
@@ -2930,6 +3156,11 @@ A. Heyrani Nobari, L. Regenwetter, C. Picard, L. Han, and F. Ahmed.
 K. C. Felton, J. G. Rittig, and A. A. Lapkin.
 \newblock Summit: Benchmarking Machine Learning Methods for Reaction Optimisation.
 \newblock \emph{Chemistry-Methods}, 2021; code: \url{https://github.com/sustainable-processes/summit}.
+
+\bibitem{hone2017snar}
+C. A. Hone, N. Holmes, G. R. Akien, R. A. Bourne, and F. L. Muller.
+\newblock Rapid multistep kinetic model generation from transient flow data.
+\newblock \emph{React. Chem. Eng.}, 2017, 2, 103--108; DOI: \url{https://doi.org/10.1039/C6RE00109B}.
 
 \bibitem{goodwin2024cantera}
 D. G. Goodwin, H. K. Moffat, I. Schoegl, R. L. Speth, and B. W. Weber.

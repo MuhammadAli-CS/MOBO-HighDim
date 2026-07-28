@@ -1,0 +1,14 @@
+{
+    "dim": 4,
+    "evalfn": "SnAr",
+    "max_evals": 150,
+    "n_initial_points": 20,
+    "batch_size": 10,
+    "n_trust_regions": 3,
+    "min_tr_size": 8,
+    "max_reference_point": [
+      50.0,
+      -400.0
+    ],
+    "verbose": true
+  }

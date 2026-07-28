@@ -55,6 +55,10 @@ from morbo.problems.composite_penicillin import (
     composite_penicillin_reduction,
     get_composite_penicillin_fn,
 )
+from morbo.problems.composite_snar import (
+    composite_snar_reduction,
+    get_composite_snar_fn,
+)
 from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
 from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
 from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
@@ -78,6 +82,9 @@ supported_labels = [
     "ard_pca_ellipsoid",
     "composite_penicillin_ard_pca",
     "composite_penicillin_pca",
+    "composite_snar",
+    "composite_snar_pca",
+    "composite_snar_ard_pca",
     "cma_ellipsoid",
     "linear_gp",
     "linear_gp_pca",
@@ -413,6 +420,28 @@ def run_one_replication(
         bounds = bounds.to(**tkwargs)
         num_outputs = 5 * n_penicillin_checkpoints + 1
         composite_reduction = composite_penicillin_reduction
+    elif evalfn == "SnAr":
+        # Direct-objective baseline for the composite A/B: same simulator and
+        # reduction as "CompositeSnAr", but the GP models the final 2
+        # objectives directly rather than the 6-dim raw concentration/flow
+        # response. `composite_snar_reduction` returns the maximize-convention
+        # pair directly (it performs its own sign flip, see its docstring),
+        # so this branch negates it back to the minimize-convention `f` every
+        # other non-excluded evalfn returns, letting `BenchmarkFunction`'s
+        # default `negate=True` restore the correct sign -- exactly the
+        # `Penicillin(negate=False)` pattern above, not a special case.
+        _snar_raw_response, bounds = get_composite_snar_fn(dtype=dtype, device=device)
+
+        def f(X: Tensor) -> Tensor:
+            return -composite_snar_reduction(_snar_raw_response(X))
+
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 2
+    elif evalfn == "CompositeSnAr":
+        f, bounds = get_composite_snar_fn(dtype=dtype, device=device)
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 6
+        composite_reduction = composite_snar_reduction
     elif evalfn != "ackley":
         # Handle the non-constrained botorch test functions here.
         constructor_map = {
@@ -450,7 +479,7 @@ def run_one_replication(
         # deal for evalfn="Callable" whenever a composite_reduction was
         # built above (raw_evaluate_components + raw_compose path).
         negate=not (
-            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve")
+            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr")
             or (evalfn == "Callable" and composite_reduction is not None)
         ),
         observation_noise_std=observation_noise_std,

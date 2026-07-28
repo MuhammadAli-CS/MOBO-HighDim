@@ -82,6 +82,8 @@ e.g.
     python run_comparison.py correlation_ablation_dtlz2curve kronecker_gp_composite 0
     python run_comparison.py penicillin_composite morbo 0
     python run_comparison.py penicillin_composite composite_penicillin 0
+    python run_comparison.py snar_composite morbo 0
+    python run_comparison.py snar_composite composite_snar 0
     python run_comparison.py tr_shape_dtlz2_100d ard_box 0
     python run_comparison.py tr_shape_dtlz2_100d pca_ellipsoid 0
     python run_comparison.py tr_shape_dtlz2_100d ard_pca_ellipsoid 0
@@ -151,6 +153,24 @@ LABEL_OVERRIDES = {
     "composite_penicillin_pca": {
         "evalfn": "CompositePenicillin",
         "tr_shape": "pca_ellipsoid",
+    },
+    # Composite modeling on Summit's SnAr plug-flow reactor (Felton et al.
+    # 2021; kinetics from Hone et al. 2017): the GP models the 6-dim raw
+    # final-concentration/flow-rate response
+    # (`morbo/problems/composite_snar.py`) instead of the 2 final objectives
+    # (STY, E-factor) directly. Compare against the "morbo" label on the same
+    # experiment directory (`evalfn: "SnAr"` in the base config) for a
+    # controlled A/B, same pattern as "composite_penicillin" above.
+    "composite_snar": {
+        "evalfn": "CompositeSnAr",
+    },
+    "composite_snar_pca": {
+        "evalfn": "CompositeSnAr",
+        "tr_shape": "pca_ellipsoid",
+    },
+    "composite_snar_ard_pca": {
+        "evalfn": "CompositeSnAr",
+        "tr_shape": "ard_pca_ellipsoid",
     },
     # CMA-ES-style covariance adaptation (AS-SMEA, Wang et al. 2026):
     # persistent per-TR covariance updated from Pareto-elite points plus an
