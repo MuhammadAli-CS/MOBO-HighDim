@@ -33,6 +33,15 @@ _COLORS = {
     "batched_morbo / composite_batched_morbo": "#9467bd",
 }
 
+# Display-only renames for legend labels -- "standard_mobo" is
+# tau315/composite-mobo's own name for plain independent-GP qLogEHVI;
+# labeling it qEHVI (its actual acquisition function) is clearer than the
+# internal solver-function name it happens to be called in solvers.py.
+_DISPLAY_NAMES = {
+    "standard_mobo": "qEHVI",
+    "composite_mobo": "composite qEHVI",
+}
+
 
 def _mean_and_sem(traces: np.ndarray) -> tuple:
     # Ragged if a mid-pair timeout left trials of different lengths --
@@ -79,9 +88,13 @@ def plot_benchmark_dir(results_dir: Path, output: Path, title: str = None) -> No
 
         if len(direct_traces) == 0:
             continue
+        direct_name, composite_name = name.split(" / ")
+        direct_name = _DISPLAY_NAMES.get(direct_name, direct_name)
+        composite_name = _DISPLAY_NAMES.get(composite_name, composite_name)
+
         mean, sem = _mean_and_sem(direct_traces)
         evals = np.arange(1, len(mean) + 1)
-        ax.plot(evals, mean, linestyle="-", color=color, linewidth=2.0, label=f"{name.split(' / ')[0]} (direct)")
+        ax.plot(evals, mean, linestyle="-", color=color, linewidth=2.0, label=f"{direct_name} (direct)")
         ax.fill_between(evals, mean - sem, mean + sem, color=color, alpha=0.15, linewidth=0)
         plotted_any = True
         seed_counts.append(len(direct_traces))
@@ -92,7 +105,7 @@ def plot_benchmark_dir(results_dir: Path, output: Path, title: str = None) -> No
         evals_c = np.arange(1, len(mean_c) + 1)
         ax.plot(
             evals_c, mean_c, linestyle="--", color=color, linewidth=2.0,
-            label=f"{name.split(' / ')[-1]} (composite)",
+            label=f"{composite_name} (composite)",
         )
         ax.fill_between(evals_c, mean_c - sem_c, mean_c + sem_c, color=color, alpha=0.15, linewidth=0)
         seed_counts.append(len(composite_traces))
