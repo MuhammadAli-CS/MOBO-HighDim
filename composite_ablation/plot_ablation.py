@@ -58,6 +58,7 @@ def plot_benchmark_dir(results_dir: Path, output: Path, title: str = None) -> No
 
     fig, ax = plt.subplots(figsize=(8, 5.5))
     plotted_any = False
+    seed_counts = []
     for npz_path in npz_files:
         # "_-_" is the only substitution `run_ablation.py`'s
         # `name.replace(" ", "_").replace("/", "-")` introduces beyond
@@ -83,6 +84,7 @@ def plot_benchmark_dir(results_dir: Path, output: Path, title: str = None) -> No
         ax.plot(evals, mean, linestyle="-", color=color, linewidth=2.0, label=f"{name.split(' / ')[0]} (direct)")
         ax.fill_between(evals, mean - sem, mean + sem, color=color, alpha=0.15, linewidth=0)
         plotted_any = True
+        seed_counts.append(len(direct_traces))
 
         if len(composite_traces) == 0:
             continue
@@ -93,13 +95,21 @@ def plot_benchmark_dir(results_dir: Path, output: Path, title: str = None) -> No
             label=f"{name.split(' / ')[-1]} (composite)",
         )
         ax.fill_between(evals_c, mean_c - sem_c, mean_c + sem_c, color=color, alpha=0.15, linewidth=0)
+        seed_counts.append(len(composite_traces))
 
     if not plotted_any:
         raise ValueError(f"every result file in {results_dir} had zero completed trials")
 
+    # Seed (trial) count per pair can differ -- e.g. a still-running pair
+    # has fewer completed trials than an already-finished one in the same
+    # benchmark directory -- so report the range rather than assuming one
+    # shared number.
+    lo, hi = min(seed_counts), max(seed_counts)
+    seeds_label = f"n={lo} seeds" if lo == hi else f"n={lo}-{hi} seeds"
+
     ax.set_xlabel("Total function evaluations")
     ax.set_ylabel("Dominated hypervolume")
-    ax.set_title(title or results_dir.name)
+    ax.set_title(f"{title or results_dir.name} ({seeds_label})")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="lower right", frameon=False, fontsize=9)
     fig.tight_layout()
