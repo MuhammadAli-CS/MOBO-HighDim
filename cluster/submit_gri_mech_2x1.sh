@@ -48,6 +48,8 @@ done
 deps=$(IFS=:; echo "${IDS[*]}")
 sbatch --requeue \
   --job-name="plot-${EXP}" \
+  --output="cluster/logs/plot-${EXP}_%j.out" \
+  --error="cluster/logs/plot-${EXP}_%j.err" \
   --dependency=afterany:$deps \
   --partition=aimi --account=kilian \
   --cpus-per-task=4 --mem=8g --time=1:00:00 \
