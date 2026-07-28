@@ -96,7 +96,7 @@ def plot_benchmark_dir(results_dir: Path, output: Path, title: str = None) -> No
 
         mean, sem = _mean_and_sem(direct_traces)
         evals = np.arange(1, len(mean) + 1)
-        ax.plot(evals, mean, linestyle="-", color=color, linewidth=2.0, label=f"{direct_name} (direct)")
+        ax.plot(evals, mean, linestyle="-", color=color, linewidth=2.0, label=direct_name)
         ax.fill_between(evals, mean - sem, mean + sem, color=color, alpha=0.15, linewidth=0)
         plotted_any = True
         seed_counts.append(len(direct_traces))
@@ -107,7 +107,7 @@ def plot_benchmark_dir(results_dir: Path, output: Path, title: str = None) -> No
         evals_c = np.arange(1, len(mean_c) + 1)
         ax.plot(
             evals_c, mean_c, linestyle="--", color=color, linewidth=2.0,
-            label=f"{composite_name} (composite)",
+            label=composite_name,
         )
         ax.fill_between(evals_c, mean_c - sem_c, mean_c + sem_c, color=color, alpha=0.15, linewidth=0)
         seed_counts.append(len(composite_traces))
