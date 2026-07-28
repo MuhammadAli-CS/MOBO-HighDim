@@ -102,10 +102,10 @@ def plot_benchmark_dir(results_dir: Path, output: Path, title: str = None) -> No
 
     # Seed (trial) count per pair can differ -- e.g. a still-running pair
     # has fewer completed trials than an already-finished one in the same
-    # benchmark directory -- so report the range rather than assuming one
-    # shared number.
-    lo, hi = min(seed_counts), max(seed_counts)
-    seeds_label = f"n={lo} seeds" if lo == hi else f"n={lo}-{hi} seeds"
+    # benchmark directory. Report the minimum: every line in the plot has
+    # AT LEAST this many trials backing it, so it's the honest "how much
+    # data is this plot built on" number, not an average or a range.
+    seeds_label = f"n={min(seed_counts)}"
 
     ax.set_xlabel("Total function evaluations")
     ax.set_ylabel("Dominated hypervolume")
