@@ -52,6 +52,7 @@ project's own added 5-objective/6D DTLZ2 benchmark is "low"-suite (6D).
 Usage:
     python -m composite_ablation.run_from_tau_repo --benchmark dtlz2_2obj_6d --pair standard --trials 20
     python -m composite_ablation.run_from_tau_repo --benchmark dtlz2_5obj_6d_ours --pair morbo --trials 20
+    python -m composite_ablation.run_from_tau_repo --benchmark snar_4d_2obj_ours --pair chebyshev --trials 20
 """
 
 from __future__ import annotations
@@ -100,6 +101,10 @@ from morbo.problems.composite_dtlz2_general import (  # noqa: E402
     composite_dtlz2_general_reduction,
     get_composite_dtlz2_general_fn,
 )
+from morbo.problems.composite_snar import (  # noqa: E402
+    composite_snar_reduction,
+    get_composite_snar_fn,
+)
 
 TAU_PROBLEMS = {
     "dtlz2_2obj_6d": _bm_dtlz2.PROBLEM,
@@ -144,6 +149,43 @@ def _make_our_dtlz2_5obj_6d() -> MinimizeConventionProblem:
     )
 
 
+def _make_our_snar() -> MinimizeConventionProblem:
+    r"""This project's own SnAr plug-flow-reactor benchmark
+    (`morbo/problems/composite_snar.py`, d=4, M=2), wrapped into tau315's
+    own minimize-convention interface the same way `_make_our_dtlz2_5obj_6d`
+    wraps DTLZ2 above. `composite_snar_reduction` returns
+    `[sty, -e_factor]` (maximize convention, both maximized); `compose`
+    negates that to `[-sty, e_factor]` (minimize).
+
+    ref_point/ideal derived from an empirical 2000-point random sample over
+    the raw bounds (observed sty in [146, 10912], e_factor in [9.6, 229]):
+    ref_point=[-50, 400] is the minimize-convention form of this project's
+    own established `max_reference_point=[50.0, -400.0]`
+    (experiments/snar_composite/config.json) -- worse than every observed
+    point in both conventions, so it's the same reference, just negated.
+    ideal=[-12000, 0] is a generous lower bound below the best observed
+    sty/e_factor in that sample.
+    """
+    raw_response, bounds = get_composite_snar_fn(dtype=torch.double)
+    lb, ub = bounds[0], bounds[1]
+
+    def evaluate_components(X: torch.Tensor) -> torch.Tensor:
+        X_native = lb + X.double() * (ub - lb)
+        return raw_response(X_native)  # [C_dfnb, C_pldn, C_product, C_regio, C_bis, q_tot]
+
+    def compose(H: torch.Tensor) -> torch.Tensor:
+        return -composite_snar_reduction(H)  # [-sty, e_factor], minimize
+
+    return MinimizeConventionProblem(
+        evaluate=lambda X: compose(evaluate_components(X)),
+        dim=4,
+        ref_point=torch.tensor([-50.0, 400.0], dtype=torch.double),
+        ideal=torch.tensor([-12000.0, 0.0], dtype=torch.double),
+        evaluate_components=evaluate_components,
+        compose=compose,
+    )
+
+
 def _eval_budget(dim: int) -> tuple:
     r"""(n_init, remaining) -- see module docstring's scaling rule."""
     if dim <= 10:
@@ -157,7 +199,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--benchmark",
-        choices=list(TAU_PROBLEMS) + ["dtlz2_5obj_6d_ours"],
+        choices=list(TAU_PROBLEMS) + ["dtlz2_5obj_6d_ours", "snar_4d_2obj_ours"],
         required=True,
     )
     parser.add_argument(
@@ -179,6 +221,9 @@ def main() -> None:
     if args.benchmark == "dtlz2_5obj_6d_ours":
         problem = _make_our_dtlz2_5obj_6d()
         num_objectives, suite = 5, "low"
+    elif args.benchmark == "snar_4d_2obj_ours":
+        problem = _make_our_snar()
+        num_objectives, suite = 2, "low"
     else:
         tau_bench = TAU_PROBLEMS[args.benchmark]
         problem = MinimizeConventionProblem(
