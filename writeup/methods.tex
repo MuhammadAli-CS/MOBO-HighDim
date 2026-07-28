@@ -3263,19 +3263,35 @@ same three-step pipeline from design input to objective:
 \begin{align}
 x \;\longrightarrow\; g(x) \;\longrightarrow\; f(x) = L(g(x)),
 \end{align}
-where $g: \mathcal{X} \to \mathbb{R}^k$ is the \emph{raw (composite)
-response} -- the real simulator's intermediate physical state, run once
-per evaluation of $x$ -- and $L: \mathbb{R}^k \to \mathbb{R}^M$ is the
-\emph{known reduction}, a fixed, closed-form (not learned, not
-re-simulated) formula mapping that raw state to the $M$ final
-objectives. The \textbf{direct} evalfn (\texttt{SnAr},
-\texttt{GriMechCalib}) evaluates $x \mapsto f(x)$ end to end and lets
-the GP model $f(x) \in \mathbb{R}^M$ directly; the \textbf{composite}
-evalfn (\texttt{CompositeSnAr}, \texttt{CompositeGriMechCalib}) instead
-lets the GP model the intermediate $g(x) \in \mathbb{R}^k$, applying the
-same fixed $L$ afterward to reconstruct $f(x)$ -- so both evalfns are
-computing the identical function $x \mapsto f(x)$, differing only in
-what the surrogate model is asked to predict.
+where $g$ is computed by the \textbf{black-box simulator} and $L$ is
+the \textbf{known reduction}. The boundary between the two is exact and
+never blurred in either benchmark:
+\begin{itemize}
+\item $g: \mathcal{X} \to \mathbb{R}^k$, the \emph{raw (composite)
+response}, is \emph{everything that requires actually running the
+simulator} -- the ODE integration (SnAr) or the 0D reactor integration
+(GRI-Mech) -- to obtain the real system's intermediate physical state
+(concentrations and flow, or a temperature trajectory) for the given
+input $x$. This is the one and only black-box call per evaluation; nothing
+past this point ever re-invokes the simulator.
+\item $L: \mathbb{R}^k \to \mathbb{R}^M$, the \emph{known reduction}, is
+\emph{pure closed-form algebra applied to $g(x)$ after the simulator has
+already returned} -- unit conversions, a ratio, an interpolation, a sum
+of squares -- with no differential equation, no physics, and no further
+simulator calls anywhere in it. $L$ is fixed and identical for both
+evalfns below; it is never learned or approximated.
+\end{itemize}
+The \textbf{direct} evalfn (\texttt{SnAr}, \texttt{GriMechCalib})
+evaluates $x \mapsto f(x)$ end to end (runs the simulator, then applies
+$L$, and only the final $f(x) \in \mathbb{R}^M$ is kept) and lets the GP
+model $f(x)$ directly. The \textbf{composite} evalfn
+(\texttt{CompositeSnAr}, \texttt{CompositeGriMechCalib}) runs the exact
+same simulator call to get the exact same $g(x) \in \mathbb{R}^k$, but
+keeps $g(x)$ itself as the GP's modeling target, applying $L$
+\emph{after} the GP posterior is used -- so both evalfns invoke the
+identical black-box simulator on the identical input and apply the
+identical reduction; the only difference is which of $g(x)$ or
+$L(g(x))$ the surrogate model is fit to.
 
 \subsection{Summit SnAr reaction}
 
@@ -3287,21 +3303,23 @@ what the surrogate model is asked to predict.
 (residence time, pyrrolidine equivalents, inlet DNFB concentration,
 temperature).
 
-\paragraph{Raw response $g(x)$.} A five-species kinetic ODE
-(\S\ref{sec:snar}) integrated over $[0,\tau]$ from $x$ gives the final
-concentrations plus the flow rate $q = 5\,\mathrm{mL}/\tau$ implied by
-$\tau$:
+\paragraph{Black box: $g(x)$, the simulator.} The only step that
+integrates any physics: a five-species kinetic ODE (\S\ref{sec:snar})
+integrated over $[0,\tau]$ from $x$, giving the final concentrations
+plus the flow rate $q = 5\,\mathrm{mL}/\tau$ implied by $\tau$:
 \begin{align}
 g(x) = \big(C_{\mathrm{dfnb}},\, C_{\mathrm{pldn}},\, C_p,\,
 C_{\mathrm{regio}},\, C_{\mathrm{bis}},\, q\big) \in \mathbb{R}^6.
 \end{align}
 This one vector is shared: both objectives below are computed from the
 \emph{same} $g(x)$, rather than each objective exposing its own separate
-raw response.
+raw response. Nothing after this paragraph ever integrates the ODE
+again.
 
-\paragraph{Known reduction $L(g)$ and objectives $f(x) = L(g(x))$.}
-Writing $C_p, q$ as the relevant components of $g(x)$, $V$ the reactor
-volume, and $M_p$ the product molecular weight, space-time yield is
+\paragraph{Closed form: $L(g)$ and objectives $f(x) = L(g(x))$.} Pure
+algebra on the six numbers in $g(x)$ -- no simulation. Writing $C_p, q$
+as the relevant components of $g(x)$, $V$ the reactor volume, and $M_p$
+the product molecular weight, space-time yield is
 \begin{align}
 \mathrm{STY}(g) = \frac{6\times10^4\, M_p\, C_p\, q}{1000\, V},
 \end{align}
@@ -3324,20 +3342,25 @@ x = (x_1, \ldots, x_{64}) \in [-1,1]^{64}, \qquad
 k_{r_i}(x_i) = 2^{x_i}\, k_{r_i}^{(0)}.
 \end{align}
 
-\paragraph{Raw response $g(x)$.} For each of 6 fixed conditions $c$
-(initial temperature $T_{0,c}$, horizon $t_{\max,c}$), a 0D
-constant-pressure ignition run under rate constants $k(x)$ gives a
-4-point checkpointed temperature trajectory:
+\paragraph{Black box: $g(x)$, the simulator.} The only step that
+integrates any physics: for each of 6 fixed conditions $c$ (initial
+temperature $T_{0,c}$, horizon $t_{\max,c}$), a 0D constant-pressure
+ignition run under rate constants $k(x)$ gives a 4-point checkpointed
+temperature trajectory:
 \begin{align}
 g_c(x) = \big(T_c(x; t_{c,1}), \ldots, T_c(x; t_{c,4})\big),
 \qquad t_{c,j} = \tfrac{j}{4}\, t_{\max,c},
 \end{align}
-and $g(x) = (g_1(x), \ldots, g_6(x)) \in \mathbb{R}^{24}$.
+and $g(x) = (g_1(x), \ldots, g_6(x)) \in \mathbb{R}^{24}$. This is 6
+separate reactor integrations (one per condition) per evaluation of
+$x$; nothing after this paragraph ever integrates the reactor again.
 
-\paragraph{Known reduction $L(g)$ and objectives $f(x) = L(g(x))$.}
-Ignition delay $\tau_c(x)$ is recovered from $g_c(x)$ by linear
-interpolation to the crossing $T_{0,c}+400$ (\S\ref{sec:gri-mech}).
-Writing $\mathcal{C}_{\mathrm{low}} = \{1000,1050,1100\}$~K,
+\paragraph{Closed form: $L(g)$ and objectives $f(x) = L(g(x))$.} Pure
+algebra on the 24 numbers in $g(x)$ -- no simulation. Ignition delay
+$\tau_c(x)$ is recovered from $g_c(x)$ by linear interpolation to the
+crossing $T_{0,c}+400$ (\S\ref{sec:gri-mech}) -- an interpolation
+formula, not a re-simulation. Writing
+$\mathcal{C}_{\mathrm{low}} = \{1000,1050,1100\}$~K,
 $\mathcal{C}_{\mathrm{high}} = \{1300,1400,1500\}$~K, and
 $\tau_c^{\mathrm{target}}$ for the fixed \texttt{gri30\_highT.yaml}
 targets, we maximize
