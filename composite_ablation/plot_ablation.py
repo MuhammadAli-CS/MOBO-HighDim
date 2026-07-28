@@ -40,6 +40,8 @@ _COLORS = {
 _DISPLAY_NAMES = {
     "standard_mobo": "qEHVI",
     "composite_mobo": "composite qEHVI",
+    "batched_morbo": "morbo",
+    "composite_batched_morbo": "composite morbo",
 }
 
 
