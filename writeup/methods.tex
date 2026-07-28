@@ -2981,11 +2981,25 @@ ignite within budget) -- both directions behave exactly as the
 underlying chemistry predicts, and a random draw of independent
 per-reaction multipliers gives intermediate, non-degenerate errors in
 both objectives. The full pipeline was then run end to end through
-\texttt{morbo.run\_one\_replication.\allowbreak run\_one\_replication} for both
-the \texttt{morbo} label (direct 2-objective modeling; toy-scale 10-eval
-smoke test, wall time XXs) and \texttt{composite\_gri\_mech}
-(composite-GP modeling of the 24-dim raw response; wall time XXs) --
-XXX.
+\texttt{morbo.run\_one\_replication.\allowbreak run\_one\_replication} at a
+single seed of the real experiment config
+(\texttt{experiments/gri\_mech\_composite/config.json}, capped to 160
+evaluations -- 128 initial + one 32-point batch -- for this local timing
+check rather than the full 400) for both the \texttt{morbo} label (direct
+2-objective modeling, $346.5$~s, final hypervolume $2500.000$) and
+\texttt{composite\_gri\_mech} (composite-GP modeling of the 24-dim raw
+response, $3666.3$~s, final hypervolume $2500.000$) -- both complete
+successfully and reach the same hypervolume, as expected at $n=1$ seed
+(a pipeline check, not yet a real comparison, same caveat as
+\S\ref{sec:snar}'s SnAr check). Composite modeling took about
+$10.6\times$ longer per run here, a larger multiplier than SnAr's
+$2.3\times$ (6 raw outputs) -- consistent with fitting roughly 4$\times$
+as many independent single-output GPs per iteration (24 vs.\ 6). This
+cost is per-iteration model-refit overhead, not a hang or bug: local
+testing confirmed steady progress (increasing hypervolume) throughout,
+just at a real, measured, higher wall-clock cost -- expected to be
+substantially faster on the cluster's 32 CPUs (and available GPU) than
+this single-machine CPU-only timing check.
 
 \paragraph{Not yet added: shape-adapted trust regions.} Unlike
 \S\ref{sec:snar}'s SnAr benchmark, this experiment does not include
