@@ -3254,6 +3254,35 @@ ablation, so this cluster sweep
 only: 2 labels $\times$ 5 seeds, 300 evaluations/trial, no SLURM time
 limit.
 
+\paragraph{Results.} All 10 jobs completed on the cluster without error
+(\texttt{morbo}: 1.4 min/seed; \texttt{composite\_rcm40}: 7.7 min/seed).
+Mean \emph{final} hypervolume is close between the two --
+$102054.0$ (std $382.1$) for \texttt{composite\_rcm40} versus
+$101477.8$ (std $731.7$) for \texttt{morbo} -- and this difference alone
+is not statistically significant (win-rate $4/5$, paired $t$-test
+$p=0.129$). The aggregate plot
+(\texttt{experiments/rcm40\_composite/comparison\_aggregate.png}) makes
+clear why a final-value-only comparison understates what is actually
+happening: the two curves separate sharply right after initialization
+(around evaluation 70) and \texttt{composite\_rcm40} stays visibly ahead,
+with mostly non-overlapping $\pm$SEM bands, through most of the
+trajectory, only for \texttt{morbo} to close most (not all) of the gap
+by evaluation 300. This is a genuine \emph{sample-efficiency} effect,
+not just noise in the final read-out: computing the area under each
+seed's hypervolume-vs-evaluations curve (trapezoidal rule) and comparing
+those 5 paired AUC values directly shows composite modeling ahead on
+\emph{every} seed (mean $+2.03\%$ AUC), with a paired $t$-test
+$p=0.0035$ -- much stronger evidence than the final-value comparison
+alone, because it credits the sustained mid-run lead that a single
+end-of-budget snapshot discards. Read together with GRI-Mech's v2
+result (composite ahead throughout, including at the end) and SnAr/v1
+GRI-Mech (composite and direct modeling statistically tied throughout):
+composite modeling's advantage here shows up specifically as reaching a
+given hypervolume faster, converging toward -- but here not fully
+reaching -- parity with direct modeling by the time the eval budget
+runs out, distinct from GRI-Mech v2's pattern of a persistent gap that
+does not close.
+
 \section{Discussion}
 
 Trust-region shape adaptation (Section~\ref{sec:tr-shape}) occupies a
