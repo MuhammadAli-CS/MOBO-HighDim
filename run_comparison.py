@@ -86,6 +86,8 @@ e.g.
     python run_comparison.py snar_composite composite_snar 0
     python run_comparison.py gri_mech_composite morbo 0
     python run_comparison.py gri_mech_composite composite_gri_mech 0
+    python run_comparison.py rcm40_composite morbo 0
+    python run_comparison.py rcm40_composite composite_rcm40 0
     python run_comparison.py tr_shape_dtlz2_100d ard_box 0
     python run_comparison.py tr_shape_dtlz2_100d pca_ellipsoid 0
     python run_comparison.py tr_shape_dtlz2_100d ard_pca_ellipsoid 0
@@ -187,6 +189,17 @@ LABEL_OVERRIDES = {
     # composite x shape ablation -- not re-run here until that's fixed.
     "composite_gri_mech": {
         "evalfn": "CompositeGriMechCalib",
+    },
+    # Composite modeling on RCM40 Optimal Power Flow (CEC2021 RWCMOP
+    # suite, Kumar et al. 2021; real IEEE 14-bus test system, Biswas
+    # et al. 2020): the GP models the 29-dim raw per-bus power-injection
+    # response (`morbo/problems/composite_rcm40.py`) instead of the 2
+    # final active/reactive power-loss objectives directly. Compare
+    # against "morbo" on the same experiment dir (`evalfn: "RCM40"` in
+    # the base config). No _pca/_ard_pca variant here either, same
+    # reason as composite_gri_mech above.
+    "composite_rcm40": {
+        "evalfn": "CompositeRCM40",
     },
     # CMA-ES-style covariance adaptation (AS-SMEA, Wang et al. 2026):
     # persistent per-TR covariance updated from Pareto-elite points plus an

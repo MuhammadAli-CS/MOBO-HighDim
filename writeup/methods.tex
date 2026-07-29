@@ -2126,7 +2126,7 @@ Candidate & Dim.\ & Objectives & Status \\
 PyBaMM battery aging \citep{sulzer2021pybamm} & $\sim$28 & 2--3 (energy, retention, temp.) & Strongest confirmed; installed \& run (\S\ref{sec:pybamm}) \\
 OC20/OC22 catalysis \citep{chanussot2021oc20,tran2022oc22} & high (atom coords.) & 2 (energy, stability) & Fixed dataset; live proxy via fairchem (\S\ref{sec:oc20}) \\
 OpenTO topology opt.\ \citep{nobari2025openTO} & 1024--10000+ & 2 (compliance, volume) & Live re-runnable solver confirmed (\S\ref{sec:topodiff-selto}) \\
-RCM40 optimal power flow \citep{kumar2021rwcmop,biswas2020opf} & 34 & 2 (active/reactive loss) & Closed-form, verified vs.\ source (\S\ref{sec:rcm40}) \\
+RCM40 optimal power flow \citep{kumar2021rwcmop,biswas2020opf} & 34 & 2 (active/reactive loss) & \textbf{Implemented \& run through the real engine} (\S\ref{sec:rcm40-implemented}) \\
 RCM17 bulk carrier design \citep{kumar2021rwcmop} & 6 & 3 (cost, weight, capacity) & Closed-form, verified vs.\ source (\S\ref{sec:rcm17}) \\
 IDAES process flowsheets \citep{lee2021idaes} & 5--50 & 2 (yield, cost) & Real \& open; not yet run ourselves (\S\ref{sec:idaes}) \\
 TopoDiff \citep{maze2023topodiff} & 4096 & 2 (compliance, manufacturability) & Fixed dataset only; solver unconfirmed (\S\ref{sec:topodiff-selto}) \\
@@ -3161,6 +3161,98 @@ cannot be driven to exactly zero error, preserving genuine optimization
 difficulty (and therefore headroom for a better-informed surrogate to
 matter) all the way to the eval budget's end, rather than saturating
 before it.
+
+\subsection{Implemented: composite RCM40 Optimal Power Flow}
+\label{sec:rcm40-implemented}
+
+This project's next real high-dimensional (34D) composite benchmark
+after GRI-Mech, and its first non-chemistry one: RCM40 Optimal Power
+Flow, from the CEC2021 Real-World Constrained Multi-Objective
+Optimization suite \citep{kumar2021rwcmop}, a real IEEE 14-bus
+test-system OPF instance \citep{biswas2020opf}, already surveyed (not
+yet implemented) in Section~\ref{sec:rcm40} above. Implemented in
+\texttt{morbo/\allowbreak problems/\allowbreak composite\_rcm40.py} and wired into
+\texttt{morbo/\allowbreak run\_one\_replication.py} as \texttt{evalfn} values
+\texttt{"RCM40"} (direct) and \texttt{"CompositeRCM40"} (composite).
+
+\paragraph{Why this one next.} The two highest-dimensional real,
+open, live-solver candidates on this project's own survey
+(Table~\ref{tab:all-candidates}) were OpenTO topology optimization
+(1024--10000+D) and RCM40 (34D). OpenTO was checked first and set
+aside: its released solver (\texttt{ahnobari/OptimizeAnyTopology})
+needs compiled sparse-linear-algebra dependencies (CHOLMOD,
+scikit-sparse) with no confirmed license, and its own evaluation script
+(\texttt{RunComplianceTest.py}) is built to score pre-generated
+diffusion-model samples in bulk, not to serve as a simple $x \mapsto$
+compliance oracle a BO loop could call directly -- real integration
+risk with no clear entry point, discovered by inspection before
+committing engineering time to it. RCM40, by contrast, needed no new
+research: its formulas were already fully derived and
+\emph{verified against source} in Section~\ref{sec:rcm40} (from an
+earlier survey pass), so implementing it was a matter of porting
+already-checked equations, not deriving new ones.
+
+\paragraph{Unlike SnAr/GRI-Mech: no black box, in the ODE/reactor
+sense.} Every other implemented composite benchmark in this work has a
+"black box" that means \emph{integrate a differential equation or run
+an iterative physical simulation}. RCM40's raw response is instead a
+single closed-form linear-algebra computation -- solve $I = YV$ (one
+matrix-vector product against a fixed $14\times14$ admittance matrix)
+and $S = V \odot \bar I$ (one elementwise product) -- with no
+iteration, no adaptive step size, and no numerical solver in the loop
+at all. This still fits the $x \to g(x) \to f(x)=L(g(x))$ pattern
+(Section~\ref{sec:compact-summaries}) and is still a genuine composite
+structure (the per-bus injections $g(x)$ carry more information than
+the two summed final objectives $f(x)$), just a cheaper and more exactly
+computable one than a real ODE/PDE solve.
+
+\paragraph{Design variables, raw response, and reduction.} 34
+design variables (bounds already given in Section~\ref{sec:rcm40}):
+real/imaginary bus
+voltage $V_r, V_m \in [-1,1]$ for the 13 non-slack buses, and
+active/reactive generation $P_g, Q_g \in [0,1]$ at the 4 generator
+buses. The raw response is $g(x) = (P_{sp,1..14}, Q_{sp,1..14},
+\operatorname{Im}(I_2)) \in \mathbb{R}^{29}$ -- all 14 buses' real and
+reactive power injections, plus $\operatorname{Im}(I_2)$ specifically
+because the second objective's slack-bus term needs bus 2's current
+multiplied against bus 1's voltage (an artifact of the reference
+implementation's own apparent index slip, reproduced exactly -- see
+Section~\ref{sec:rcm40}'s "honest discrepancy" paragraph -- so it is not
+recoverable from $Q_{sp,2}$, which uses bus 2's own voltage instead).
+The known reduction: $f_1 = \sum_{k=1}^{14} P_{sp,k}$ (total active
+power loss; algebraically identical to the source's own
+$\operatorname{Re}(V_1\bar I_1) + \sum_{k=2}^{14} P_{sp,k}$ since
+$V_1=1$ makes $\operatorname{Re}(V_1 \bar I_1) = P_{sp,1}$) and
+$f_2 = -\operatorname{Im}(I_2) + \sum_{k=2}^{14} Q_{sp,k}$ (total
+reactive power loss, reproducing the reference's own $I_2$/$V_1$
+term verbatim).
+
+\paragraph{Verification.} All 34 admittance-matrix and load-vector
+constants ($G$, $B$, $P$, $Q$) were extracted directly from the
+reference implementation's source
+(\texttt{CEC2021\_func.m}, \texttt{case 40}, and \texttt{Cal\_par.m}'s
+\texttt{xmin40}/\texttt{xmax40}), not retyped from a paper's typeset
+equations -- the same discipline as Section~\ref{sec:rcm17}'s RCM17
+port, which caught real transcription errors doing exactly this for a
+different benchmark in this suite. The composite module's
+\texttt{raw\_response}/\texttt{composite\_rcm40\_reduction} pipeline was
+checked against a second, independent NumPy reimplementation of
+\texttt{CEC2021\_func.m}'s own formula on a random input: both
+objectives matched to full float64 precision. A local smoke test (10
+evaluations, batch size 2) completed successfully for both
+\texttt{morbo} ($12.1$~s) and \texttt{composite\_rcm40} ($404.4$~s,
+$\sim$33$\times$ slower -- a larger multiplier than GRI-Mech's
+$10.6\times$, consistent with fitting more independent GPs, 29 raw
+outputs here versus 24 there) before cluster submission.
+
+\paragraph{Not yet added: shape-adapted trust regions.} Same reason
+as GRI-Mech (Section~\ref{sec:gri-mech}): the \texttt{\_pca}/
+\texttt{\_ard\_pca} composite$\times$shape variants hit the pre-existing
+\texttt{assert len(tr\_inds) == len(tr.X)} crash found during the SnAr
+ablation, so this cluster sweep
+(\texttt{cluster/submit\_rcm40\_2x1.sh}) is a direct-vs-composite A/B
+only: 2 labels $\times$ 5 seeds, 300 evaluations/trial, no SLURM time
+limit.
 
 \section{Discussion}
 

@@ -1,0 +1,14 @@
+{
+    "dim": 34,
+    "evalfn": "RCM40",
+    "max_evals": 300,
+    "n_initial_points": 70,
+    "batch_size": 20,
+    "n_trust_regions": 3,
+    "min_tr_size": 70,
+    "max_reference_point": [
+      -200.0,
+      -500.0
+    ],
+    "verbose": true
+  }
