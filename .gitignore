@@ -145,3 +145,10 @@ writeup/*.log
 writeup/*.out
 writeup/*.pdf
 
+# Isolated venv + downloaded model checkpoint for composite_oc20.py
+# (fairchem-core needs an incompatible older torch pin -- see
+# morbo/problems/composite_oc20.py's module docstring). Each environment
+# (local, cluster) builds its own via cluster/setup_fairchem_env.sh.
+.fairchem_env/
+.fairchem_cache/
+

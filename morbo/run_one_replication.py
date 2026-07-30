@@ -67,6 +67,10 @@ from morbo.problems.composite_rcm40 import (
     composite_rcm40_reduction,
     get_composite_rcm40_fn,
 )
+from morbo.problems.composite_oc20 import (
+    composite_oc20_reduction,
+    get_composite_oc20_fn,
+)
 from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
 from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
 from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
@@ -99,6 +103,9 @@ supported_labels = [
     "composite_rcm40",
     "composite_rcm40_pca",
     "composite_rcm40_ard_pca",
+    "composite_oc20",
+    "composite_oc20_pca",
+    "composite_oc20_ard_pca",
     "cma_ellipsoid",
     "linear_gp",
     "linear_gp_pca",
@@ -497,6 +504,27 @@ def run_one_replication(
         bounds = bounds.to(**tkwargs)
         num_outputs = 29
         composite_reduction = composite_rcm40_reduction
+    elif evalfn == "OC20Relax":
+        # Direct-objective baseline for the composite A/B, same pattern as
+        # "SnAr"/"GriMechCalib"/"RCM40" above: identical raw response/
+        # reduction as "CompositeOC20", but the GP models the final 2
+        # relative-energy/residual-force objectives directly rather than
+        # the 10-dim checkpointed relaxation-trajectory raw response.
+        # `composite_oc20_reduction` returns the maximize-convention pair
+        # directly, so negate it back to the minimize-convention `f` here
+        # and let `negate=True` restore the sign.
+        _oc20_raw_response, bounds = get_composite_oc20_fn(dtype=dtype, device=device)
+
+        def f(X: Tensor) -> Tensor:
+            return -composite_oc20_reduction(_oc20_raw_response(X))
+
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 2
+    elif evalfn == "CompositeOC20":
+        f, bounds = get_composite_oc20_fn(dtype=dtype, device=device)
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 10
+        composite_reduction = composite_oc20_reduction
     elif evalfn != "ackley":
         # Handle the non-constrained botorch test functions here.
         constructor_map = {
@@ -534,7 +562,7 @@ def run_one_replication(
         # deal for evalfn="Callable" whenever a composite_reduction was
         # built above (raw_evaluate_components + raw_compose path).
         negate=not (
-            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40")
+            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeOC20")
             or (evalfn == "Callable" and composite_reduction is not None)
         ),
         observation_noise_std=observation_noise_std,

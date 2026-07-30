@@ -2124,7 +2124,7 @@ in Section~\ref{sec:more-candidates}) can be found.
 Candidate & Dim.\ & Objectives & Status \\
 \midrule
 PyBaMM battery aging \citep{sulzer2021pybamm} & $\sim$28 & 2--3 (energy, retention, temp.) & Strongest confirmed; installed \& run (\S\ref{sec:pybamm}) \\
-OC20/OC22 catalysis \citep{chanussot2021oc20,tran2022oc22} & high (atom coords.) & 2 (energy, stability) & Fixed dataset; live proxy via fairchem (\S\ref{sec:oc20}) \\
+OC20/OC22 catalysis \citep{chanussot2021oc20,tran2022oc22} & 57 (fixed system) & 2 (energy, stability) & \textbf{Implemented \& run through the real engine} (\S\ref{sec:oc20-implemented}) \\
 OpenTO topology opt.\ \citep{nobari2025openTO} & 1024--10000+ & 2 (compliance, volume) & Live re-runnable solver confirmed (\S\ref{sec:topodiff-selto}) \\
 RCM40 optimal power flow \citep{kumar2021rwcmop,biswas2020opf} & 34 & 2 (active/reactive loss) & \textbf{Implemented \& run through the real engine} (\S\ref{sec:rcm40-implemented}) \\
 RCM17 bulk carrier design \citep{kumar2021rwcmop} & 6 & 3 (cost, weight, capacity) & Closed-form, verified vs.\ source (\S\ref{sec:rcm17}) \\
@@ -2664,7 +2664,7 @@ project's highest-dimensional chemistry composite benchmark
 Candidate & Dim.\ & Objectives & Status \\
 \midrule
 PyBaMM battery aging \citep{sulzer2021pybamm} & $\sim$28 & 2--3 (energy, retention, temp.) & Strongest confirmed; installed \& run (\S\ref{sec:pybamm}) \\
-OC20/OC22 catalysis \citep{chanussot2021oc20,tran2022oc22} & high (atom coords.) & 2 (energy, stability) & Fixed dataset; live proxy via fairchem (\S\ref{sec:oc20}) \\
+OC20/OC22 catalysis \citep{chanussot2021oc20,tran2022oc22} & 57 (fixed system) & 2 (energy, stability) & \textbf{Implemented \& run through the real engine} (\S\ref{sec:oc20-implemented}) \\
 IDAES process flowsheets \citep{lee2021idaes} & 5--50 & 2 (yield, cost) & Real \& open; not yet run ourselves (\S\ref{sec:idaes}) \\
 Summit SnAr reactor \citep{felton2021summit} & 4 & 2 (space-time yield, E-factor) & \textbf{Implemented \& run through the real engine} (\S\ref{sec:snar}) \\
 GRI-Mech 3.0 rate calibration \citep{goodwin2024cantera,smith1999grimech,frenklach1992solutionmapping} & 64 & 2 (low-/high-T ignition-delay error) & \textbf{Implemented \& run through the real engine} (\S\ref{sec:gri-mech}) \\
@@ -3319,6 +3319,127 @@ given hypervolume faster, converging toward -- but here not fully
 reaching -- parity with direct modeling by the time the eval budget
 runs out, distinct from GRI-Mech v2's pattern of a persistent gap that
 does not close.
+
+\subsection{Implemented: composite OC20 catalyst-adsorbate relaxation}
+\label{sec:oc20-implemented}
+
+This project's next real high-dimensional (57D) composite benchmark
+after GRI-Mech and RCM40: OC20 catalyst-adsorbate relaxation
+\citep{chanussot2021oc20}, already surveyed (not yet tried, dependent
+on \texttt{facebookresearch/fairchem}) in Section~\ref{sec:oc20} above.
+Implemented in \texttt{morbo/\allowbreak problems/\allowbreak composite\_oc20.py} (plus
+a worker script, \texttt{oc20\_fairchem\_worker.py}, described below) and
+wired into \texttt{morbo/\allowbreak run\_one\_replication.py} as
+\texttt{evalfn} values \texttt{"OC20Relax"} (direct) and
+\texttt{"CompositeOC20"} (composite).
+
+\paragraph{Getting to a live oracle: two real blockers, both resolved.}
+Section~\ref{sec:oc20} already flagged OC20/OC22 as released fixed
+datasets, with \texttt{fairchem-core}'s pretrained potentials as "the
+practical middle ground, not yet tried." Trying it surfaced two genuine
+problems, each requiring a real fix rather than a workaround:
+\begin{enumerate}
+\item \texttt{pip install fairchem-core} (latest, 2.21.0) into this
+project's own environment silently downgraded its pinned
+\texttt{torch} from 2.12.0 to 2.8.0 -- caught immediately by checking
+package versions, and would have put every other composite benchmark
+in this repository (GRI-Mech, RCM40, SnAr) at risk of subtly different
+behavior under an unverified torch version. Fixed by building a
+\emph{separate} venv (\texttt{.fairchem\_env/}, via
+\texttt{cluster/setup\_fairchem\_env.sh}) that fairchem's own
+dependency chain can pin however it needs, without touching this
+project's own environment at all.
+\item The latest \texttt{fairchem-core} moved to a gated
+\texttt{facebook/UMA} checkpoint on HuggingFace: attempting to load it
+raises \texttt{GatedRepoError}, requiring a HuggingFace account and
+accepting Meta's license agreement -- neither of which this process
+can do on the user's behalf (matching this project's own operating
+constraints on account creation and license acceptance). The fix:
+\texttt{fairchem-core==1.10.0} still has the older
+\texttt{fairchem.core.models.model\_registry.model\_name\_to\_local\_file}
+public registry and \texttt{OCPCalculator} class, which download and
+load the \texttt{GemNet-OC-S2EF-OC20-2M} checkpoint (38.9M parameters,
+trained on 2M OC20 S2EF frames) with \emph{no authentication
+whatsoever} -- verified directly by loading it and running real
+inference. That older release in turn needs \texttt{torch\_scatter}/
+\texttt{torch\_sparse}/\texttt{torch\_cluster} (compiled extensions,
+resolved via PyG's own wheel index for \texttt{torch==2.4.1+cpu}) and
+\texttt{scipy<1.15} (newer scipy removed \texttt{scipy.special.sph\_harm},
+which this release's basis-function code calls directly) -- both
+one-time, documented fixes in \texttt{cluster/setup\_fairchem\_env.sh},
+not silent version pins chosen at random.
+\end{enumerate}
+
+\paragraph{Architecture: a persistent subprocess worker, not an
+in-process import.} Because the isolated environment's \texttt{torch}
+is incompatible with this project's own, \texttt{composite\_oc20.py}
+never imports \texttt{fairchem} directly. Instead it launches
+\texttt{oc20\_fairchem\_worker.py} once, in the isolated venv, as a
+persistent subprocess (\texttt{.fairchem\_env/\allowbreak bin\allowbreak/python} or
+\texttt{Scripts\allowbreak/python.exe}), communicating one JSON request/response
+pair per line over stdin/stdout -- loading the 38.9M-parameter model
+once per worker lifetime rather than once per evaluation, which would
+otherwise dominate the cost of every single design point.
+
+\paragraph{Black box: $g(x)$, a real ML-surrogate relaxation.} A fixed
+Cu(111) slab (3x3x4 supercell, 36 atoms) plus one adsorbed O atom (37
+atoms total); the bottom two layers are held fixed (standard
+surface-relaxation practice) and the top two layers plus the adsorbate
+(19 atoms, 57 real-valued coordinates) are free. $x \in [-1,1]^{57}$
+perturbs each free atom's position by up to $\pm0.5$~\AA\ from a
+reference guess; the worker then runs 15 steps of ASE's BFGS optimizer
+using GemNet-OC as the force field, checkpointing energy and the
+maximum residual force over the mobile atoms at 5 evenly-spaced steps
+-- $g(x) \in \mathbb{R}^{10}$ (5 energies, 5 max-forces), the same
+checkpointed-trajectory pattern as \texttt{composite\_penicillin.py}/
+\texttt{composite\_snar.py}/\texttt{composite\_gri\_mech.py}, just with
+an ML potential run through a real geometry-optimization loop as the
+simulator instead of an ODE/reactor integration or closed-form linear
+algebra.
+
+\paragraph{Closed form: $L(g)$ and objectives $f(x)=L(g(x))$, with an
+honest simplification.} The known reduction takes the final (5th)
+checkpoint's energy and max-force: $f_1(x) = -(E_5(x) - E_{\text{slab}})$,
+$f_2(x) = -F_5(x)$ (both maximized: less positive relative energy is
+more stable, less residual force is better-converged). The textbook
+adsorption-energy formula subtracts \emph{two} references -- the bare
+slab \emph{and} an isolated gas-phase adsorbate -- but a single free O
+atom (and, tried as an alternative, an O$_2$ molecule) are degenerate
+edge cases for this graph-neural-network potential's edge construction
+and raised a runtime error rather than returning a value, confirmed
+directly by trying both. Only the bare-slab reference
+$E_{\text{slab}} = -0.757$~eV (computed successfully, verified directly)
+is subtracted here, giving a well-defined \emph{relative} energy for
+comparing different perturbations of the same fixed slab+adsorbate
+system -- adequate for a controlled direct-vs-composite A/B on one
+fixed system, but \textbf{not} a reference-corrected adsorption energy
+matching published DFT tables, and not claimed to be one.
+
+\paragraph{Verification.} The worker script was smoke-tested standalone
+(one request via stdin, matching the exact JSON protocol
+\texttt{composite\_oc20.py} uses) before wiring it into the composite
+module: the all-zero-perturbation request returns a real, physically
+sensible relaxation trajectory (energy $0.753 \to 0.528$~eV, max force
+$0.503 \to 0.007$~eV/\AA\ over the 5 checkpoints, i.e.\ genuine
+convergence toward a local minimum), and five random perturbations gave
+five different, non-degenerate final energies/forces -- confirmed the
+design space has real, exploitable signal rather than being flat or
+degenerate. A local smoke test of the full pipeline (8 evaluations,
+batch size 2) completed successfully for both \texttt{morbo} ($57.7$~s)
+and \texttt{composite\_oc20} ($84.0$~s) before cluster submission.
+
+\paragraph{Not yet added: shape-adapted trust regions.} Same reason as
+GRI-Mech/RCM40 (Sections~\ref{sec:gri-mech}/\ref{sec:rcm40-implemented}):
+the \texttt{\_pca}/\texttt{\_ard\_pca} composite$\times$shape variants
+hit the pre-existing \texttt{assert len(tr\_inds) == len(tr.X)} crash
+found during the SnAr ablation, so this cluster sweep
+(\texttt{cluster/submit\_oc20\_2x1.sh}, run after
+\texttt{cluster/setup\_fairchem\_env.sh} builds the isolated environment
+on that checkout) is a direct-vs-composite A/B only: 2 labels $\times$
+5 seeds, 120 evaluations/trial, CPU-only (the isolated environment's
+compiled extensions are all \texttt{+cpu} builds, deliberately, to avoid
+matching a specific CUDA version across environments), no SLURM time
+limit.
 
 \section{Discussion}
 

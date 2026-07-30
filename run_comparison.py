@@ -88,6 +88,8 @@ e.g.
     python run_comparison.py gri_mech_composite composite_gri_mech 0
     python run_comparison.py rcm40_composite morbo 0
     python run_comparison.py rcm40_composite composite_rcm40 0
+    python run_comparison.py oc20_composite morbo 0
+    python run_comparison.py oc20_composite composite_oc20 0
     python run_comparison.py tr_shape_dtlz2_100d ard_box 0
     python run_comparison.py tr_shape_dtlz2_100d pca_ellipsoid 0
     python run_comparison.py tr_shape_dtlz2_100d ard_pca_ellipsoid 0
@@ -200,6 +202,18 @@ LABEL_OVERRIDES = {
     # reason as composite_gri_mech above.
     "composite_rcm40": {
         "evalfn": "CompositeRCM40",
+    },
+    # Composite modeling on OC20 catalyst-adsorbate relaxation (Chanussot
+    # et al. 2021), using a live, no-auth GemNet-OC potential
+    # (fairchem-core, isolated in .fairchem_env/) as a proxy for DFT: the
+    # GP models the 10-dim raw checkpointed-relaxation-trajectory response
+    # (`morbo/problems/composite_oc20.py`) instead of the 2 final
+    # relative-energy/residual-force objectives directly. Compare against
+    # "morbo" on the same experiment dir (`evalfn: "OC20Relax"` in the
+    # base config). No _pca/_ard_pca variant here either, same reason as
+    # composite_gri_mech/composite_rcm40 above.
+    "composite_oc20": {
+        "evalfn": "CompositeOC20",
     },
     # CMA-ES-style covariance adaptation (AS-SMEA, Wang et al. 2026):
     # persistent per-TR covariance updated from Pareto-elite points plus an

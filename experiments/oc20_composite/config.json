@@ -1,0 +1,14 @@
+{
+    "dim": 57,
+    "evalfn": "OC20Relax",
+    "max_evals": 120,
+    "n_initial_points": 57,
+    "batch_size": 12,
+    "n_trust_regions": 3,
+    "min_tr_size": 57,
+    "max_reference_point": [
+      -5.0,
+      -5.0
+    ],
+    "verbose": true
+  }
