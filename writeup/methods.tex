@@ -2420,18 +2420,33 @@ Honest caveat: OC20/OC22 as released are fixed datasets of already-run
 DFT relaxations, not a live oracle you can query on an arbitrary new
 candidate structure -- getting a true live simulator would mean running
 DFT (VASP, Quantum ESPRESSO) ourselves, which is a heavy dependency. The
-practical middle ground, not yet tried by us: \texttt{facebookresearch/fairchem}
-(formerly \texttt{ocp}) ships pretrained GemNet-OC graph-neural-network
-potentials trained on OC20/OC22, runnable for fast inference as an
-approximate but genuinely open, live-queryable proxy for the true DFT
-relaxation -- at the cost of the evaluation then being fast ML inference
-rather than genuinely expensive DFT, the same expense trade-off already
-flagged for the tabular NAS/HPO benchmarks below. (One more citation
-correction, same pattern as EvoXBench's link and Optiland's author
-above: a follow-up survey pass attributed OC20 to ``Montoya et al.\ 2021,
+practical middle ground: \texttt{facebookresearch/fairchem} (formerly
+\texttt{ocp}) ships pretrained GemNet-OC graph-neural-network potentials
+trained on OC20/OC22, runnable for fast inference as an approximate but
+genuinely open, live-queryable proxy for the true DFT relaxation -- at
+the cost of the evaluation then being fast ML inference rather than
+genuinely expensive DFT, the same expense trade-off already flagged for
+the tabular NAS/HPO benchmarks below. (One more citation correction,
+same pattern as EvoXBench's link and Optiland's author above: a
+follow-up survey pass attributed OC20 to ``Montoya et al.\ 2021,
 \emph{JACS}''; no such author appears on the actual paper, which is
 \citet{chanussot2021oc20} in \emph{ACS Catalysis} -- already the citation
 used throughout this section.)
+
+\textbf{Update, now checked}: \texttt{pip install fairchem-core}
+installs cleanly on its own, but its dependency resolution silently
+downgraded this project's own pinned \texttt{torch} from 2.12.0 to
+2.8.0 (\texttt{fairchem-core} requires \texttt{torch\textasciitilde=2.8.0})
+-- a real, verified risk to the rest of this project's pipeline
+(botorch/gpytorch, every other composite benchmark in this work), not
+a hypothetical one: caught only by checking package versions
+immediately after installing, and reverted before running anything
+else. \textbf{Deprioritized as this project's next high-dimensional
+benchmark for that reason}: adopting fairchem as a live OC20/OC22 proxy
+would mean either accepting an incompatible, untested \texttt{torch}
+version project-wide, or isolating it in a separate environment,
+neither of which was attempted here given how straightforwardly it
+would touch every other benchmark in this repository.
 
 \subsubsection{TopoDiff and SELTO: a correction}
 \label{sec:topodiff-selto}
@@ -2521,11 +2536,33 @@ Yield and Cost above; IDAES's costing framework is a real, shipped
 reduction function $L(g)$, not something we would need to write
 ourselves.
 
-Honest caveat, matching this section's own standard: unlike PyBaMM
-(Section~\ref{sec:pybamm}), IDAES has not yet been installed and run by
-us -- the flowsheet structure above is read from IDAES's own
-documentation and tutorials, not measured directly, so treat the exact
-unit count and solve time as approximate until verified the same way.
+\textbf{Update, now verified by installing and running it}: unlike when
+first surveyed above, IDAES (\texttt{pip install idaes-pse}, plus
+\texttt{idaes get-extensions} for the compiled IPOPT/solver binaries)
+and its example flowsheets (\texttt{pip install idaes-examples}) install
+and run cleanly, and the documented HDA tutorial
+(\texttt{idaes\_examples/notebooks/docs/tut/core/hda\_flowsheet.py})
+solves to its documented optimum exactly as published. But the real,
+measured degrees of freedom at the optimization stage --
+\texttt{assert degrees\_of\allowbreak\_freedom(m) == 4} in the tutorial's own
+code, confirmed by running it -- is only \textbf{4} free design
+variables (H101 outlet temperature, R101 heat duty, F101/F102 vapor
+outlet temperatures and F102 outlet pressure), not the $5$--$50$ this
+section originally estimated from documentation alone before
+installing anything. The flowsheet has many more \emph{fixed}
+parameters that could in principle be exposed as additional design
+variables (e.g.\ \texttt{S101} split fraction, \texttt{C101} outlet
+pressure, \texttt{R101} conversion, currently all hardcoded
+\texttt{.fix(...)} calls in the tutorial rather than physical
+constraints), but doing so was not attempted here, since it would mean
+redesigning the flowsheet's own degree-of-freedom balance rather than
+running an existing, already-verified tutorial -- a real project, not
+logged as "not yet tried." \textbf{Deprioritized as this project's next
+high-dimensional benchmark for that reason}: as documented and
+runnable today, this is a low-dimensional benchmark (4D), the same
+dimensionality trap already flagged for Airfoil/battery below, caught
+here only by actually installing and running it rather than trusting
+the documentation's own dimension estimate.
 
 \textbf{Deprioritized}: Airfoil CFD (NREL 2k/9k, UniFoil) and the two
 non-PyBaMM battery papers \citep{kench2024battery,ma2024battery} are
