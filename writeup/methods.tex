@@ -3441,6 +3441,34 @@ compiled extensions are all \texttt{+cpu} builds, deliberately, to avoid
 matching a specific CUDA version across environments), no SLURM time
 limit.
 
+\paragraph{Results.} All 10 jobs completed on the cluster without error
+(\texttt{morbo}: 12.1 min/seed; \texttt{composite\_oc20}: 12.7 min/seed
+-- the closed-form reduction's cost is negligible next to running
+GemNet-OC itself, so the two labels cost essentially the same per
+evaluation, unlike GRI-Mech/RCM40 where the composite side was visibly
+slower or faster). Mean \emph{final} hypervolume is effectively tied --
+$18.560$ (std $0.092$) for \texttt{morbo} versus $18.548$ (std $0.048$)
+for \texttt{composite\_oc20} -- and the difference is not statistically
+significant (win-rate $2/5$, paired $t$-test $p=0.834$). Unlike RCM40,
+this is not a case of a final-value comparison hiding a sample-efficiency
+story: computing the area under each seed's hypervolume-vs-evaluations
+curve (trapezoidal rule) gives $18.363$ (std $0.031$) for \texttt{morbo}
+versus $18.358$ (std $0.033$) for \texttt{composite\_oc20}, again a
+win-rate of only $2/5$ and not significant (paired $t$-test $p=0.671$).
+Composite and direct modeling are statistically indistinguishable
+throughout the trajectory here, not just at the end -- the same pattern
+as SnAr and GRI-Mech v1, and worth reading against RCM40 and GRI-Mech v2
+where composite modeling did show a real advantage: composite structure
+is not a free lunch that helps on every problem, and this benchmark is a
+genuine (if less exciting) data point for that, not a bug to chase down.
+A plausible reason specific to this task: the raw response $g(x) \in
+\mathbb{R}^{10}$ (5 energy/force checkpoint pairs from one BFGS
+trajectory) is highly \emph{autocorrelated} -- consecutive checkpoints
+of the same monotonically-relaxing trajectory carry mostly redundant
+information relative to the final checkpoint alone -- so modeling the
+full trajectory may add little beyond what direct modeling of the two
+final-checkpoint objectives already captures.
+
 \section{Discussion}
 
 Trust-region shape adaptation (Section~\ref{sec:tr-shape}) occupies a
