@@ -66,7 +66,12 @@ OC20_DIM = 3 * OC20_MOBILE_ATOMS  # 57
 OC20_N_CHECKPOINTS = 5
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_FAIRCHEM_PYTHON = _REPO_ROOT / ".fairchem_env" / "Scripts" / "python.exe"
+# Linux venvs/conda envs put the interpreter under bin/; Windows under
+# Scripts/ (see cluster/setup_fairchem_env.sh, which builds either layout
+# depending on platform).
+_FAIRCHEM_PYTHON = _REPO_ROOT / ".fairchem_env" / "bin" / "python"
+if not _FAIRCHEM_PYTHON.exists():
+    _FAIRCHEM_PYTHON = _REPO_ROOT / ".fairchem_env" / "Scripts" / "python.exe"
 _WORKER_SCRIPT = Path(__file__).resolve().parent / "oc20_fairchem_worker.py"
 
 _worker_process = None
