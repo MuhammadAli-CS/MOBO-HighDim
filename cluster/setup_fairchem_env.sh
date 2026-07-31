@@ -23,9 +23,25 @@ cd "$(dirname "$0")/.."
 ENV_DIR=.fairchem_env
 CACHE_DIR=.fairchem_cache
 
-python3 -m venv "$ENV_DIR"
+# Prefer stdlib venv; fall back to a conda --prefix env (same directory
+# layout, so PY's path below still works) when python3-venv isn't
+# installed system-wide and there's no sudo to fix that (true on this
+# project's own SLURM login node, discovered the hard way: `python3 -m
+# venv` failed there with "ensurepip is not available").
+if python3 -m venv "$ENV_DIR" 2>/tmp/venv_err.$$; then
+  :
+elif command -v conda >/dev/null 2>&1 || [ -f /share/apps/software/anaconda3/etc/profile.d/conda.sh ]; then
+  rm -rf "$ENV_DIR"
+  [ -f /share/apps/software/anaconda3/etc/profile.d/conda.sh ] && . /share/apps/software/anaconda3/etc/profile.d/conda.sh
+  conda create --prefix "$ENV_DIR" python=3.11 -y -q
+else
+  cat /tmp/venv_err.$$ >&2
+  echo "Neither a working 'python3 -m venv' nor conda is available -- cannot build the isolated environment." >&2
+  exit 1
+fi
+rm -f /tmp/venv_err.$$
 PY="$ENV_DIR/bin/python"
-# Windows venvs put the interpreter under Scripts/, not bin/
+# Windows venvs/conda envs put the interpreter under Scripts/, not bin/
 [ -f "$PY" ] || PY="$ENV_DIR/Scripts/python.exe"
 
 "$PY" -m pip install --upgrade pip -q
