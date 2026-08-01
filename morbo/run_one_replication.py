@@ -509,7 +509,8 @@ def run_one_replication(
         # "SnAr"/"GriMechCalib"/"RCM40" above: identical raw response/
         # reduction as "CompositeOC20", but the GP models the final 2
         # relative-energy/residual-force objectives directly rather than
-        # the 10-dim checkpointed relaxation-trajectory raw response.
+        # the 25-dim checkpointed relaxation-trajectory raw response
+        # (5 checkpoints x [energy + 4 per-atom-force order statistics]).
         # `composite_oc20_reduction` returns the maximize-convention pair
         # directly, so negate it back to the minimize-convention `f` here
         # and let `negate=True` restore the sign.
@@ -523,7 +524,7 @@ def run_one_replication(
     elif evalfn == "CompositeOC20":
         f, bounds = get_composite_oc20_fn(dtype=dtype, device=device)
         bounds = bounds.to(**tkwargs)
-        num_outputs = 10
+        num_outputs = 25
         composite_reduction = composite_oc20_reduction
     elif evalfn != "ackley":
         # Handle the non-constrained botorch test functions here.

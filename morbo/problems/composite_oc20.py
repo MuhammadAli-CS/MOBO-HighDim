@@ -64,6 +64,23 @@ from torch import Tensor
 OC20_MOBILE_ATOMS = 19
 OC20_DIM = 3 * OC20_MOBILE_ATOMS  # 57
 OC20_N_CHECKPOINTS = 5
+# Per checkpoint: 1 energy + 4 order statistics (max, mean, std, min) of the
+# raw per-atom force-magnitude vector the worker returns. Using order
+# statistics of the *real* per-atom vector, rather than the worker
+# pre-collapsing to a single max (the original design), is the actual fix:
+# it's real distributional signal, not fabricated. The full 19-component
+# per-atom vector was tried first (100-dim raw response total) and reliably
+# crashed GP fitting (a Windows access violation inside
+# gpytorch/linear_operator's Cholesky routine during Thompson-sampling
+# posterior draws, confirmed via `faulthandler` -- likely the joint
+# posterior covariance across 100 independent-output GPs times
+# `raw_samples=4096` discrete TS candidates becoming too large for this
+# library/platform to handle, well past GRI-Mech's 24 and RCM40's 29 raw
+# dims, both of which run fine). 25 raw dims keeps the real fix (no more
+# scalar pre-reduction inside the black box) while staying in the range
+# this project's other composite benchmarks have already verified works.
+OC20_N_FORCE_STATS = 4
+OC20_RAW_DIM = OC20_N_CHECKPOINTS * (1 + OC20_N_FORCE_STATS)  # 25
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 # Linux venvs/conda envs put the interpreter under bin/; Windows under
@@ -125,9 +142,17 @@ def get_composite_oc20_fn(dtype=torch.double, device=None) -> Tuple[callable, Te
             raw_response: callable mapping an `n x 57`-dim tensor (raw,
                 *unnormalized* per-mobile-atom-coordinate perturbations,
                 each in `[-1, 1]`, scaled internally by the worker to
-                `+-0.5` Angstrom) to an `n x 10`-dim tensor
-                `[energy_1..energy_5, max_force_1..max_force_5]` (5
-                checkpoints each along the 15-step BFGS relaxation).
+                `+-0.5` Angstrom) to an `n x 25`-dim tensor
+                `[energy_1..energy_5, stats_1[4]..stats_5[4]]` -- 5
+                checkpoints along the 15-step BFGS relaxation, each an
+                energy scalar plus `[max, mean, std, min]` of that
+                checkpoint's raw per-mobile-atom force-magnitude vector
+                (the worker itself only ever returns the raw, un-reduced
+                per-atom vector -- these order statistics are computed
+                here, not inside the worker; see
+                `oc20_fairchem_worker.py`'s module docstring and this
+                module's `OC20_RAW_DIM` comment for why order statistics
+                rather than the full per-atom vector).
             bounds: `2 x 57`-dim tensor, `[-1, 1]` per dimension.
     """
     proc = _ensure_worker()
@@ -139,9 +164,13 @@ def get_composite_oc20_fn(dtype=torch.double, device=None) -> Tuple[callable, Te
             proc.stdin.write(json.dumps({"x": row}) + "\n")
             proc.stdin.flush()
             resp = json.loads(proc.stdout.readline())
-            rows.append(resp["energies"] + resp["max_forces"])
+            stats = []
+            for checkpoint_forces in resp["atom_forces"]:
+                f = torch.tensor(checkpoint_forces, dtype=dtype)
+                stats.extend([f.max().item(), f.mean().item(), f.std().item(), f.min().item()])
+            rows.append(resp["energies"] + stats)
         out = torch.tensor(rows, dtype=dtype, device=device)
-        return out.view(*X_input.shape[:-1], 2 * OC20_N_CHECKPOINTS)
+        return out.view(*X_input.shape[:-1], OC20_RAW_DIM)
 
     bounds = torch.tensor([[-1.0] * OC20_DIM, [1.0] * OC20_DIM], dtype=dtype, device=device)
     return raw_response, bounds
@@ -150,12 +179,16 @@ def get_composite_oc20_fn(dtype=torch.double, device=None) -> Tuple[callable, Te
 def composite_oc20_reduction(Y_raw: Tensor) -> Tensor:
     r"""Known reduction: final-checkpoint relative adsorption energy
     (bare-slab-referenced, see module docstring) and final-checkpoint
-    residual force, both from the last of the 5 checkpoints.
+    residual force (the max-force order statistic at that checkpoint --
+    the actual convergence criterion ASE/DFT relaxations use, one of the
+    4 order statistics `raw_response` computes from the worker's raw
+    per-atom force vector).
 
     Args:
-        Y_raw: `... x 10`-dim tensor
-            `[energy_1..energy_5, max_force_1..max_force_5]`, as produced
-            by `raw_response` above.
+        Y_raw: `... x 25`-dim tensor
+            `[energy_1..energy_5, stats_1[4]..stats_5[4]]` (each
+            `stats_i = [max, mean, std, min]`), as produced by
+            `raw_response` above.
 
     Returns:
         An `... x 2`-dim tensor `[-E_rel, -F_res]` (maximize convention:
@@ -165,7 +198,10 @@ def composite_oc20_reduction(Y_raw: Tensor) -> Tensor:
     """
     _ensure_worker()
     energies = Y_raw[..., 0:OC20_N_CHECKPOINTS]
-    max_forces = Y_raw[..., OC20_N_CHECKPOINTS : 2 * OC20_N_CHECKPOINTS]
+    stats = Y_raw[..., OC20_N_CHECKPOINTS:].view(
+        *Y_raw.shape[:-1], OC20_N_CHECKPOINTS, OC20_N_FORCE_STATS
+    )
+    max_forces = stats[..., 0]  # [max, mean, std, min] -> index 0 is max
 
     e_final = energies[..., -1]
     f_final = max_forces[..., -1]

@@ -9,6 +9,17 @@ authentication required -- see module docstring), writes one JSON
 response per line to stdout, and loops -- avoiding the cost of
 reloading the ~39M-parameter model for every single design point.
 
+Each checkpoint reports the raw per-mobile-atom force magnitude
+vector (`atom_forces`), not a pre-reduced scalar (e.g. max over
+atoms) -- that reduction belongs client-side in
+`composite_oc20.composite_oc20_reduction`, on the far side of the
+black-box/closed-form boundary, not baked into the simulator's own
+output. Exposing the full per-atom pattern (rather than a single
+number) is also what gives the composite GP something genuinely
+richer than direct modeling to learn from: which atoms are still
+unrelaxed at each checkpoint is real spatial structure that a scalar
+max discards.
+
 Not imported by anything in the main environment; invoked only via
 `subprocess.Popen([".fairchem_env/Scripts/python.exe", <this file>], ...)`
 from `composite_oc20.py`.
@@ -72,7 +83,7 @@ def main() -> None:
         atoms.calc = calc
 
         energies = []
-        max_forces = []
+        atom_forces = []  # each entry: n_mobile-length list of per-atom force magnitudes
         try:
             opt = BFGS(atoms, logfile=None)
             checkpoint_every = max(1, N_RELAX_STEPS // N_CHECKPOINTS)
@@ -81,22 +92,22 @@ def main() -> None:
                 if (step + 1) % checkpoint_every == 0:
                     e = atoms.get_potential_energy()
                     f = atoms.get_forces()
-                    fmax = float(np.abs(f[mobile_indices]).max())
+                    f_mag = np.linalg.norm(f[mobile_indices], axis=-1)
                     energies.append(float(e))
-                    max_forces.append(fmax)
+                    atom_forces.append(f_mag.tolist())
             while len(energies) < N_CHECKPOINTS:
                 energies.append(energies[-1] if energies else float(atoms.get_potential_energy()))
-                max_forces.append(max_forces[-1] if max_forces else 0.0)
+                atom_forces.append(atom_forces[-1] if atom_forces else [0.0] * n_mobile)
             ok = True
         except Exception as exc:  # noqa: BLE001 -- report failure to caller, don't crash the worker
             energies = [float(e_slab_bare)] * N_CHECKPOINTS
-            max_forces = [100.0] * N_CHECKPOINTS
+            atom_forces = [[100.0] * n_mobile] * N_CHECKPOINTS
             ok = False
 
         print(json.dumps({
             "ok": ok,
             "energies": energies[:N_CHECKPOINTS],
-            "max_forces": max_forces[:N_CHECKPOINTS],
+            "atom_forces": atom_forces[:N_CHECKPOINTS],
         }), flush=True)
 
 

@@ -3388,26 +3388,47 @@ surface-relaxation practice) and the top two layers plus the adsorbate
 (19 atoms, 57 real-valued coordinates) are free. $x \in [-1,1]^{57}$
 perturbs each free atom's position by up to $\pm0.5$~\AA\ from a
 reference guess; the worker then runs 15 steps of ASE's BFGS optimizer
-using GemNet-OC as the force field, checkpointing energy and the
-maximum residual force over the mobile atoms at 5 evenly-spaced steps
--- $g(x) \in \mathbb{R}^{10}$ (5 energies, 5 max-forces), the same
+using GemNet-OC as the force field, checkpointing the energy and the
+\emph{raw per-mobile-atom} force-magnitude vector (19 components, not
+pre-reduced to a single number) at 5 evenly-spaced steps -- the same
 checkpointed-trajectory pattern as \texttt{composite\_penicillin.py}/
 \texttt{composite\_snar.py}/\texttt{composite\_gri\_mech.py}, just with
 an ML potential run through a real geometry-optimization loop as the
 simulator instead of an ODE/reactor integration or closed-form linear
-algebra.
+algebra. An earlier version of this worker computed the max over atoms
+\emph{inside} the worker and returned only that scalar per checkpoint
+-- on inspection this was a black-box/closed-form boundary violation
+(a post-processing reduction leaking into the simulator's own output),
+and, separately, gave the composite GP nothing beyond 2 scalars per
+checkpoint to model. $g(x)$ is now $5 \times (1 + 4) = 20$-dim client-side
+(see below): each checkpoint contributes its energy plus order
+statistics -- $[\max, \text{mean}, \text{std}, \min]$ -- of the raw
+19-component force vector, which \texttt{composite\_oc20.py} computes
+from the worker's un-reduced output, not the worker itself. Passing the
+full 19-component vector through per checkpoint ($g(x) \in
+\mathbb{R}^{100}$) was tried first and reliably crashed GP fitting (a
+Windows access violation deep in \texttt{gpytorch}/\texttt{linear\_operator}'s
+Cholesky routine during Thompson-sampling posterior draws, confirmed via
+Python's \texttt{faulthandler}) -- past GRI-Mech's 24 and RCM40's 29 raw
+dimensions, both of which fit without issue, so the 25-dim
+order-statistics version is the largest that fits reliably with this
+project's current GP-fitting code, not the largest that could in
+principle be exposed.
 
 \paragraph{Closed form: $L(g)$ and objectives $f(x)=L(g(x))$, with an
 honest simplification.} The known reduction takes the final (5th)
-checkpoint's energy and max-force: $f_1(x) = -(E_5(x) - E_{\text{slab}})$,
-$f_2(x) = -F_5(x)$ (both maximized: less positive relative energy is
-more stable, less residual force is better-converged). The textbook
-adsorption-energy formula subtracts \emph{two} references -- the bare
-slab \emph{and} an isolated gas-phase adsorbate -- but a single free O
-atom (and, tried as an alternative, an O$_2$ molecule) are degenerate
-edge cases for this graph-neural-network potential's edge construction
-and raised a runtime error rather than returning a value, confirmed
-directly by trying both. Only the bare-slab reference
+checkpoint's energy and its max-force order statistic:
+$f_1(x) = -(E_5(x) - E_{\text{slab}})$, $f_2(x) = -F_{5,\max}(x)$ (both
+maximized: less positive relative energy is more stable, less residual
+force is better-converged) -- $F_{5,\max}$ is exactly the fmax
+convergence criterion ASE/DFT relaxations use, now computed client-side
+from the real per-atom vector rather than inside the worker. The
+textbook adsorption-energy formula subtracts \emph{two} references --
+the bare slab \emph{and} an isolated gas-phase adsorbate -- but a
+single free O atom (and, tried as an alternative, an O$_2$ molecule)
+are degenerate edge cases for this graph-neural-network potential's
+edge construction and raised a runtime error rather than returning a
+value, confirmed directly by trying both. Only the bare-slab reference
 $E_{\text{slab}} = -0.757$~eV (computed successfully, verified directly)
 is subtracted here, giving a well-defined \emph{relative} energy for
 comparing different perturbations of the same fixed slab+adsorbate
@@ -3425,8 +3446,11 @@ convergence toward a local minimum), and five random perturbations gave
 five different, non-degenerate final energies/forces -- confirmed the
 design space has real, exploitable signal rather than being flat or
 degenerate. A local smoke test of the full pipeline (8 evaluations,
-batch size 2) completed successfully for both \texttt{morbo} ($57.7$~s)
-and \texttt{composite\_oc20} ($84.0$~s) before cluster submission.
+batch size 2), rerun after the raw-response redesign above, completed
+successfully for both \texttt{morbo} ($71.5$~s) and
+\texttt{composite\_oc20} ($150.7$~s -- fitting 25 independent
+per-output GPs instead of 2 is genuinely more expensive, not just a
+different constant) before cluster resubmission.
 
 \paragraph{Not yet added: shape-adapted trust regions.} Same reason as
 GRI-Mech/RCM40 (Sections~\ref{sec:gri-mech}/\ref{sec:rcm40-implemented}):
@@ -3441,33 +3465,24 @@ compiled extensions are all \texttt{+cpu} builds, deliberately, to avoid
 matching a specific CUDA version across environments), no SLURM time
 limit.
 
-\paragraph{Results.} All 10 jobs completed on the cluster without error
-(\texttt{morbo}: 12.1 min/seed; \texttt{composite\_oc20}: 12.7 min/seed
--- the closed-form reduction's cost is negligible next to running
-GemNet-OC itself, so the two labels cost essentially the same per
-evaluation, unlike GRI-Mech/RCM40 where the composite side was visibly
-slower or faster). Mean \emph{final} hypervolume is effectively tied --
-$18.560$ (std $0.092$) for \texttt{morbo} versus $18.548$ (std $0.048$)
-for \texttt{composite\_oc20} -- and the difference is not statistically
-significant (win-rate $2/5$, paired $t$-test $p=0.834$). Unlike RCM40,
-this is not a case of a final-value comparison hiding a sample-efficiency
-story: computing the area under each seed's hypervolume-vs-evaluations
-curve (trapezoidal rule) gives $18.363$ (std $0.031$) for \texttt{morbo}
-versus $18.358$ (std $0.033$) for \texttt{composite\_oc20}, again a
-win-rate of only $2/5$ and not significant (paired $t$-test $p=0.671$).
-Composite and direct modeling are statistically indistinguishable
-throughout the trajectory here, not just at the end -- the same pattern
-as SnAr and GRI-Mech v1, and worth reading against RCM40 and GRI-Mech v2
-where composite modeling did show a real advantage: composite structure
-is not a free lunch that helps on every problem, and this benchmark is a
-genuine (if less exciting) data point for that, not a bug to chase down.
-A plausible reason specific to this task: the raw response $g(x) \in
-\mathbb{R}^{10}$ (5 energy/force checkpoint pairs from one BFGS
-trajectory) is highly \emph{autocorrelated} -- consecutive checkpoints
-of the same monotonically-relaxing trajectory carry mostly redundant
-information relative to the final checkpoint alone -- so modeling the
-full trajectory may add little beyond what direct modeling of the two
-final-checkpoint objectives already captures.
+\paragraph{Results (v1, worker-internal max-force reduction --
+superseded).} The first cluster run of this benchmark (raw response
+$g(x) \in \mathbb{R}^{10}$: 5 energy/max-force checkpoint pairs, with
+the max already taken \emph{inside} the worker) found composite and
+direct modeling statistically indistinguishable throughout the
+trajectory -- final hypervolume $18.560$ (std $0.092$) for
+\texttt{morbo} versus $18.548$ (std $0.048$) for
+\texttt{composite\_oc20} ($p=0.834$), AUC likewise tied ($p=0.671$). On
+inspection this design had two problems, not one: the worker-internal
+max was a black-box/closed-form boundary violation (Section
+"Black box" above), and -- independent of that -- the raw response gave
+the composite GP only 2 scalars per checkpoint to model, from a
+monotonically-converging BFGS trajectory where consecutive checkpoints
+are highly autocorrelated with the final one. Both are fixed in the
+v2 design below (raw per-atom force order statistics, computed
+client-side); see that Results paragraph for the outcome.
+
+\paragraph{Results (v2, client-side order-statistics reduction).}
 
 \section{Discussion}
 
