@@ -3482,7 +3482,32 @@ are highly autocorrelated with the final one. Both are fixed in the
 v2 design below (raw per-atom force order statistics, computed
 client-side); see that Results paragraph for the outcome.
 
-\paragraph{Results (v2, client-side order-statistics reduction).}
+\paragraph{Results (v2, client-side order-statistics reduction).} All
+10 jobs completed on the cluster without error (\texttt{morbo}:
+12.4~min/seed; \texttt{composite\_oc20}: 16.2~min/seed -- fitting 25
+independent per-output GPs instead of 2 is genuinely more expensive
+per iteration, matching the local smoke test's finding). Mean
+\emph{final} hypervolume is again effectively tied -- $18.540$ (std
+$0.037$) for \texttt{composite\_oc20} versus $18.540$ (std $0.076$) for
+\texttt{morbo} -- and the difference is not statistically significant
+(win-rate $2/5$, paired $t$-test $p=0.813$). AUC tells the same story:
+$18.322$ (std $0.058$) for \texttt{composite\_oc20} versus $18.330$
+(std $0.070$) for \texttt{morbo}, win-rate $2/5$, paired $t$-test
+$p=0.398$. This is the same qualitative outcome as the v1 run
+(Results, above), but now a considerably stronger null result: v1 left
+open the possibility that the tie was an artifact of a thin composite
+design (2 scalars/checkpoint, a black-box-boundary violation on top).
+v2 fixes both -- the composite GP now sees real per-atom force
+distributional structure (25 raw dimensions instead of 10, the largest
+this project's GP-fitting code currently handles reliably, see "Black
+box" above) computed honestly client-side -- and the result is
+unchanged. Read together with SnAr and GRI-Mech v1 (also statistically
+tied) against RCM40 and GRI-Mech v2 (composite genuinely ahead):
+composite structure's benefit is real but task-dependent, and OC20's
+BFGS relaxation trajectory -- monotonically convergent by construction,
+regardless of how richly each checkpoint's state is exposed to the
+GP -- appears to be a genuine case where it does not help, not a case
+where this project under-exposed the raw response.
 
 \section{Discussion}
 
