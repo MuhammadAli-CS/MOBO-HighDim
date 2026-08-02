@@ -67,6 +67,10 @@ from morbo.problems.composite_rcm40 import (
     composite_rcm40_reduction,
     get_composite_rcm40_fn,
 )
+from morbo.problems.composite_rcm46 import (
+    composite_rcm46_reduction,
+    get_composite_rcm46_fn,
+)
 from morbo.problems.composite_oc20 import (
     composite_oc20_reduction,
     get_composite_oc20_fn,
@@ -103,6 +107,9 @@ supported_labels = [
     "composite_rcm40",
     "composite_rcm40_pca",
     "composite_rcm40_ard_pca",
+    "composite_rcm46",
+    "composite_rcm46_pca",
+    "composite_rcm46_ard_pca",
     "composite_oc20",
     "composite_oc20_pca",
     "composite_oc20_ard_pca",
@@ -504,6 +511,27 @@ def run_one_replication(
         bounds = bounds.to(**tkwargs)
         num_outputs = 29
         composite_reduction = composite_rcm40_reduction
+    elif evalfn == "RCM46":
+        # Direct-objective baseline for the composite A/B, same pattern as
+        # "RCM40" above: identical raw response/reduction as
+        # "CompositeRCM46", but the GP models the final 4 objectives
+        # (fuel cost, active/reactive power loss, voltage deviation)
+        # directly rather than the 45-dim raw response.
+        # `composite_rcm46_reduction` returns the maximize-convention
+        # tuple directly, so negate it back to the minimize-convention
+        # `f` here and let `negate=True` restore the sign.
+        _rcm46_raw_response, bounds = get_composite_rcm46_fn(dtype=dtype, device=device)
+
+        def f(X: Tensor) -> Tensor:
+            return -composite_rcm46_reduction(_rcm46_raw_response(X))
+
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 4
+    elif evalfn == "CompositeRCM46":
+        f, bounds = get_composite_rcm46_fn(dtype=dtype, device=device)
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 45
+        composite_reduction = composite_rcm46_reduction
     elif evalfn == "OC20Relax":
         # Direct-objective baseline for the composite A/B, same pattern as
         # "SnAr"/"GriMechCalib"/"RCM40" above: identical raw response/
@@ -563,7 +591,7 @@ def run_one_replication(
         # deal for evalfn="Callable" whenever a composite_reduction was
         # built above (raw_evaluate_components + raw_compose path).
         negate=not (
-            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeOC20")
+            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeRCM46", "CompositeOC20")
             or (evalfn == "Callable" and composite_reduction is not None)
         ),
         observation_noise_std=observation_noise_std,

@@ -88,6 +88,8 @@ e.g.
     python run_comparison.py gri_mech_composite composite_gri_mech 0
     python run_comparison.py rcm40_composite morbo 0
     python run_comparison.py rcm40_composite composite_rcm40 0
+    python run_comparison.py rcm46_composite morbo 0
+    python run_comparison.py rcm46_composite composite_rcm46 0
     python run_comparison.py oc20_composite morbo 0
     python run_comparison.py oc20_composite composite_oc20 0
     python run_comparison.py tr_shape_dtlz2_100d ard_box 0
@@ -202,6 +204,19 @@ LABEL_OVERRIDES = {
     # reason as composite_gri_mech above.
     "composite_rcm40": {
         "evalfn": "CompositeRCM40",
+    },
+    # Composite modeling on RCM46 Optimal Power Flow -- same real 14-bus
+    # system and design space as RCM40 (same CEC2021 RWCMOP suite,
+    # `morbo/problems/composite_rcm46.py`), but with 4 objectives (fuel
+    # cost, active/reactive power loss, voltage deviation) instead of 2,
+    # testing whether more/more-decoupled objectives on the same system
+    # amplify RCM40's modest composite win. The GP models the 45-dim raw
+    # response (per-bus Psp/Qsp plus pass-through Pg/|V|) instead of the 4
+    # final objectives directly. Compare against "morbo" on the same
+    # experiment dir (`evalfn: "RCM46"` in the base config). No
+    # _pca/_ard_pca variant here either, same reason as composite_rcm40.
+    "composite_rcm46": {
+        "evalfn": "CompositeRCM46",
     },
     # Composite modeling on OC20 catalyst-adsorbate relaxation (Chanussot
     # et al. 2021), using a live, no-auth GemNet-OC potential
