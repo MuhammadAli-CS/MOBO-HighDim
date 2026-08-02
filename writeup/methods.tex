@@ -730,23 +730,43 @@ Composite MORBO & \textbf{424{,}234.9} & 36 & 134.3s \\
 \end{tabular}
 \end{table}
 
-Composite modeling wins by \textbf{+22.0\% final hypervolume} -- the largest
-margin of any composite-vs-direct comparison in this work (vs.\ $\sim$0.3\%
-on the synthetic DTLZ2-family problems in Sections~\ref{sec:composite}
-and~\ref{sec:kronecker-ablation}). This is the first result here where
-composite modeling produces a qualitatively different outcome rather than a
-marginal edge, consistent with Penicillin's raw trajectory carrying real
-correlated structure across 5 state variables and time that the final
-3-objective reduction discards, unlike DTLZ2's synthetic $(g, \cos, \sin)$
-decomposition. Checking \texttt{tr\_restarts} rules out a restart-driven
-explanation (zero restarts fired in either run): the improvement traces to
-one 10-point batch (between the 170th and 180th evaluation) whose candidates
-land in a substantially better region of raw trajectory space, producing a
+At this single seed, composite modeling wins by \textbf{+22.0\% final
+hypervolume} -- the largest margin of any composite-vs-direct comparison
+in this work (vs.\ $\sim$0.3\% on the synthetic DTLZ2-family problems in
+Sections~\ref{sec:composite} and~\ref{sec:kronecker-ablation}). Checking
+\texttt{tr\_restarts} rules out a restart-driven explanation (zero
+restarts fired in either run): the improvement traces to one 10-point
+batch (between the 170th and 180th evaluation) whose candidates land in
+a substantially better region of raw trajectory space, producing a
 21.3\% single-step jump in true hypervolume that a smooth, restart-free
-optimization trajectory then holds. Composite modeling here costs
-$\sim$9$\times$ the fit time of direct modeling (134.3s vs.\ 14.5s across
-the run) -- a real tradeoff, but unlike the Kronecker-ablation result, one
-that buys a substantively better outcome rather than none.
+optimization trajectory then holds.
+
+\paragraph{Correction after a proper 5-seed run: the single-seed result
+above was noise, not a real effect.} The single-seed table was, for a
+long time, the only evidence for this benchmark -- unlike every other
+composite benchmark in this project, Penicillin's direct-vs-composite
+comparison was never run at $n=5$ to check whether $+22.0\%$ held up. It
+does not. Run properly (\texttt{cluster/submit\_penicillin\_5seed.sh},
+5 seeds each label, same $d{=}7$, $M{=}3$, $K{=}5$ checkpoint
+configuration as above): mean final hypervolume is $374{,}540.9$ (std
+$31{,}125.7$) for \texttt{composite\_penicillin} versus $363{,}356.2$
+(std $16{,}568.4$) for \texttt{morbo} -- a $+3.0\%$ mean delta, win-rate
+only $3/5$, and \textbf{not} statistically significant (paired $t$-test
+$p=0.333$, 95\% CI on the paired \% delta $[-4.6\%,+10.7\%]$, cleanly
+straddling zero). AUC tells the same story: $-0.55\%$ mean delta,
+win-rate $2/5$, $p=0.759$. The seed-0 run that produced the original
+$+22.0\%$ table was simply the luckiest of the five -- composite
+modeling's own std ($31{,}125.7$) is nearly twice direct modeling's
+($16{,}568.4$), so a single seed landing on one side or the other of a
+noisy, high-variance comparison was never strong evidence either way.
+This retracts the "largest margin of any composite comparison in this
+work" claim above: Penicillin is, at proper sample size, a null result
+like SnAr and GRI-Mech v1 (\S\ref{sec:gri-mech}'s own results
+discussion already anticipated this alongside SnAr, before this section
+had multi-seed data of its own to confirm it), not the standout case it
+appeared to be at $n=1$. The lesson generalizes: every headline number
+in this project reported at $n=1$ deserves the same skepticism until
+run at the same $n=5$ standard as the rest of the composite ablation.
 
 \section{Trust-Region Shape Adaptation}
 \label{sec:tr-shape}
@@ -3145,13 +3165,16 @@ by the final evaluations both labels recover the exact calibration
 target to within $10^{-4}$--$10^{-6}$ log-ratio-squared error in both
 objectives, for every seed. This differs from every other composite
 result in this work (SnAr, Section~\ref{sec:snar}; Penicillin,
-Section~\ref{sec:penicillin}) -- both of which also showed no
-detectable HV difference at $n=1$--$5$ seeds, but for a different,
-already-suspected reason (a generous eval budget relative to problem
+Section~\ref{sec:penicillin}, confirmed a null result only after a
+proper 5-seed run -- see that section's own correction paragraph) --
+none of which showed a statistically significant HV difference, for a
+mix of reasons: SnAr's generous eval budget relative to problem
 difficulty lets any reasonable method converge before the budget runs
 out, leaving no headroom for composite modeling's efficiency advantage
-to show, discussed at length in \S\ref{sec:snar}'s own results
-paragraph and the SnAr plot analysis). Here that same generic budget
+to show (discussed at length in \S\ref{sec:snar}'s own results
+paragraph and the SnAr plot analysis), while Penicillin's null result
+instead reflects genuinely high seed-to-seed variance swamping a small
+or nonexistent effect. Here that same generic budget
 effect is compounded by something specific to this benchmark's own
 construction: the calibration target is the \emph{exact}, exactly
 achievable value of the unmodified mechanism itself (all 64 multipliers
