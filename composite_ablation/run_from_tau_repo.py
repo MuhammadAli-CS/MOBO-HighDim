@@ -88,12 +88,12 @@ if not hasattr(_botorch_errors, "OptimizationGradientError"):
     _botorch_errors.OptimizationGradientError = RuntimeError
 
 import solvers as tau_solvers  # noqa: E402  (tau315's own solvers.py; now uses OUR morbo)
-import benchmark_ackley_griewank_50d as _bm_ag50  # noqa: E402
-import benchmark_ackley_griewank_6d as _bm_ag6  # noqa: E402
 import benchmark_dtlz2 as _bm_dtlz2  # noqa: E402
-import benchmark_five_ackley_6d as _bm_5ack  # noqa: E402
-import benchmark_langermann_ackley_6d as _bm_lang  # noqa: E402
-import benchmark_projected_langermann_500d as _bm_plang  # noqa: E402
+import benchmark_dtlz2_100d as _bm_dtlz2_100d  # noqa: E402
+import benchmark_dtlz2_600d as _bm_dtlz2_600d  # noqa: E402
+import benchmark_nanoparticle_rgb as _bm_nanoparticle  # noqa: E402
+import benchmark_snar as _bm_tau_snar  # noqa: E402
+import benchmark_cort_tg119 as _bm_cort  # noqa: E402
 
 from composite_ablation.adapters import MinimizeConventionProblem  # noqa: E402
 from composite_ablation.run_ablation import run_pair  # noqa: E402  (reuse, don't re-derive)
@@ -108,12 +108,17 @@ from morbo.problems.composite_snar import (  # noqa: E402
 
 TAU_PROBLEMS = {
     "dtlz2_2obj_6d": _bm_dtlz2.PROBLEM,
-    "ackley_griewank_2obj_6d": _bm_ag6.PROBLEM,
-    "ackley_griewank_2obj_50d": _bm_ag50.PROBLEM,
-    "five_ackley_5obj_6d": _bm_5ack.PROBLEM,
-    "langermann3_ackley_2obj_6d": _bm_lang.PROBLEM,
-    "projected_langermann_2obj_500d": _bm_plang.PROBLEM,
+    "dtlz2_2obj_100d": _bm_dtlz2_100d.PROBLEM,
+    "dtlz2_2obj_600d": _bm_dtlz2_600d.PROBLEM,
+    "nanoparticle_rgb_3obj_6d": _bm_nanoparticle.PROBLEM,
+    "summit_snar_2obj_4d": _bm_tau_snar.PROBLEM,
+    "cort_tg119_3obj_418d": _bm_cort.PROBLEM,
 }
+# ackley_griewank_2obj_{6,50}d, five_ackley_5obj_6d, langermann3_ackley_2obj_6d,
+# and projected_langermann_2obj_500d were retired upstream (their generator
+# scripts were deleted in tau315/composite-mobo commit 41ab952, replaced by
+# the benchmarks above) -- no longer runnable, kept only as the already-
+# committed results in composite_ablation/results_tau_repo/.
 
 
 def _make_our_dtlz2_5obj_6d() -> MinimizeConventionProblem:
