@@ -1,0 +1,14 @@
+{
+    "dim": 1024,
+    "evalfn": "PhotonicBandgap",
+    "max_evals": 300,
+    "n_initial_points": 100,
+    "batch_size": 20,
+    "n_trust_regions": 3,
+    "min_tr_size": 100,
+    "max_reference_point": [
+      -0.3,
+      -0.3
+    ],
+    "verbose": true
+  }

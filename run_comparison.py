@@ -92,6 +92,8 @@ e.g.
     python run_comparison.py rcm46_composite composite_rcm46 0
     python run_comparison.py oc20_composite morbo 0
     python run_comparison.py oc20_composite composite_oc20 0
+    python run_comparison.py photonic_composite morbo 0
+    python run_comparison.py photonic_composite composite_photonic 0
     python run_comparison.py tr_shape_dtlz2_100d ard_box 0
     python run_comparison.py tr_shape_dtlz2_100d pca_ellipsoid 0
     python run_comparison.py tr_shape_dtlz2_100d ard_pca_ellipsoid 0
@@ -229,6 +231,20 @@ LABEL_OVERRIDES = {
     # composite_gri_mech/composite_rcm40 above.
     "composite_oc20": {
         "evalfn": "CompositeOC20",
+    },
+    # Composite modeling on 2D photonic-crystal bandgap design (1024-dim
+    # pixelated dielectric-density unit cell, plane-wave-expansion solver
+    # implemented from scratch, verified against the classic textbook
+    # rods-in-air validation case -- see
+    # `morbo/problems/composite_photonic.py`'s module docstring). The GP
+    # models the 48-dim raw band-structure response (6 k-points x 4 bands
+    # x 2 polarizations) instead of the 2 final bandgap-width objectives
+    # directly. Compare against "morbo" on the same experiment dir
+    # (`evalfn: "PhotonicBandgap"` in the base config). No _pca/_ard_pca
+    # variant here either, same reason as composite_gri_mech/
+    # composite_rcm40 above.
+    "composite_photonic": {
+        "evalfn": "CompositePhotonic",
     },
     # CMA-ES-style covariance adaptation (AS-SMEA, Wang et al. 2026):
     # persistent per-TR covariance updated from Pareto-elite points plus an

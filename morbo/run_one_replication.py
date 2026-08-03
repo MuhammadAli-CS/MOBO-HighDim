@@ -75,6 +75,10 @@ from morbo.problems.composite_oc20 import (
     composite_oc20_reduction,
     get_composite_oc20_fn,
 )
+from morbo.problems.composite_photonic import (
+    composite_photonic_reduction,
+    get_composite_photonic_fn,
+)
 from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
 from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
 from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
@@ -113,6 +117,9 @@ supported_labels = [
     "composite_oc20",
     "composite_oc20_pca",
     "composite_oc20_ard_pca",
+    "composite_photonic",
+    "composite_photonic_pca",
+    "composite_photonic_ard_pca",
     "cma_ellipsoid",
     "linear_gp",
     "linear_gp_pca",
@@ -554,6 +561,27 @@ def run_one_replication(
         bounds = bounds.to(**tkwargs)
         num_outputs = 25
         composite_reduction = composite_oc20_reduction
+    elif evalfn == "PhotonicBandgap":
+        # Direct-objective baseline for the composite A/B, same pattern as
+        # "RCM40"/"OC20Relax" above: identical raw response/reduction as
+        # "CompositePhotonic", but the GP models the final 2 bandgap-width
+        # objectives directly rather than the 48-dim band-structure raw
+        # response. `composite_photonic_reduction` already returns the
+        # maximize-convention pair directly, so negate it back to the
+        # minimize-convention `f` here and let `negate=True` restore the
+        # sign.
+        _photonic_raw_response, bounds = get_composite_photonic_fn(dtype=dtype, device=device)
+
+        def f(X: Tensor) -> Tensor:
+            return -composite_photonic_reduction(_photonic_raw_response(X))
+
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 2
+    elif evalfn == "CompositePhotonic":
+        f, bounds = get_composite_photonic_fn(dtype=dtype, device=device)
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 48
+        composite_reduction = composite_photonic_reduction
     elif evalfn != "ackley":
         # Handle the non-constrained botorch test functions here.
         constructor_map = {
@@ -591,7 +619,7 @@ def run_one_replication(
         # deal for evalfn="Callable" whenever a composite_reduction was
         # built above (raw_evaluate_components + raw_compose path).
         negate=not (
-            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeRCM46", "CompositeOC20")
+            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeRCM46", "CompositeOC20", "CompositePhotonic")
             or (evalfn == "Callable" and composite_reduction is not None)
         ),
         observation_noise_std=observation_noise_std,
