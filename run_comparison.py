@@ -94,6 +94,8 @@ e.g.
     python run_comparison.py oc20_composite composite_oc20 0
     python run_comparison.py photonic_composite morbo 0
     python run_comparison.py photonic_composite composite_photonic 0
+    python run_comparison.py topopt_composite morbo 0
+    python run_comparison.py topopt_composite composite_topopt 0
     python run_comparison.py tr_shape_dtlz2_100d ard_box 0
     python run_comparison.py tr_shape_dtlz2_100d pca_ellipsoid 0
     python run_comparison.py tr_shape_dtlz2_100d ard_pca_ellipsoid 0
@@ -245,6 +247,22 @@ LABEL_OVERRIDES = {
     # composite_rcm40 above.
     "composite_photonic": {
         "evalfn": "CompositePhotonic",
+    },
+    # Composite modeling on 2D SIMP structural topology optimization (half-
+    # MBB beam, 1152-dim per-element density design space, real sparse
+    # finite-element solve using the verified `top88.m` element stiffness
+    # matrix/DOF assembly/boundary conditions -- see
+    # `morbo/problems/composite_topopt.py`'s module docstring; the SIMP
+    # power-law compliance scaling was checked analytically, not just for
+    # absence of crashes). The GP models the 48-dim raw block-compliance
+    # response (an 8x6 coarse aggregation of the 1152-element strain-energy
+    # field, exact not approximate since the reduction is a sum/max over
+    # blocks) instead of the 2 final total-compliance/peak-compliance
+    # objectives directly. Compare against "morbo" on the same experiment
+    # dir (`evalfn: "TopOpt"` in the base config). No _pca/_ard_pca variant
+    # here either, same reason as composite_gri_mech/composite_rcm40 above.
+    "composite_topopt": {
+        "evalfn": "CompositeTopOpt",
     },
     # CMA-ES-style covariance adaptation (AS-SMEA, Wang et al. 2026):
     # persistent per-TR covariance updated from Pareto-elite points plus an

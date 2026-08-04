@@ -79,6 +79,10 @@ from morbo.problems.composite_photonic import (
     composite_photonic_reduction,
     get_composite_photonic_fn,
 )
+from morbo.problems.composite_topopt import (
+    composite_topopt_reduction,
+    get_composite_topopt_fn,
+)
 from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
 from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
 from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
@@ -120,6 +124,9 @@ supported_labels = [
     "composite_photonic",
     "composite_photonic_pca",
     "composite_photonic_ard_pca",
+    "composite_topopt",
+    "composite_topopt_pca",
+    "composite_topopt_ard_pca",
     "cma_ellipsoid",
     "linear_gp",
     "linear_gp_pca",
@@ -582,6 +589,24 @@ def run_one_replication(
         bounds = bounds.to(**tkwargs)
         num_outputs = 48
         composite_reduction = composite_photonic_reduction
+    elif evalfn == "TopOpt":
+        # Direct-objective baseline for the composite A/B, same pattern as
+        # "PhotonicBandgap"/"RCM40" above: identical raw response/reduction
+        # as "CompositeTopOpt", but the GP models the final 2 objectives
+        # (total/peak compliance) directly rather than the 48-dim
+        # block-compliance raw response.
+        _topopt_raw_response, bounds = get_composite_topopt_fn(dtype=dtype, device=device)
+
+        def f(X: Tensor) -> Tensor:
+            return -composite_topopt_reduction(_topopt_raw_response(X))
+
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 2
+    elif evalfn == "CompositeTopOpt":
+        f, bounds = get_composite_topopt_fn(dtype=dtype, device=device)
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 48
+        composite_reduction = composite_topopt_reduction
     elif evalfn != "ackley":
         # Handle the non-constrained botorch test functions here.
         constructor_map = {
@@ -619,7 +644,7 @@ def run_one_replication(
         # deal for evalfn="Callable" whenever a composite_reduction was
         # built above (raw_evaluate_components + raw_compose path).
         negate=not (
-            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeRCM46", "CompositeOC20", "CompositePhotonic")
+            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeRCM46", "CompositeOC20", "CompositePhotonic", "CompositeTopOpt")
             or (evalfn == "Callable" and composite_reduction is not None)
         ),
         observation_noise_std=observation_noise_std,
