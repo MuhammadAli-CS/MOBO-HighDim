@@ -96,6 +96,8 @@ e.g.
     python run_comparison.py photonic_composite composite_photonic 0
     python run_comparison.py topopt_composite morbo 0
     python run_comparison.py topopt_composite composite_topopt 0
+    python run_comparison.py moopf_composite morbo 0
+    python run_comparison.py moopf_composite composite_moopf 0
     python run_comparison.py tr_shape_dtlz2_100d ard_box 0
     python run_comparison.py tr_shape_dtlz2_100d pca_ellipsoid 0
     python run_comparison.py tr_shape_dtlz2_100d ard_pca_ellipsoid 0
@@ -263,6 +265,18 @@ LABEL_OVERRIDES = {
     # here either, same reason as composite_gri_mech/composite_rcm40 above.
     "composite_topopt": {
         "evalfn": "CompositeTopOpt",
+    },
+    # Composite modeling on 5-objective many-objective OPF (same verified
+    # IEEE 14-bus system as RCM40/RCM46, morbo/problems/composite_moopf.py):
+    # RCM46's 4 objectives plus the L-index voltage-stability objective, to
+    # test whether pushing past RCM46's 4 decoupled objectives (the CEC2021
+    # suite's max) to 5 amplifies the composite win further. The GP models
+    # the 54-dim raw response (RCM46's 45 + 9 per-load-bus L_j) instead of
+    # the 5 final objectives. Compare against "morbo" on the same experiment
+    # dir (`evalfn: "MOOPF"` in the base config). No _pca/_ard_pca variant,
+    # same reason as composite_rcm40/rcm46.
+    "composite_moopf": {
+        "evalfn": "CompositeMOOPF",
     },
     # CMA-ES-style covariance adaptation (AS-SMEA, Wang et al. 2026):
     # persistent per-TR covariance updated from Pareto-elite points plus an

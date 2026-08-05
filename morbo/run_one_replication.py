@@ -83,6 +83,10 @@ from morbo.problems.composite_topopt import (
     composite_topopt_reduction,
     get_composite_topopt_fn,
 )
+from morbo.problems.composite_moopf import (
+    composite_moopf_reduction,
+    get_composite_moopf_fn,
+)
 from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
 from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
 from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
@@ -127,6 +131,9 @@ supported_labels = [
     "composite_topopt",
     "composite_topopt_pca",
     "composite_topopt_ard_pca",
+    "composite_moopf",
+    "composite_moopf_pca",
+    "composite_moopf_ard_pca",
     "cma_ellipsoid",
     "linear_gp",
     "linear_gp_pca",
@@ -607,6 +614,23 @@ def run_one_replication(
         bounds = bounds.to(**tkwargs)
         num_outputs = 48
         composite_reduction = composite_topopt_reduction
+    elif evalfn == "MOOPF":
+        # Direct-objective baseline for the composite A/B, same pattern as
+        # "RCM40"/"RCM46" above: identical raw response/reduction as
+        # "CompositeMOOPF", but the GP models the 5 final objectives
+        # directly rather than the 54-dim raw response.
+        _moopf_raw_response, bounds = get_composite_moopf_fn(dtype=dtype, device=device)
+
+        def f(X: Tensor) -> Tensor:
+            return -composite_moopf_reduction(_moopf_raw_response(X))
+
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 5
+    elif evalfn == "CompositeMOOPF":
+        f, bounds = get_composite_moopf_fn(dtype=dtype, device=device)
+        bounds = bounds.to(**tkwargs)
+        num_outputs = 54
+        composite_reduction = composite_moopf_reduction
     elif evalfn != "ackley":
         # Handle the non-constrained botorch test functions here.
         constructor_map = {
@@ -644,7 +668,7 @@ def run_one_replication(
         # deal for evalfn="Callable" whenever a composite_reduction was
         # built above (raw_evaluate_components + raw_compose path).
         negate=not (
-            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeRCM46", "CompositeOC20", "CompositePhotonic", "CompositeTopOpt")
+            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeRCM46", "CompositeOC20", "CompositePhotonic", "CompositeTopOpt", "CompositeMOOPF")
             or (evalfn == "Callable" and composite_reduction is not None)
         ),
         observation_noise_std=observation_noise_std,
