@@ -77,6 +77,18 @@ _TAU_REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tau315_rep
 if _TAU_REPO not in sys.path:
     sys.path.insert(0, _TAU_REPO)
 
+# This project's OWN benchmark adapters written against tau315's
+# BenchmarkProblem interface (benchmark_rcm40/rcm46/penicillin). They live
+# here, tracked in THIS repo, rather than in the gitignored tau315_repo/
+# clone above -- otherwise the cluster's `git pull` never receives them and
+# every job crashes with `ModuleNotFoundError: No module named
+# 'benchmark_rcm40'` (which is exactly what happened on the first cluster
+# submission). Inserted AFTER _TAU_REPO so these adapters' own
+# `from benchmark_common import ...` still resolves against tau315's clone.
+_OURS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tau_benchmarks_ours")
+if _OURS not in sys.path:
+    sys.path.insert(0, _OURS)
+
 # Compat shim, not an edit to the cloned file: tau315's solvers.py imports
 # `OptimizationGradientError`, added to botorch after the version this
 # project pins (botorch==0.9.5, see cluster/README.md's "Build the
