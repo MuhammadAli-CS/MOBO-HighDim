@@ -3343,6 +3343,84 @@ reaching -- parity with direct modeling by the time the eval budget
 runs out, distinct from GRI-Mech v2's pattern of a persistent gap that
 does not close.
 
+\subsection{Implemented: composite RCM46 Optimal Power Flow}
+\label{sec:rcm46-implemented}
+
+RCM46 is the same real IEEE 14-bus test system as RCM40
+(Section~\ref{sec:rcm40-implemented}) -- identical admittance data,
+identical 34-dimensional design space -- but case 46 of the CEC2021
+RWCMOP suite \citep{kumar2021rwcmop} computes \emph{four} objectives
+(fuel cost, active-power loss, reactive-power loss, and voltage
+deviation) rather than two, testing whether more, and more-decoupled,
+objectives on the same genuinely bus-decoupled raw response amplify
+RCM40's modest composite advantage. Implemented in
+\texttt{morbo/\allowbreak problems/\allowbreak composite\_rcm46.py}, the raw response is
+the 45-dim per-bus injection/generation/voltage vector; the reduction is
+the four objectives, each a decoupled function of it. All constants were
+extracted directly from \texttt{CEC2021\_func.m}'s \texttt{case 46}, the
+same extract-don't-retype discipline as RCM40 (and RCM46's $f_3$ term
+uses the matched-bus $\operatorname{Im}(V_1 \bar I_1)$, unlike RCM40's
+apparent $I_2$ index slip, so RCM40's version is most likely a typo in
+the original suite -- documented, not silently reconciled).
+
+\paragraph{Results.} This is the strongest, cleanest real-world
+composite win in this work. Across 5 seeds (300 evaluations, no SLURM
+time limit, \texttt{cluster/submit\_rcm46\_2x1.sh}), \texttt{composite\_rcm46}
+beats \texttt{morbo} on \emph{final} hypervolume by $+4.5\%$ (win-rate
+$5/5$, paired $t$-test $p=0.013$, 95\% CI $[+1.6\%, +7.5\%]$), and on
+AUC by $+3.5\%$ ($4/5$, $p=0.031$) -- significant on both the
+final-value and sample-efficiency measures, unlike RCM40 (sample
+efficiency only). That the effect grows from RCM40's modest, close-by-
+the-end margin to RCM46's decisive one, on the identical physical system
+with only the objective count changed, is direct evidence for this
+work's central claim: composite modeling helps most when the reduction
+exposes genuinely decoupled structure, and four decoupled objectives
+expose more of it than two.
+
+\subsection{Cross-validation on an independent multi-method pipeline}
+\label{sec:tau-crossval}
+
+Every result above uses this project's own MORBO engine. To check that
+the composite advantage is not an artifact of that one implementation,
+the same benchmarks were run through a collaborator's independent
+multi-method pipeline (\texttt{tau315/composite-mobo}), which drives four
+solver families -- standard qEHVI (\texttt{standard\_mobo}), a Chebyshev
+scalarization (\texttt{chebyshev\_bo}), a spherical-Chebyshev
+scalarization for high dimension (\texttt{spherical\_chebyshev\_bo}), and
+a batched trust-region method (\texttt{batched\_morbo}) -- each in a
+direct and a composite variant, at $n=17$--$20$ seeds. Our RCM40, RCM46,
+and Penicillin benchmarks were ported into that pipeline's own
+\texttt{BenchmarkProblem} interface (verified bit-identical to our
+reference implementations on shared inputs) and run there.
+
+\paragraph{The power-flow wins replicate.} On \texttt{batched\_morbo},
+composite modeling beats direct by $+0.79\%$ on RCM40 ($18/20$,
+$p=0.0001$) and $+4.63\%$ on RCM46 ($17/17$, $p<0.0001$) -- the same
+sign, and for RCM46 nearly the same magnitude, as our own pipeline's
+$+4.5\%$. A win this size surviving a completely separate solver
+codebase is much stronger evidence than either run alone.
+
+\paragraph{Penicillin reverses under more seeds.} Our own 5-seed
+Penicillin run (Section~\ref{sec:penicillin}) showed a non-significant
+$+3.0\%$ ($p=0.333$); at $n=20$ through this pipeline, composite modeling
+is a significant \emph{loss} on \texttt{batched\_morbo} ($-2.53\%$,
+$p=0.019$) and null-to-negative on the scalarization solvers. The
+apparent gain was small-sample noise, exactly the failure a
+five-seed read-out is prone to -- and the corrected conclusion (Penicillin
+is not a composite-friendly benchmark) is consistent with its raw
+response being a checkpointed trajectory of one smooth fermentation
+process, the same structure that fails for GRI-Mech v1 and OC20.
+
+\paragraph{Method dependence is real.} The composite advantage is not
+purely a property of the benchmark. On CORT TG119 (a 418-dimensional
+radiotherapy problem in the collaborator's own set), composite modeling
+\emph{loses} $-1.98\%$ on \texttt{batched\_morbo} ($p=0.006$) but
+\emph{wins} $+1.67\%$ on \texttt{spherical\_chebyshev\_bo} ($p=0.0004$)
+-- opposite signs, both significant, same benchmark. Whatever composite
+modeling does for the surrogate, the acquisition/scalarization it feeds
+into can turn that into a gain or a loss, a caveat any single-solver
+study (including our own main results) cannot see.
+
 \subsection{Implemented: composite OC20 catalyst-adsorbate relaxation}
 \label{sec:oc20-implemented}
 
