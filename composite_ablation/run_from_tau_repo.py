@@ -94,6 +94,9 @@ import benchmark_dtlz2_600d as _bm_dtlz2_600d  # noqa: E402
 import benchmark_nanoparticle_rgb as _bm_nanoparticle  # noqa: E402
 import benchmark_snar as _bm_tau_snar  # noqa: E402
 import benchmark_cort_tg119 as _bm_cort  # noqa: E402
+import benchmark_rcm40 as _bm_rcm40  # noqa: E402
+import benchmark_rcm46 as _bm_rcm46  # noqa: E402
+import benchmark_penicillin as _bm_penicillin  # noqa: E402
 
 from composite_ablation.adapters import MinimizeConventionProblem  # noqa: E402
 from composite_ablation.run_ablation import run_pair  # noqa: E402  (reuse, don't re-derive)
@@ -113,6 +116,16 @@ TAU_PROBLEMS = {
     "nanoparticle_rgb_3obj_6d": _bm_nanoparticle.PROBLEM,
     "summit_snar_2obj_4d": _bm_tau_snar.PROBLEM,
     "cort_tg119_3obj_418d": _bm_cort.PROBLEM,
+    # This project's own composite benchmarks, ported into tau315's
+    # BenchmarkProblem interface (composite_ablation/tau315_repo/
+    # benchmark_rcm40.py, _rcm46.py, _penicillin.py), so the SAME
+    # multi-method comparison (standard/chebyshev/spherical/morbo x
+    # direct/composite) runs on them too, not just on tau315's own set.
+    # RCM40/46 are 34D ("high" suite -> spherical + morbo); Penicillin is
+    # 7D ("low" suite -> standard + chebyshev + morbo).
+    "rcm40_2obj_34d": _bm_rcm40.PROBLEM,
+    "rcm46_4obj_34d": _bm_rcm46.PROBLEM,
+    "penicillin_3obj_7d": _bm_penicillin.PROBLEM,
 }
 # ackley_griewank_2obj_{6,50}d, five_ackley_5obj_6d, langermann3_ackley_2obj_6d,
 # and projected_langermann_2obj_500d were retired upstream (their generator
