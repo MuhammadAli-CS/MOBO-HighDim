@@ -46,6 +46,11 @@ OWN = [
 
 # --- Block B: tau-repo benchmarks (auto-discovered .npz solver pairs) --------
 TAU_ORDER = [
+    # This project's own benchmarks, run through tau315's multi-method
+    # pipeline (not just our own MORBO engine) -- listed first.
+    ("rcm40_2obj_34d", "RCM40 OPF, tau pipeline  (34D, 2 obj)"),
+    ("rcm46_4obj_34d", "RCM46 OPF, tau pipeline  (34D, 4 obj)"),
+    ("penicillin_3obj_7d", "Penicillin, tau pipeline  (7D, 3 obj)"),
     ("dtlz2_2obj_100d", "DTLZ2  (100D, 2 obj)"),
     ("dtlz2_2obj_600d", "DTLZ2  (600D, 2 obj)"),
     ("cort_tg119_3obj_418d", "CORT TG119 radiotherapy  (418D, 3 obj)"),
@@ -114,7 +119,7 @@ def own_panel(ax, exp, comp_label, title):
 
 
 def tau_panel(ax, slug, title):
-    d = c = None
+    best = None  # (n_seeds, direct_finals, comp_finals, pair_name) with the most seeds
     for fname in sorted(os.listdir(os.path.join(TAU, slug))):
         if not fname.endswith(".npz"):
             continue
@@ -132,10 +137,16 @@ def tau_panel(ax, slug, title):
             xs = np.arange(1, L + 1)
             ax.plot(xs, mean, color=color, ls=ls, lw=1.5)
             ax.fill_between(xs, mean - sem, mean + sem, color=color, alpha=0.13, lw=0)
-        # capture finals from the last (primary) pair for annotation
-        d = np.array([t[-1] for t in arr["direct_traces"]], dtype=float)
-        c = np.array([t[-1] for t in arr["composite_traces"]], dtype=float)
-    annotate(ax, d, c, n_hint=f"n={len(d)}" if d is not None else "")
+        # Annotate the pair with the MOST seeds (a just-started STCH pair at
+        # n=1 must not shadow a complete n=20 morbo pair's headline delta/p).
+        n_this = min(len(arr["direct_traces"]), len(arr["composite_traces"]))
+        if best is None or n_this > best[0]:
+            d = np.array([t[-1] for t in arr["direct_traces"]], dtype=float)
+            c = np.array([t[-1] for t in arr["composite_traces"]], dtype=float)
+            best = (n_this, d, c, direct_name)
+    if best is not None:
+        _, d, c, pair = best
+        annotate(ax, d, c, n_hint=f"{pair} n={len(d)}")
     finish(ax, title)
 
 
