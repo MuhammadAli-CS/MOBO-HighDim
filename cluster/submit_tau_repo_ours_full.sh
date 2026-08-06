@@ -7,15 +7,14 @@
 # run_from_tau_repo.py's TAU_PROBLEMS), our own morbo engine for the morbo
 # pair via import-caching.
 #
-# Benchmarks and pairs:
+# Benchmarks and pairs (trimmed to the three we still need):
 #   snar_4d_2obj_ours (4D, low)   : standard, chebyshev, morbo
 #       -- the CLEANED SnAr (6th raw component is now the product molar flow
 #          F_product, not the closed-form-known q_tot; objectives bit-identical)
-#   penicillin_3obj_7d (7D, low)  : standard, chebyshev, morbo
-#   rcm40_2obj_34d (34D, high)    : standard, chebyshev, spherical, morbo
 #   rcm46_4obj_34d (34D, high)    : standard, chebyshev, spherical, morbo
 #   moopf_5obj_34d (34D, high)    : standard, chebyshev, spherical, morbo
 #       -- MOOPF-5, RCM46's 4 objectives + L-index (constructed benchmark)
+# (RCM40 and Penicillin are already covered / not needed, so left out.)
 #
 # The 34D benchmarks are "high" suite, so standard/chebyshev are off-suite --
 # passed --allow-any-pair to run them anyway (34D is well within the plain
@@ -40,15 +39,15 @@ submit() {
     --wrap="cd $(pwd); . /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python -m composite_ablation.run_from_tau_repo --benchmark ${job_name} --pair ${pair} --trials ${TRIALS} --allow-any-pair --num-threads 8 --num-interop-threads 4 --out-dir composite_ablation/results_tau_repo/${job_name}"
 }
 
-# Low-suite (4D/7D): the three plain solvers.
-for bm in snar_4d_2obj_ours penicillin_3obj_7d; do
+# Low-suite (4D): the three plain solvers. Cleaned SnAr only.
+for bm in snar_4d_2obj_ours; do
   for pair in standard chebyshev morbo; do submit "$bm" "$pair"; done
 done
 
 # High-suite (34D): the three plain solvers PLUS spherical STCH.
-for bm in rcm40_2obj_34d rcm46_4obj_34d moopf_5obj_34d; do
+for bm in rcm46_4obj_34d moopf_5obj_34d; do
   for pair in standard chebyshev spherical morbo; do submit "$bm" "$pair"; done
 done
 
-echo "Submitted 18 jobs (2x3 low + 3x4 high). Check with: squeue -u \$USER"
+echo "Submitted 11 jobs (1x3 SnAr + 2x4 RCM46/MOOPF-5). Check with: squeue -u \$USER"
 echo "Results: composite_ablation/results_tau_repo/<benchmark>/<pair>_-_*.npz"
