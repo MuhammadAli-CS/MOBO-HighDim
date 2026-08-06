@@ -102,15 +102,26 @@ def get_composite_snar_fn(dtype=torch.double, device=None) -> Tuple[callable, Te
             raw_response: callable mapping an `n x 4`-dim tensor (raw,
                 *unnormalized* problem-space SnAr inputs: tau, equiv_pldn,
                 conc_dfnb, temperature) to an `n x 6`-dim tensor
-                `[C_dfnb, C_pldn, C_product, C_regioisomer, C_bis, q_tot]`
-                -- the 5 final concentrations plus the total flow rate
-                `q_tot = 5 / tau` (mL/min), which `composite_snar_reduction`
-                needs alongside the concentrations to reproduce Summit's own
-                STY/E-factor formula (`tau` itself is a design input, not
-                part of the reactor's chemical state, so it must be carried
-                through explicitly rather than re-derived from `Y_raw`
-                alone).
+                `[C_dfnb, C_pldn, C_product, C_regioisomer, C_bis, F_product]`
+                -- the 5 final concentrations plus the product *molar flow
+                rate* `F_product = C_product * q_tot` (where the total flow
+                `q_tot = 5 / tau` mL/min).
             bounds: `2 x 4`-dim tensor, Summit's own raw-space bounds.
+
+    Why `F_product` and not `q_tot` as the 6th component (a design fix, not
+    a physics change): an earlier version carried the bare flow rate
+    `q_tot = 5/tau` through as the 6th raw component, but `q_tot` is a
+    deterministic closed-form function of a single design variable -- so a
+    composite GP fitted to it is modeling a quantity that is already known
+    exactly, wasting one of the K per-output models on zero uncertainty (a
+    redundancy pointed out in review). The fix exploits two exact algebraic
+    facts about Summit's own STY/E-factor formulas: (i) STY depends on the
+    flow only through the product *molar flow* `C_product * q_tot`, and
+    (ii) `q_tot` *cancels identically* in the E-factor ratio (numerator and
+    denominator are both proportional to it). So every raw component is now
+    a genuinely uncertain reactor observable -- five outlet concentrations
+    plus one product throughput -- with no GP spent on a known constant, and
+    the objectives (below) are bit-identical to the previous version.
     """
     def raw_response(X_input: Tensor) -> Tensor:
         X_flat = X_input.reshape(-1, SNAR_DIM)
@@ -118,7 +129,8 @@ def get_composite_snar_fn(dtype=torch.double, device=None) -> Tuple[callable, Te
         for row in X_flat.tolist():
             tau, equiv_pldn, conc_dfnb, temperature = row
             C_final, q_tot = _integrate_one(tau, equiv_pldn, conc_dfnb, temperature)
-            rows.append(np.append(C_final, q_tot))
+            f_product = C_final[2] * q_tot  # product molar flow (throughput)
+            rows.append(np.append(C_final, f_product))
         out = torch.tensor(np.stack(rows), dtype=dtype, device=device)
         return out.view(*X_input.shape[:-1], 6)
 
@@ -132,34 +144,42 @@ def composite_snar_reduction(Y_raw: Tensor) -> Tensor:
 
     Args:
         Y_raw: `... x 6`-dim tensor `[C_dfnb, C_pldn, C_product,
-            C_regioisomer, C_bis, q_tot]`, as produced by `raw_response`
-            above (un-negated, true reactor-state concentrations and flow
-            rate -- this evalfn should use `negate=False` in
-            `BenchmarkFunction`, like `composite_dtlz2_reduction`, since this
-            reduction performs its own maximize-convention sign flip below;
-            there is no Penicillin-style pre-existing sign convention to
-            preserve here, so folding the negation into the reduction is the
-            simpler choice, matching `composite_dtlz2.py` rather than
-            `composite_penicillin.py`).
+            C_regioisomer, C_bis, F_product]`, as produced by `raw_response`
+            above, where `F_product = C_product * q_tot` is the product molar
+            flow rate (un-negated, true reactor-state quantities -- this
+            evalfn should use `negate=False` in `BenchmarkFunction`, like
+            `composite_dtlz2_reduction`, since this reduction performs its own
+            maximize-convention sign flip below).
 
     Returns:
         An `... x 2`-dim tensor `[sty, -e_factor]`: space-time yield
         (kg/m^3/h, maximized) and *negative* E-factor (maximized, i.e. true
         E-factor minimized) -- bit-identical to Summit's own
         `SnarBenchmark._integrate_equations` STY/E-factor computation
-        (noise-free) on the same inputs.
+        (noise-free) on the same inputs. See `get_composite_snar_fn`'s
+        docstring for why the flow enters via `F_product` (a genuine reactor
+        throughput) rather than the bare, closed-form-known `q_tot`.
     """
     C_product = Y_raw[..., 2]
-    q_tot = Y_raw[..., 5]
+    F_product = Y_raw[..., 5]  # = C_product * q_tot (product molar flow)
     M = _MOLECULAR_WEIGHTS
     V = _REACTOR_VOLUME_ML
 
-    sty = 6e4 / 1000 * M[2] * C_product * q_tot / V
+    # STY depends on the flow only through the product molar flow F_product,
+    # so it reads that single component directly (= 6e4/1000 * M2 * C_product
+    # * q_tot / V, the original formula).
+    sty = 6e4 / 1000 * M[2] * F_product / V
     sty = torch.clamp(sty, min=1e-6)
 
-    other_mass = sum(M[i] * Y_raw[..., i] for i in range(5) if i != 2) * q_tot * 1e-3
-    product_mass = M[2] * C_product * q_tot * 1e-3
-    e_factor = (q_tot * _RHO_ETHANOL + other_mass) / product_mass
+    # E-factor: q_tot cancels identically between numerator and denominator
+    # (both are proportional to it), leaving a pure function of the
+    # concentrations -- (rho + 1e-3 * sum_{i!=product} M_i C_i) /
+    # (1e-3 * M_product * C_product). The degeneracy guard fires on the same
+    # condition as before: product_mass = M2 * C_product * q_tot * 1e-3, which
+    # equals M2 * F_product * 1e-3 exactly.
+    waste_mass = sum(M[i] * Y_raw[..., i] for i in range(5) if i != 2) * 1e-3
+    e_factor = (_RHO_ETHANOL + waste_mass) / (M[2] * C_product * 1e-3)
+    product_mass = M[2] * F_product * 1e-3
     e_factor = torch.where(
         product_mass <= 1e-12, torch.full_like(e_factor, 1e3), e_factor
     )
