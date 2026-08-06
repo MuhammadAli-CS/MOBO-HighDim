@@ -109,6 +109,7 @@ import benchmark_cort_tg119 as _bm_cort  # noqa: E402
 import benchmark_rcm40 as _bm_rcm40  # noqa: E402
 import benchmark_rcm46 as _bm_rcm46  # noqa: E402
 import benchmark_penicillin as _bm_penicillin  # noqa: E402
+import benchmark_moopf as _bm_moopf  # noqa: E402
 
 from composite_ablation.adapters import MinimizeConventionProblem  # noqa: E402
 from composite_ablation.run_ablation import run_pair  # noqa: E402  (reuse, don't re-derive)
@@ -138,6 +139,9 @@ TAU_PROBLEMS = {
     "rcm40_2obj_34d": _bm_rcm40.PROBLEM,
     "rcm46_4obj_34d": _bm_rcm46.PROBLEM,
     "penicillin_3obj_7d": _bm_penicillin.PROBLEM,
+    # MOOPF-5: RCM46's 4 objectives + the L-index voltage-stability objective
+    # (constructed benchmark, see benchmark_moopf.py). 34D/5-obj.
+    "moopf_5obj_34d": _bm_moopf.PROBLEM,
 }
 # ackley_griewank_2obj_{6,50}d, five_ackley_5obj_6d, langermann3_ackley_2obj_6d,
 # and projected_langermann_2obj_500d were retired upstream (their generator
@@ -240,6 +244,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--weights", type=int, default=8)
     parser.add_argument("--quick", action="store_true", help="tiny smoke-test-scale run")
+    parser.add_argument(
+        "--allow-any-pair", action="store_true",
+        help="run a solver pair even if it is off-suite (uniform cross-method "
+        "comparison, e.g. all of standard/chebyshev/morbo on a 34D benchmark).",
+    )
     parser.add_argument("--out-dir", type=Path, default=None)
     parser.add_argument("--num-threads", type=int, default=8)
     parser.add_argument("--num-interop-threads", type=int, default=4)
@@ -266,10 +275,24 @@ def main() -> None:
         )
         num_objectives, suite = tau_bench.num_objectives, tau_bench.suite
 
-    if args.pair in ("standard", "chebyshev") and suite != "low":
-        raise ValueError(f"{args.pair} is only meaningful on a 'low'-suite benchmark (got suite={suite!r})")
-    if args.pair == "spherical" and suite != "high":
-        raise ValueError(f"spherical is only meaningful on a 'high'-suite benchmark (got suite={suite!r})")
+    # Suite gating is a soft protocol preference (plain-kernel solvers are a
+    # weaker test at very high dimension, and spherical STCH is aimed at the
+    # high-dim regime), not a correctness constraint -- so it is a warning,
+    # not an error. This lets every benchmark be run through ALL solver pairs
+    # (standard/chebyshev/morbo + spherical) for a uniform cross-method
+    # comparison when `--allow-any-pair` is set, e.g. to get "all three" plain
+    # solvers on the 34D power-flow benchmarks too, not just spherical/morbo.
+    _mismatch = (
+        (args.pair in ("standard", "chebyshev") and suite != "low")
+        or (args.pair == "spherical" and suite != "high")
+    )
+    if _mismatch and not args.allow_any_pair:
+        raise ValueError(
+            f"{args.pair} is off-suite for suite={suite!r}; pass --allow-any-pair "
+            "to run it anyway (uniform cross-method comparison)."
+        )
+    if _mismatch:
+        print(f"[warn] running off-suite pair {args.pair!r} on suite={suite!r} (--allow-any-pair)", flush=True)
 
     n_init, remaining = _eval_budget(problem.dim)
     if args.quick:
