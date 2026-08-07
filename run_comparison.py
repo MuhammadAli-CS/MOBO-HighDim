@@ -278,6 +278,18 @@ LABEL_OVERRIDES = {
     "composite_moopf": {
         "evalfn": "CompositeMOOPF",
     },
+    # Controlled decoupling sweep (morbo/problems/composite_dtlz2_blocked.py):
+    # DTLZ2 with the objective held fixed while the composite raw response's
+    # effective input-dimension is dialed via `block_size` (read from the
+    # experiment config.json). "dtlz2_blocked" is the block-size-independent
+    # direct baseline; "composite_dtlz2_blocked" models the block-structured
+    # raw response. Compare on the same experiment dir per block size.
+    "dtlz2_blocked": {
+        "evalfn": "DTLZ2Blocked",
+    },
+    "composite_dtlz2_blocked": {
+        "evalfn": "CompositeDTLZ2Blocked",
+    },
     # CMA-ES-style covariance adaptation (AS-SMEA, Wang et al. 2026):
     # persistent per-TR covariance updated from Pareto-elite points plus an
     # evolution-path term -- success-weighted and temporally smoothed, vs.

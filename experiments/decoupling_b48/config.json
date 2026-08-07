@@ -1,0 +1,15 @@
+{
+  "dim": 49,
+  "evalfn": "DTLZ2Blocked",
+  "block_size": 48,
+  "max_evals": 300,
+  "n_initial_points": 60,
+  "batch_size": 20,
+  "n_trust_regions": 3,
+  "min_tr_size": 60,
+  "max_reference_point": [
+    -1.1,
+    -1.1
+  ],
+  "verbose": false
+}

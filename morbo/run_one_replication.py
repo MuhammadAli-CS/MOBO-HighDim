@@ -87,6 +87,11 @@ from morbo.problems.composite_moopf import (
     composite_moopf_reduction,
     get_composite_moopf_fn,
 )
+from morbo.problems.composite_dtlz2_blocked import (
+    dtlz2_blocked_objective,
+    get_composite_dtlz2_blocked_fn,
+    composite_dtlz2_blocked_reduction,
+)
 from morbo.problems.sparse_dtlz2 import get_sparse_dtlz2_fn
 from morbo.problems.rotated_sparse_dtlz2 import get_rotated_sparse_dtlz2_fn
 from morbo.problems.time_varying_sparse_dtlz2 import get_time_varying_sparse_dtlz2_fn
@@ -134,6 +139,8 @@ supported_labels = [
     "composite_moopf",
     "composite_moopf_pca",
     "composite_moopf_ard_pca",
+    "dtlz2_blocked",
+    "composite_dtlz2_blocked",
     "cma_ellipsoid",
     "linear_gp",
     "linear_gp_pca",
@@ -213,6 +220,7 @@ def run_one_replication(
     mab_ducb_c: float = TurboHParams.mab_ducb_c,
     mab_shared_cma: bool = TurboHParams.mab_shared_cma,
     n_curve_points: int = 8,
+    block_size: int = 1,  # composite_dtlz2_blocked decoupling knob
     n_penicillin_checkpoints: int = 10,
     sparse_dtlz2_k_eff: int = 5,
     lasso_bench_name: str = "synt_medium",
@@ -631,6 +639,27 @@ def run_one_replication(
         bounds = bounds.to(**tkwargs)
         num_outputs = 54
         composite_reduction = composite_moopf_reduction
+    elif evalfn == "DTLZ2Blocked":
+        # Direct baseline for the controlled decoupling sweep: the M=2 DTLZ2
+        # objectives directly. Block-size-independent (the block size only
+        # affects the composite raw response), so this baseline is identical
+        # across the whole sweep. See composite_dtlz2_blocked.py.
+        def f(X: Tensor) -> Tensor:
+            return -dtlz2_blocked_objective(X, dim)
+
+        bounds = torch.stack([torch.zeros(dim, **tkwargs), torch.ones(dim, **tkwargs)])
+        num_outputs = 2
+    elif evalfn == "CompositeDTLZ2Blocked":
+        # Composite side of the sweep: models the block-structured raw
+        # response (1 position pass-through + K = ceil((dim-1)/block_size)
+        # block sums), reduced back to the identical DTLZ2 objective. The
+        # block size dials the effective input-dimension of the raw
+        # components from ~1/dim (b=1, decoupled) to ~1 (b=dim-1, coupled).
+        f, bounds = get_composite_dtlz2_blocked_fn(dim, block_size, dtype=dtype, device=device)
+        bounds = bounds.to(**tkwargs)
+        with torch.no_grad():
+            num_outputs = f(torch.rand(2, dim, **tkwargs)).shape[-1]
+        composite_reduction = composite_dtlz2_blocked_reduction
     elif evalfn != "ackley":
         # Handle the non-constrained botorch test functions here.
         constructor_map = {
@@ -668,7 +697,7 @@ def run_one_replication(
         # deal for evalfn="Callable" whenever a composite_reduction was
         # built above (raw_evaluate_components + raw_compose path).
         negate=not (
-            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeRCM46", "CompositeOC20", "CompositePhotonic", "CompositeTopOpt", "CompositeMOOPF")
+            evalfn in ("CompositeDTLZ2", "CompositeDTLZ2Curve", "CompositeSnAr", "CompositeGriMechCalib", "CompositeRCM40", "CompositeRCM46", "CompositeOC20", "CompositePhotonic", "CompositeTopOpt", "CompositeMOOPF", "CompositeDTLZ2Blocked")
             or (evalfn == "Callable" and composite_reduction is not None)
         ),
         observation_noise_std=observation_noise_std,
