@@ -28,7 +28,7 @@ from morbo.problems.composite_dtlz2_blocked import (
     composite_dtlz2_blocked_reduction,
 )
 
-REF = [-1.1, -1.1]  # maximize convention; DTLZ2 front on the unit quarter-circle
+REF = [-6.0, -6.0]  # maximize convention; matches the project's DTLZ2 experiments
 
 
 def _run(dim, block_size, seed, evals, n_init, batch, composite):

@@ -8,8 +8,8 @@
   "n_trust_regions": 3,
   "min_tr_size": 60,
   "max_reference_point": [
-    -1.1,
-    -1.1
+    -6.0,
+    -6.0
   ],
   "verbose": false
 }
