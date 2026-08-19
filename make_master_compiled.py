@@ -34,6 +34,7 @@ TAU = os.path.join(HERE, "composite_ablation", "results_tau_repo")
 
 # --- Block A: own composite experiments, in narrative order -----------------
 OWN = [
+    ("moopf_composite", "composite_moopf", "MOOPF 5-objective OPF  (34D, 5 obj)"),
     ("rcm46_composite", "composite_rcm46", "RCM46 Optimal Power Flow  (34D, 4 obj)"),
     ("rcm40_composite", "composite_rcm40", "RCM40 Optimal Power Flow  (34D, 2 obj)"),
     ("gri_mech_composite", "composite_gri_mech", "GRI-Mech 3.0 calibration  (64D, 2 obj)"),
@@ -48,6 +49,7 @@ OWN = [
 TAU_ORDER = [
     # This project's own benchmarks, run through tau315's multi-method
     # pipeline (not just our own MORBO engine) -- listed first.
+    ("moopf_5obj_34d", "MOOPF-5 OPF, tau pipeline  (34D, 5 obj)"),
     ("rcm40_2obj_34d", "RCM40 OPF, tau pipeline  (34D, 2 obj)"),
     ("rcm46_4obj_34d", "RCM46 OPF, tau pipeline  (34D, 4 obj)"),
     ("penicillin_3obj_7d", "Penicillin, tau pipeline  (7D, 3 obj)"),
