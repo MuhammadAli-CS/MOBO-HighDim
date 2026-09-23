@@ -27,6 +27,7 @@ if [ -z "${MAP:-}" ]; then
 fi
 SEEDS="${SEEDS:-10}"
 BUDGET="${BUDGET:-40}"
+ENV_PATH="${ENV_PATH:-$HOME/morbo-env}"
 
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p cluster/logs three_arm/results
@@ -34,7 +35,7 @@ mkdir -p cluster/logs three_arm/results
 # See cluster/setup_env.sh for why this sources conda's profile script
 # directly rather than ~/.bashrc.
 source /share/apps/software/anaconda3/etc/profile.d/conda.sh
-conda activate "$HOME/morbo-env"
+conda activate "$ENV_PATH"
 
 # Keep every job single-threaded; parallelism comes from running many jobs.
 export OMP_NUM_THREADS=1
