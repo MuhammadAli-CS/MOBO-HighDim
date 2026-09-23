@@ -1,0 +1,388 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Xs}{\mathcal{X}}
+\newcommand{\GP}{\mathcal{GP}}
+\newcommand{\Norm}{\mathcal{N}}
+\newcommand{\Data}{\mathcal{D}}
+
+\title{Separating Two Things Composite Modeling Provides:\\
+Knowing the Outer Function from Observing the Intermediates}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Where this sits}
+
+Our benchmark study compared two surrogates on problems of the composite form
+$f(x)=g(h(x))$, where $h$ is an expensive black box and $g$ is a known, cheap
+function. \emph{Direct} fits a Gaussian process to $f$; \emph{Composite} fits
+Gaussian processes to $h$ and pushes their posterior samples through $g$.
+Composite improved most comparisons, but by amounts ranging from $121\%$ to
+nothing, and the follow-up experiments are designed to find out what separates
+those cases.
+
+This note addresses a confound that runs through all of them. Composite gives
+the surrogate \textbf{two different things at the same time}:
+
+\begin{enumerate}
+\item the \textbf{knowledge of $g$} --- the surrogate is told the algebraic form
+of the final objective, so it never has to learn that part from data;
+\item the \textbf{observations of $h$} --- each expensive evaluation returns
+$k$ numbers instead of one.
+\end{enumerate}
+
+Every Direct--Composite comparison we have run, and every experiment currently
+planned, changes both at once. So when Composite wins by $121\%$ on DTLZ2 we
+cannot say which of the two is responsible, and when it wins by nothing on
+RGB we cannot say which one failed to pay off.
+
+The fix is to add a third surrogate that receives exactly one of the two.
+
+\section{Three arms}
+
+Fix a single objective $f(x)=g(h(x))$ with $h:\Xs\to\R^k$ unknown and
+$g:\R^k\to\R$ known. Write $\Data_n=\{(x_i,\cdot)\}_{i\le n}$ for the data after
+$n$ evaluations.
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+Arm & Observes & Knows $g$ & Surrogate \\
+\midrule
+1. Direct    & $y_i=f(x_i)$ & no  & $f\sim\GP$ fit to $y$ \\
+2. Composite & $h(x_i)$     & yes & $h_j\sim\GP$ fit to $h_j$, then apply $g$ \\
+3. Latent    & $y_i=f(x_i)$ & yes & $h_j\sim\GP$ \emph{a priori}, $h$ never observed \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Arm 3 is the new one. It has the same prior belief about $h$ that Composite
+has, and it knows $g$ exactly, but it only ever sees the scalar $y$. Its
+posterior over the latent values $\mathbf{h}(X)=(h(x_1),\dots,h(x_n))$ is
+just Bayes' rule,
+\begin{equation}
+p\bigl(\mathbf{h}(X)\mid \mathbf{y}\bigr)\;\propto\;
+\underbrace{\prod_{i=1}^{n}\Norm\!\bigl(y_i;\,g(h(x_i)),\,\sigma^2\bigr)}_{\text{likelihood}}
+\;\cdot\;
+\underbrace{\prod_{j=1}^{k}\Norm\!\bigl(h_j(X);\,m_j,\,v_jK\bigr)}_{\text{GP prior}} ,
+\label{eq:posterior}
+\end{equation}
+and prediction at a new point is exact given the latent values, because
+$h(x')\mid \mathbf{h}(X)$ is an ordinary GP conditional. The arm-3 predictive is
+therefore a \emph{mixture of Gaussian processes}, one component per posterior
+sample of $\mathbf{h}(X)$.
+
+Because arms 2 and 3 use the \textbf{identical} prior on $h$ --- the true kernel
+of the generator that produced the test functions --- the only difference
+between them is what they observe. The two comparisons then read cleanly:
+\begin{align}
+\text{Arm 3} - \text{Arm 1} &\;=\; \text{the value of \emph{knowing} } g, \\
+\text{Arm 2} - \text{Arm 3} &\;=\; \text{the value of \emph{observing} } h .
+\end{align}
+
+\section{Why the decomposition should be informative}
+
+The second quantity has a clean characterization: observing $h$ can only help
+to the extent that $y=g(h)$ fails to determine $h$. That makes the
+\emph{invertibility of $g$} the governing property, and it gives three regimes
+we can reason about in advance.
+
+\subsection{Invertible $g$: observing $h$ is worth nothing}
+
+If $g$ is injective and the observations are noise-free, then
+$h(x_i)=g^{-1}(y_i)$ exactly. Arm 3 recovers the intermediates from the
+objective alone, so arms 2 and 3 condition on identical information and are the
+\emph{same model}. Any advantage Composite shows over Direct on such a problem
+is attributable entirely to knowing $g$.
+
+The doc's exponential warping family, $g(z)=\exp(\beta z)$, is of this type.
+Knowing $g$ is still worth something --- it tells the surrogate that $y>0$ and
+how the scale is warped --- but the extra numbers are redundant.
+
+\subsection{Linear $g$: knowing $g$ is worth nothing}
+
+If $g(\mathbf{y})=\sum_j c_j y_j$ and the $h_j$ are independent GPs, then
+$g(h(\cdot))$ is \emph{itself} a GP, with mean $\sum_j c_jm_j$ and kernel
+$\bigl(\sum_j c_j^2 v_j\bigr)k(\cdot,\cdot)$. Arm 3 therefore collapses to an
+ordinary GP fitted to $y$ --- which is arm 1 with a particular kernel. Up to
+hyperparameter estimation, knowing $g$ buys nothing at all.
+
+This is the sharpest prediction in the design, and it matters for the paper:
+Truss and RCM40 both have linear outer maps, and both produced our weakest
+results. If the prediction holds, the explanation is not merely that ``linear
+maps are easy'' but something more specific --- on a linear map there is no
+knowledge to exploit, so whatever gain Composite shows must come from the extra
+observations alone.
+
+\subsection{Non-invertible $g$: both channels are live}
+
+Take the smallest interesting case, $g(z)=z^2$, with a noise-free observation
+$y=g(h(x))$. Then $h(x)$ is known only up to sign,
+\begin{equation}
+p\bigl(h(x')\mid g(h(x))=y\bigr)
+\;=\;p\bigl(h(x')\;\bigm|\;h(x)\in\{+\sqrt{y},\,-\sqrt{y}\}\bigr),
+\label{eq:square}
+\end{equation}
+so the posterior is a two-component mixture for one observation, and a mixture
+over $2^n$ sign patterns for $n$ of them, weighted by how plausible each pattern
+is under the GP prior. Observing $h$ removes that ambiguity outright, which is
+what arm 2 measures.
+
+But knowing $g$ is worth something even without any observation of $h$. The
+range of $g$ is $[0,\infty)$, so arm 3 assigns
+\begin{equation}
+P\bigl(y(x')=-1\mid\Data\bigr)=P\bigl(h(x')^2=-1\mid\Data\bigr)=0 ,
+\end{equation}
+whereas a Direct GP on $y$ --- a Gaussian --- puts positive probability on
+negative values it can never observe. More generally, knowing $g$ imposes the
+support, the shape, and any kinks or saturation of the outer map, none of which
+a stationary GP on $y$ can represent.
+
+In general the information destroyed by $g$ is the \emph{fiber} $g^{-1}(y)$: a
+finite set for $z^2$ or $\cos$, a half-line for a clipped or rectified map, a
+circle for a Euclidean norm, a hyperbola for a product. This is the structure
+the synthetic maps in Section~\ref{sec:functions} are chosen to vary.
+
+\subsection{Summary of predictions}
+
+\begin{center}
+\begin{tabular}{llcc}
+\toprule
+$g$ & Type & Arm 3 $-$ Arm 1 & Arm 2 $-$ Arm 3 \\
+& & (knowing $g$) & (observing $h$) \\
+\midrule
+$z$                    & identity    & $0$      & $0$ \\
+$\exp(\beta z)$, $\sinh(\beta z)$ & invertible & $+$ & $0$ by construction \\
+$(z-c)^2$              & lossy, tunable & $+$   & $+$ at $c=0$, $\to 0$ as $c$ grows \\
+$|z|$                  & lossy       & $+$      & $+$ \\
+$y_1+y_2$              & linear      & $\approx 0$ & $+$ \\
+norm, max, product     & lossy       & $+$      & $+$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Test functions}
+\label{sec:functions}
+
+\subsection{Design principle}
+
+The intermediates must not become a confound. Every primitive $h_j$ is
+therefore a fixed draw from the same RBF-GP family used by the surrogate,
+generated once with random Fourier features,
+\begin{equation}
+h(x)=\sqrt{\tfrac{2}{M}}\sum_{m=1}^{M}a_m\cos(\omega_m^\top x+b_m),
+\qquad a_m\sim\Norm(0,1),\;\;b_m\sim U(0,2\pi),\;\;\omega_m\sim\Norm(0,\ell^{-2}I),
+\end{equation}
+with $M=1024$ and $\ell=0.5$, which has prior $\GP(0,k_{\mathrm{RBF}})$. The draw
+is standardized on a fixed Sobol reference set, so the implied prior on the
+standardized function is $\GP(-\mu/s,\,k_{\mathrm{RBF}}/s^2)$; those constants are
+what arms 2 and 3 use as their known prior. The same draw seeds are reused for
+every condition, so switching $g$ never changes the underlying functions.
+
+Standardization matters for a reason beyond scale: it puts the draw's mean at
+zero, so $h$ takes \emph{both signs}. Without that, $z^2$ would be injective over
+the region actually visited and would lose nothing.
+
+Each final objective is normalized to roughly $[0,1]$ using the $1$st and $99$th
+percentiles of $g(h(\cdot))$ on a fixed reference set, so that different outer
+maps do not differ merely in scale. The normalization is affine and known, so it
+is part of $g$ for all three arms.
+
+\subsection{The maps}
+
+\paragraph{The sweep.} $g_c(z)=(z-c)^2$ for $c\in\{0,0.5,1,2,3\}$ holds the
+functional form fixed and varies only how much ambiguity there is. At $c=0$ the
+sign of $h$ is lost wherever the draw crosses zero; at $c=3$ the shifted argument
+almost never changes sign over the domain, so $g$ is effectively injective. This
+is the cleanest available knob on ``how much $g$ discards.''
+
+\paragraph{Matched pairs.} Each pair changes one property and holds the rest:
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Pair & Shared & Isolates \\
+\midrule
+$z^2$ vs.\ $|z|$ & both two-to-one & smoothness at the optimum \\
+$\exp(\beta z)$ vs.\ $\sinh(\beta z)$ & both injective, both smooth & whether a range constraint helps \\
+$\cos(\omega z)$, $\omega\in\{1,2,4\}$ & smooth & \emph{how many} preimages \\
+$\max(z,0)$, $\mathrm{clip}(cz,-1,1)$ & --- & censoring and saturation \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Benchmark analogs.} Two intermediates into one objective, each
+mirroring a real benchmark: $y_1+y_2$ (Truss, RCM40), $y_1y_2$ (DTLZ2),
+$\sqrt{y_1^2+y_2^2}$ (Color), $\max(y_1,y_2)$ (Lake), and
+$u_1/(0.05+u_1+\lambda u_2)$ with $u=\mathrm{sigmoid}(y)$ (RGB). These let the
+synthetic conclusions be carried back to the benchmark results.
+
+\section{Inference for the latent arm}
+
+Arm 3 is the only one that needs more than a closed form. Three cases:
+
+\paragraph{Closed form where possible.} For the identity and injective maps,
+$h=g^{-1}(y)$ exactly, so arm 3 is implemented as arm 2. For a linear map the
+posterior \eqref{eq:posterior} is Gaussian and is available analytically. Both
+shortcuts are validated against the general sampler in Section~\ref{sec:validation}.
+
+\paragraph{General case.} Otherwise we sample \eqref{eq:posterior} over the
+$n\times k$ latent values, which is at most $90$ numbers at our budget. Two move
+types alternate.
+
+\emph{Elliptical slice sampling} \cite{murray2010} is the standard sampler for a
+GP prior with an arbitrary likelihood: it proposes
+$\mathbf{h}\cos\theta+\boldsymbol{\nu}\sin\theta$ with
+$\boldsymbol{\nu}$ a prior draw, and shrinks $\theta$ until the likelihood
+threshold is met. It needs no gradients, which matters because $|z|$, $\max$ and
+the clipped map have kinks or flat regions, and no tuning.
+
+\emph{Level-set moves} do the work that elliptical slice sampling cannot. When
+$\sigma$ is small the likelihood is sharply peaked on the set
+$\{g(h(x_i))=y_i\}$, and slice proposals must shrink to roughly
+$\sigma/\mathrm{sd}(h)$ to stay on it, so movement \emph{along} that set is a slow
+random walk --- precisely along the directions the experiment is about. But
+those directions are known in closed form for each $g$. We therefore propose
+$h(x_i)\mapsto h'(x_i)$ with
+\begin{equation}
+g\bigl(h'(x_i)\bigr)=g\bigl(h(x_i)\bigr) \text{ exactly},
+\end{equation}
+from a symmetric proposal, so the likelihood ratio is identically one and the
+Metropolis--Hastings acceptance probability reduces to the GP prior ratio alone.
+With $Q=K^{-1}$ and $r_j=h_j(X)-m_j$, changing coordinate $i$ of latent $j$ from
+$\alpha$ to $\beta$ gives
+\begin{equation}
+\Delta\log p=-\frac{1}{2v_j}\Bigl[Q_{ii}\bigl(\beta^2-\alpha^2\bigr)
++2(\beta-\alpha)\bigl((Qr_j)_i-Q_{ii}\alpha\bigr)\Bigr].
+\end{equation}
+The moves are the symmetries of each map: reflection $h\mapsto 2c-h$ for
+$(z-c)^2$ and $|z|$; reflection through the nearest multiple of $\pi/\omega$ plus
+translation by the period for $\cos(\omega z)$; a random walk confined to the
+flat region for $\max(z,0)$ and the clipped map; rotation of $(h_1,h_2)$ for the
+norm; negation and reciprocal rescaling for the product; swapping the two
+coordinates and moving the smaller one for the max; and the shift
+$(h_1+\delta,h_2-\delta)$ for the sum. Only the ratio map has no convenient
+exact symmetry, and is sampled by elliptical slice sampling alone.
+
+\paragraph{Practical details.} Burn-in anneals $\sigma$ geometrically down to its
+target so that chains started from the prior can find the data; later fits
+warm-start from the previous chain, with the new point initialized from its GP
+conditional. Several chains are run and diagnostics are computed on the
+predictive of $f$, which is invariant to the symmetries of $h$ that leave $f$
+unchanged --- so a chain that has globally flipped sign under an even $g$ does
+not register as non-convergence.
+
+\section{What is measured}
+
+\paragraph{Information destroyed by $g$.} The average posterior variance of the
+intermediates \emph{at the points already evaluated},
+\begin{equation}
+U_{\text{lost}}=\frac{1}{nk}\sum_{i=1}^{n}\sum_{j=1}^{k}
+\operatorname{Var}\bigl(h_j(x_i)\mid \mathbf{y}\bigr),
+\end{equation}
+is zero when $g$ is injective and grows with the size of the fiber. It is a
+measured version of the quantity the whole design is organized around, and the
+central plot is the ``observing $h$'' gain against it.
+
+\paragraph{Optimization performance.} Each arm reports simple regret against a
+reference minimum; comparisons use the final $\log_{10}$ regret, paired over
+seeds, since all three arms share an initial design and an acquisition
+procedure.
+
+\paragraph{A confound to control.} Arms 2 and 3 are given the generator's true
+kernel, whereas arm 1 must estimate its hyperparameters by maximum likelihood,
+because for a general $g$ there is no true kernel for $f$. The ``knowing $g$''
+comparison therefore mixes the value of $g$ with the value of a correct prior.
+The identity map measures the second effect alone --- knowing $g$ is worth
+exactly nothing there --- and so serves as the baseline to subtract. A
+robustness run with maximum-likelihood hyperparameters in all three arms
+resolves it directly.
+
+\section{Protocol}
+
+Single objective, $d=6$, $\ell=0.5$; $n_0=5$ Sobol points and $40$ adaptive
+evaluations, matching Experiment~1; $10$ paired seeds. All three arms share the
+initial design, the acquisition function (Monte Carlo LogEI), the candidate pool
+and the evaluation budget, so the surrogate is the only thing that differs.
+
+\section{Validation}
+\label{sec:validation}
+
+The sampler is checked against the two cases whose answers are known
+independently before being trusted anywhere else.
+
+\paragraph{Linear map, against the exact posterior.} On $y_1+y_2$ with $n=20$,
+the sampled posterior matches the analytic Gaussian: the error in the posterior
+mean is a median of $0.065$ posterior standard deviations (max $0.249$), and the
+ratio of sampled to exact standard deviation has median $0.973$ and range
+$[0.85,1.10]$.
+
+\paragraph{Injective map, for calibration.} On $\exp(z)$ the true $h$ falls
+within two posterior standard deviations at $95\%$ of points. The largest raw
+error, $0.62$, occurs at $h=-1.96$, where $\exp$ is flat enough that its slope
+falls below the likelihood noise. This is correct behavior and a substantive
+caveat: \textbf{with observation noise, an injective $g$ still destroys
+information wherever it is flat}, so ``arm 2 equals arm 3 for injective $g$''
+holds exactly only in the noise-free limit.
+
+\paragraph{The sweep behaves as designed.}
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+Map & $U_{\text{lost}}$ & Chain disagreement & Move acceptance \\
+\midrule
+$(z-0)^2$   & $0.877$ & $0.029$ & $0.67$ \\
+$(z-0.5)^2$ & $1.072$ & $0.052$ & $0.52$ \\
+$(z-1)^2$   & $0.443$ & $0.047$ & $0.32$ \\
+$(z-2)^2$   & $0.139$ & $0.036$ & $0.07$ \\
+$(z-3)^2$   & $0.003$ & $0.018$ & $0.00$ \\
+$|z|$       & $0.882$ & $0.027$ & $0.66$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The information destroyed falls by more than two orders of magnitude across the
+sweep, and the level-set acceptance rate falls with it --- at $c=3$ the
+reflected proposal is so implausible under the prior that it is never accepted,
+which is the correct behavior when there is no ambiguity left to explore. Chain
+disagreement is in normalized objective units, where the objective spans about
+one.
+
+\section{Limitations}
+
+\begin{itemize}
+\item \textbf{Noise makes injectivity a matter of degree.} As measured above,
+an injective $g$ still loses information where its slope is small relative to
+$\sigma$. The clean statement holds only in the noise-free limit.
+\item \textbf{Continuous fibers mix more slowly than discrete ones.} Reflections
+for $z^2$ are single moves that jump between modes; following the circle fiber of
+a norm is a single-site random walk over a smooth field, which mixes more slowly
+when observed points are strongly coupled. The ratio map has no exact moves at
+all and relies on elliptical slice sampling.
+\item \textbf{The reference minimum is estimated}, from a large Sobol set
+refined by gradient ascent, so regret is measured against a very good estimate
+rather than a proven optimum.
+\item \textbf{Single objective.} The decomposition is cleanest with one
+objective; whether the same accounting holds once a hypervolume acquisition is
+involved is a separate question, and the natural next step once these results
+are in.
+\end{itemize}
+
+\begin{thebibliography}{9}
+\bibitem{murray2010}
+I.~Murray, R.~P. Adams, and D.~J.~C. MacKay.
+Elliptical slice sampling.
+In \emph{Proceedings of the 13th International Conference on Artificial
+Intelligence and Statistics}, PMLR 9:541--548, 2010.
+\end{thebibliography}
+
+\end{document}
