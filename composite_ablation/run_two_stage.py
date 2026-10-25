@@ -47,6 +47,14 @@ def final_hv(Y: torch.Tensor, ref_point: torch.Tensor) -> float:
     return float(hv.compute(-Y.to(DTYPE)))
 
 
+def hv_trace(Y: torch.Tensor, ref_point: torch.Tensor, n_init: int):
+    """Hypervolume after each adaptive evaluation, so improvement can be
+    plotted rather than only its endpoint."""
+    hv = Hypervolume(ref_point=-ref_point.to(DTYPE))
+    Yd = -Y.to(DTYPE)
+    return [float(hv.compute(Yd[: n_init + t])) for t in range(Y.shape[0] - n_init + 1)]
+
+
 def _unit(args):
     """One (g1, draw, seed): both arms on the same problem and initial design.
 
@@ -55,20 +63,22 @@ def _unit(args):
     max_tasks_per_child: when every worker hits the recycle limit on the same
     tick, ProcessPoolExecutor.map deadlocks on Windows.
     """
-    g1_name, draw, seed, dim, n_init, n_iter = args
+    g1_name, draw, seed, dim, n_init, n_iter, g2, kernel = args
     torch.set_num_threads(1)
     torch.set_default_dtype(DTYPE)
     warnings.filterwarnings("ignore")
-    p = make_two_stage(g1_name, dim=dim, draw_seed=draw)
+    p = make_two_stage(g1_name, dim=dim, draw_seed=draw, g2=g2, kernel=kernel)
     rd = standard_mobo(p.evaluate, p.dim, p.ref_point,
                        n_init=n_init, n_iter=n_iter, seed=seed)
     rc = composite_mobo(p.evaluate, p.evaluate_components, p.compose,
                         p.dim, p.ref_point, n_init=n_init, n_iter=n_iter, seed=seed)
-    return g1_name, final_hv(rd.Y, p.ref_point), final_hv(rc.Y, p.ref_point)
+    return (g1_name,
+            hv_trace(rd.Y, p.ref_point, n_init),
+            hv_trace(rc.Y, p.ref_point, n_init))
 
 
-def run_all(names, trials, draws, dim, n_init, n_iter, jobs):
-    units = [(n, d, s, dim, n_init, n_iter)
+def run_all(names, trials, draws, dim, n_init, n_iter, jobs, g2, kernel):
+    units = [(n, d, s, dim, n_init, n_iter, g2, kernel)
              for n in names for d in range(draws) for s in range(trials)]
     out = {n: ([], []) for n in names}
     if jobs > 1:
@@ -107,6 +117,10 @@ def main():
     ap.add_argument("--n-iter", type=int, default=40)
     ap.add_argument("--g1", nargs="+", default=list(OUTER_G1))
     ap.add_argument("--jobs", type=int, default=1)
+    ap.add_argument("--kernel", choices=["rbf", "matern"], default="matern")
+    ap.add_argument("--g2", choices=["ackley", "identity"], default="ackley",
+                    help="identity makes objective 2 a plain GP, so the"
+                         " whole advantage is attributable to g1")
     ap.add_argument("--out", default="composite_ablation/results/two_stage.json")
     a = ap.parse_args()
     torch.set_default_dtype(DTYPE)
@@ -117,12 +131,14 @@ def main():
           f"{'gain %':>17s} {'wins':>8s} {'min':>6s}")
     print("-" * 82)
     t0 = time.time()
-    res = run_all(a.g1, a.trials, a.draws, a.dim, a.n_init, a.n_iter, a.jobs)
+    res = run_all(a.g1, a.trials, a.draws, a.dim, a.n_init, a.n_iter, a.jobs, a.g2, a.kernel)
     blob = {}
     for name in a.g1:
-        d, c = res[name]
+        dt, ct = res[name]
+        d = [t[-1] for t in dt]; c = [t[-1] for t in ct]
         m, se, wins, n = paired_pct(d, c)
-        blob[name] = dict(direct=d, composite=c, injective=G1_INJECTIVE[name])
+        blob[name] = dict(direct=d, composite=c, injective=G1_INJECTIVE[name],
+                          direct_trace=dt, composite_trace=ct)
         print(f"{name:9s} {str(G1_INJECTIVE[name]):>9s} {st.mean(d):11.4f} "
               f"{st.mean(c):13.4f} {m:+9.2f} +/- {se:5.2f} {wins:5d}/{n} "
               f"{(time.time()-t0)/60:5.1f}", flush=True)

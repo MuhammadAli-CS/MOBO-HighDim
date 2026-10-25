@@ -34,6 +34,24 @@ _CHUNK = 4096
 # --------------------------------------------------------------------------
 # Common GP-draw generator (doc Section 4)
 # --------------------------------------------------------------------------
+def _spectral_sample(d, n_features, lengthscale, kernel, gen):
+    """Draw frequencies from the kernel's spectral density.
+
+    RBF's is Gaussian.  Matern-nu's is a multivariate Student-t with 2*nu
+    degrees of freedom, sampled as a Gaussian scaled by an inverse Gamma --
+    which is what makes Matern draws rougher than RBF ones.  BoTorch's default
+    kernel is Matern 5/2, so generating h from it is what makes the surrogate
+    correctly specified about the inner function rather than merely close.
+    """
+    z = torch.randn(n_features, d, generator=gen, dtype=DTYPE)
+    if kernel == "rbf":
+        return z / lengthscale
+    nu = 2.5
+    u = torch.distributions.Gamma(torch.tensor(nu, dtype=DTYPE),
+                                  torch.tensor(nu, dtype=DTYPE)).sample((n_features, 1))
+    return z / (lengthscale * u.sqrt())
+
+
 class RFFDraw:
     """Fixed RBF-GP draw via random Fourier features.
 
@@ -46,10 +64,12 @@ class RFFDraw:
     """
 
     def __init__(self, d: int, lengthscale: float = 0.5, seed: int = 0,
-                 n_features: int = 1024, n_ref: int = 16384):
+                 n_features: int = 1024, n_ref: int = 16384,
+                 kernel: str = "rbf"):
         gen = torch.Generator().manual_seed(seed)
+        self.kernel = kernel
         self.d, self.lengthscale, self.seed = d, lengthscale, seed
-        self.omega = torch.randn(n_features, d, generator=gen, dtype=DTYPE) / lengthscale
+        self.omega = _spectral_sample(d, n_features, lengthscale, kernel, gen)
         self.b = TWO_PI * torch.rand(n_features, generator=gen, dtype=DTYPE)
         self.a = torch.randn(n_features, generator=gen, dtype=DTYPE)
         self.scale = math.sqrt(2.0 / n_features)
@@ -113,12 +133,15 @@ def _relu_walk(h, gen):
     return prop if prop[0] <= 0 else None
 
 
-def _clip_walk(c: float):
+def _clip_pair_walk(c: float):
+    """Move the clipped coordinate within its saturated region; the second
+    coordinate, which carries the optimum, is left alone."""
     def move(h, gen):
         s = c * h[0]
-        if abs(float(s)) < 1.0:  # unsaturated: pinned
+        if abs(float(s)) < 1.0:  # unsaturated: pinned by the observation
             return None
-        prop = h + _pick([0.05, 0.3, 1.0], gen) * _randn(gen)
+        prop = h.clone()
+        prop[0] = prop[0] + _pick([0.05, 0.3, 1.0], gen) * _randn(gen)
         same_side = (c * prop[0] >= 1.0) if s >= 1.0 else (c * prop[0] <= -1.0)
         return prop if same_side else None
     return move
@@ -200,11 +223,23 @@ def _build_maps() -> Dict[str, OuterMap]:
         add(OuterMap(f"cos_w{w:g}", 1, lambda y, w=w: torch.cos(w * y[..., 0]),
                      "lossy", "which of many preimages", moves=_cos_moves(w)))
 
-    add(OuterMap("relu", 1, lambda y: y[..., 0].clamp_min(0.0), "lossy",
-                 "everything below zero (censoring)", moves=[_relu_walk]))
+    # Minimizing -relu, not relu: relu itself is minimized on the whole censored
+    # region h <= 0, which the initial design already contains, so every arm
+    # scores a perfect regret and the condition carries no signal.  Negating
+    # puts the optimum at max h, which is unique, while censoring the same set.
+    # Note the optimum then sits where g is injective, so this condition tests
+    # whether information destroyed *away from* the optimum matters at all.
+    add(OuterMap("relu", 1, lambda y: -y[..., 0].clamp_min(0.0), "lossy",
+                 "everything below zero (censoring, away from the optimum)",
+                 moves=[_relu_walk]))
 
-    add(OuterMap("clip_c2", 1, lambda y: (2.0 * y[..., 0]).clamp(-1.0, 1.0), "lossy",
-                 "values inside the saturated regions", moves=[_clip_walk(2.0)]))
+    # Likewise a bare clip is flat at both ends, so the optimum is a region.
+    # Adding a second, unclipped intermediate makes the optimum a genuine
+    # tradeoff while the first coordinate stays censored inside saturation.
+    add(OuterMap("clip_c2", 2,
+                 lambda y: (2.0 * y[..., 0]).clamp(-1.0, 1.0) + y[..., 1], "lossy",
+                 "the clipped coordinate inside the saturated regions",
+                 moves=[_clip_pair_walk(2.0)]))
 
     # two inputs -> one output: analogs of the real benchmarks
     add(OuterMap("sum", 2, lambda y: y[..., 0] + y[..., 1], "linear",

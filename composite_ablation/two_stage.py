@@ -86,7 +86,8 @@ class TwoStageProblem:
 
 
 def shared_ref_point(dim: int = 6, lengthscale: float = 0.5, draw_seed: int = 0,
-                     pad: float = 0.05) -> Tensor:
+                     pad: float = 0.05, g2: str = "ackley",
+                     kernel: str = "matern") -> Tensor:
     """One reference point for every g1, so hypervolumes are comparable.
 
     Hypervolume is measured against a reference point, so letting each
@@ -96,7 +97,8 @@ def shared_ref_point(dim: int = 6, lengthscale: float = 0.5, draw_seed: int = 0,
     """
     worst = None
     for name in OUTER_G1:
-        p = make_two_stage(name, dim, lengthscale, draw_seed, _ref_point=False)
+        p = make_two_stage(name, dim, lengthscale, draw_seed, _ref_point=False,
+                           g2=g2, kernel=kernel)
         ref = SobolEngine(dim, scramble=True, seed=31337).draw(8192).to(DTYPE)
         y = p.evaluate(ref).max(dim=0).values
         worst = y if worst is None else torch.maximum(worst, y)
@@ -105,16 +107,35 @@ def shared_ref_point(dim: int = 6, lengthscale: float = 0.5, draw_seed: int = 0,
 
 def make_two_stage(g1_name: str, dim: int = 6, lengthscale: float = 0.5,
                    draw_seed: int = 0, n_ref: int = 32768,
-                   _ref_point: bool = True) -> TwoStageProblem:
+                   _ref_point: bool = True, g2: str = "ackley",
+                   kernel: str = "matern") -> TwoStageProblem:
+    """g2 = "ackley" uses four intermediates and a hard multimodal map;
+    g2 = "identity" uses one intermediate and the identity.
+
+    The identity variant is the cleaner experiment.  Ackley is itself strongly
+    nonlinear and strongly non-injective, so Composite gains a great deal on
+    the second objective in *every* condition -- a constant baseline that
+    dilutes whatever g1 contributes, and the reason the linear condition still
+    showed +17% there.  With the identity, f2 = h2 is exactly a Gaussian
+    process, Direct is correctly specified on that objective and Composite
+    gains nothing from it, so the whole advantage is attributable to g1 and
+    the absolute numbers mean something rather than only the contrasts.
+    """
     g1 = OUTER_G1[g1_name]
-    draws = [RFFDraw(dim, lengthscale, seed=1000 * draw_seed + j) for j in range(N_INNER)]
+    n_inner = N_INNER if g2 == "ackley" else 2
+    # Matern 5/2 by default, because that is BoTorch's default kernel: drawing
+    # h from the same family the surrogate assumes is what makes the model
+    # correctly specified about the inner function, so any remaining
+    # misspecification is attributable to g.
+    draws = [RFFDraw(dim, lengthscale, seed=1000 * draw_seed + j, kernel=kernel)
+             for j in range(n_inner)]
 
     def components(X: Tensor) -> Tensor:
-        return torch.stack([d(X) for d in draws], dim=-1)          # (n, 5)
+        return torch.stack([d(X) for d in draws], dim=-1)          # (n, n_inner)
 
     def raw(C: Tensor) -> Tensor:
         f1 = g1(C[..., 0])
-        f2 = ackley(C[..., 1:])
+        f2 = ackley(C[..., 1:]) if g2 == "ackley" else C[..., 1]
         return torch.stack([f1, f2], dim=-1)                       # (n, 2)
 
     # Percentile normalisation per objective, on a fixed reference set.
@@ -135,11 +156,12 @@ def make_two_stage(g1_name: str, dim: int = 6, lengthscale: float = 0.5,
     # identical in spirit across conditions, then padded.
     normed = compose(components(ref))
     ideal = normed.min(dim=0).values
-    ref_point = (shared_ref_point(dim, lengthscale, draw_seed) if _ref_point
+    ref_point = (shared_ref_point(dim, lengthscale, draw_seed, g2=g2, kernel=kernel)
+                 if _ref_point
                  else normed.max(dim=0).values + 0.05)
 
     return TwoStageProblem(
-        name=f"two_stage_{g1_name}", dim=dim, evaluate=evaluate,
+        name=f"two_stage_{g1_name}_{g2}", dim=dim, evaluate=evaluate,
         evaluate_components=components, compose=compose,
         ref_point=ref_point, ideal=ideal,
     )
