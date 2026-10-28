@@ -9,6 +9,11 @@
 #   bash cluster/submit_three_arm.sh              # every group
 #   bash cluster/submit_three_arm.sh sweep        # one group
 #   SEEDS=20 BUDGET=40 bash cluster/submit_three_arm.sh pairs
+#   DRAWS="0 1 2 3" SEEDS=5 bash cluster/submit_three_arm.sh   # 4 functions x 5 designs
+#
+# DRAWS varies the random function h itself, not just the initial design, so a
+# conclusion cannot be a property of one sampled function.  Total runs per map
+# is (number of draws) x SEEDS; --collect pools them.
 #
 # Validate the arm-3 sampler before spending a queue on it:
 #   python three_arm/run.py --check
@@ -22,6 +27,7 @@ mkdir -p cluster/logs three_arm/results
 SEEDS="${SEEDS:-10}"
 BUDGET="${BUDGET:-40}"
 ENV_PATH="${ENV_PATH:-$HOME/morbo-env}"
+DRAWS="${DRAWS:-0}"
 GROUPS_TO_RUN=("$@")
 if [ ${#GROUPS_TO_RUN[@]} -eq 0 ]; then
   GROUPS_TO_RUN=(validate sweep pairs analogs)

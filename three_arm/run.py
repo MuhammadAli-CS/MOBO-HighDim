@@ -161,11 +161,15 @@ def run_condition(map_name: str, arms, cfg: Config, out_dir: Path, quiet: bool =
         summary["observe_h"] = paired(final["latent"], final["composite"])
     if {"direct", "composite"} <= set(arms):
         summary["total"] = paired(final["direct"], final["composite"])
+    summary["n"], summary["draws"] = cfg.seeds, 1
     if "latent" in arms:
         summary["mean_u_lost"] = sum(sum(r["u_lost"]) / len(r["u_lost"]) for r in results["latent"]) / cfg.seeds
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / f"{map_name}.json", "w") as fh:
+    # One file per (map, function draw).  Draw 0 keeps the bare name so older
+    # single-draw result directories still collect.
+    stem = map_name if cfg.draw_seed == 0 else f"{map_name}@d{cfg.draw_seed}"
+    with open(out_dir / f"{stem}.json", "w") as fh:
         json.dump({"map": map_name, "config": asdict(cfg), "f_min": problem.f_min,
                    "describe": problem.describe(), "summary": summary, "results": results}, fh, indent=1)
     return summary
@@ -180,15 +184,16 @@ def _worker(map_name: str, arms, cfg: Config, out: str) -> dict:
 
 
 def print_table(rows):
-    print("\n" + "=" * 96)
-    print(f"{'map':14s} {'direct':>8s} {'comp':>8s} {'latent':>8s}   {'know g':>15s} {'observe h':>15s} {'U_lost':>8s}")
-    print("-" * 96)
+    print("\n" + "=" * 110)
+    print(f"{'map':14s} {'direct':>8s} {'comp':>8s} {'latent':>8s}   {'know g':>15s} {'observe h':>15s} {'U_lost':>8s} "
+          f"{'runs':>5s} {'drw':>4s}")
+    print("-" * 110)
     for name, s in rows:
         fmt = lambda key: (f"{s[key][0]:+6.3f}+/-{s[key][1]:5.3f}" if key in s else "      -      ")
         print(f"{name:14s} {s.get('direct', float('nan')):8.3f} {s.get('composite', float('nan')):8.3f} "
               f"{s.get('latent', float('nan')):8.3f}   {fmt('know_g'):>15s} {fmt('observe_h'):>15s} "
-              f"{s.get('mean_u_lost', float('nan')):8.4f}")
-    print("=" * 96)
+              f"{s.get('mean_u_lost', float('nan')):8.4f} {s.get('n', 0):5d} {s.get('draws', 1):4d}")
+    print("=" * 110)
     print("final log10 regret (lower is better); differences are paired over seeds, > 0 favours the second arm")
 
 
@@ -291,6 +296,9 @@ def main():
     ap.add_argument("--n0", type=int, default=Config.n0)
     ap.add_argument("--d", type=int, default=Config.d)
     ap.add_argument("--noise", type=float, default=Config.noise)
+    ap.add_argument("--draw-seed", type=int, default=Config.draw_seed,
+                    help="which random function h to draw; vary it so conclusions "
+                         "are not a property of one sampled function")
     ap.add_argument("--no-shortcuts", action="store_true",
                     help="sample arm 3 even for invertible / linear maps")
     ap.add_argument("--collect", action="store_true",
@@ -301,7 +309,8 @@ def main():
     args = ap.parse_args()
 
     cfg = Config(d=args.d, n0=args.n0, budget=args.budget, seeds=args.seeds,
-                 noise=args.noise, shortcuts=not args.no_shortcuts)
+                 noise=args.noise, shortcuts=not args.no_shortcuts,
+                 draw_seed=args.draw_seed)
     torch.set_default_dtype(DTYPE)
 
     if args.check:
@@ -310,18 +319,40 @@ def main():
 
     if args.collect:
         order = list(OUTER_MAPS)
-        files = sorted(Path(args.out).glob("*.json"), key=lambda p: order.index(p.stem)
-                       if p.stem in order else len(order))
+        files = sorted(Path(args.out).glob("*.json"))
         if not files:
             ap.error(f"no results in {args.out}")
-        rows = []
+        # Pool the function draws of one map: each file contributes its own
+        # per-seed final regrets, and the paired statistics are recomputed over
+        # the pooled (draw, seed) pairs.  Pairing stays valid because every arm
+        # within a file saw the same draw and the same initial designs.
+        pooled, draws = {}, {}
         for path in files:
             blob = json.loads(path.read_text())
-            s = blob["summary"]
-            for key in ("know_g", "observe_h", "total"):   # JSON turns tuples into lists
-                if key in s:
-                    s[key] = tuple(s[key])
-            rows.append((blob["map"], s))
+            name = blob["map"]
+            acc = pooled.setdefault(name, {})
+            draws[name] = draws.get(name, 0) + 1
+            for arm, runs in blob["results"].items():
+                acc.setdefault(arm, []).extend(
+                    log_regret(r["best"][-1], blob["f_min"]) for r in runs)
+            if "latent" in blob["results"]:
+                acc.setdefault("_u", []).extend(
+                    sum(r["u_lost"]) / len(r["u_lost"]) for r in blob["results"]["latent"])
+        rows = []
+        for name in sorted(pooled, key=lambda n: order.index(n) if n in order else len(order)):
+            acc = pooled[name]
+            u = acc.pop("_u", None)
+            s_ = {a: sum(v) / len(v) for a, v in acc.items()}
+            if {"direct", "latent"} <= set(acc):
+                s_["know_g"] = paired(acc["direct"], acc["latent"])
+            if {"latent", "composite"} <= set(acc):
+                s_["observe_h"] = paired(acc["latent"], acc["composite"])
+            if {"direct", "composite"} <= set(acc):
+                s_["total"] = paired(acc["direct"], acc["composite"])
+            if u:
+                s_["mean_u_lost"] = sum(u) / len(u)
+            s_["n"], s_["draws"] = len(next(iter(acc.values()))), draws[name]
+            rows.append((name, s_))
         print_table(rows)
         return
 

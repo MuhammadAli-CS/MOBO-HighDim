@@ -269,6 +269,28 @@ class LatentArm:
                     acc += 1
         return H, acc, tried
 
+    def _project(self, H, y, steps: int = 80, lr: float = 0.05):
+        """Move latent rows onto the constraint surface {g(h) = y}.
+
+        Elliptical slice sampling only takes steps of order sigma / sd(h) once
+        the likelihood is tight, so a point initialized off the surface -- as a
+        newly appended BO point is, sitting at its GP conditional mean -- never
+        reaches it, and the error compounds over iterations.  Local descent
+        lands on the preimage nearest that mean, which keeps whichever branch
+        the prior prefers; the level-set moves then explore the other branches.
+        """
+        Z = H.clone().requires_grad_(True)
+        opt = torch.optim.Adam([Z], lr=lr)
+        for _ in range(steps):
+            opt.zero_grad()
+            loss = ((self.problem.g(Z) - y) ** 2).sum()
+            if not torch.isfinite(loss):
+                break
+            loss.backward()
+            opt.step()
+        Z = Z.detach()
+        return Z if torch.isfinite(Z).all() else H
+
     def _mcmc(self, X, y):
         n, k = len(X), self.prior.k
         Q = torch.cholesky_inverse(self.L)
@@ -281,11 +303,18 @@ class LatentArm:
             states = []
             for Z in self.states:
                 mean, _ = self.prior.conditional(X[:n_old], Z.unsqueeze(0), X[n_old:])
-                states.append(torch.cat([Z, mean[0]], 0))
-            burn, sigma0 = self.burn, max(0.1, self.noise)
+                new_rows = self._project(mean[0], y[n_old:])
+                states.append(torch.cat([Z, new_rows], 0))
+            # No annealing on a warm start.  The chain is already on the
+            # posterior and only the appended point needs to settle; re-heating
+            # sigma scatters latents that were already correct faster than the
+            # short warm burn-in can recover them, and the error compounds over
+            # BO iterations.
+            burn, sigma0 = self.burn, self.noise
         else:
-            states = [self.prior.m + (self.L @ torch.randn(n, k, generator=self.gen, dtype=DTYPE)) * sd
-                      for _ in range(self.n_chains)]
+            states = [self._project(
+                self.prior.m + (self.L @ torch.randn(n, k, generator=self.gen, dtype=DTYPE)) * sd, y)
+                for _ in range(self.n_chains)]
             burn, sigma0 = self.burn_first, max(0.3, self.noise)
 
         anneal_len = max(1, burn // 2)
@@ -319,14 +348,22 @@ class LatentArm:
 
     # ------------------------------------------------------------- predict
     def prepare_samples(self, n: int, seed: int):
+        """Draw exactly n predictive samples, each pairing its own noise with a
+        latent sample cycled from the chain.
+
+        Giving every latent sample a *shared* noise draw instead collapses the
+        Monte Carlo estimate whenever the latent posterior is tight: the
+        samples then differ only by their posterior means, which are nearly
+        identical, so the effective sample size falls to one.  Matching the
+        composite arm's sample count here keeps the two comparable."""
         gen = torch.Generator().manual_seed(seed)
-        E = max(1, n // self.F.shape[0])
-        self.eps = torch.randn(E, self.prior.k, generator=gen, dtype=DTYPE)
+        self.eps = torch.randn(n, self.prior.k, generator=gen, dtype=DTYPE)
+        self.idx = torch.arange(n) % self.F.shape[0]
 
     def sample_f(self, Xc):
         mean, sd = self.prior.conditional(self.X, self.F, Xc, self.L)   # (S,m,k), (m,k)
-        Hs = mean.unsqueeze(0) + sd * self.eps[:, None, None, :]         # (E,S,m,k)
-        return self.problem.g(Hs.reshape(-1, *Hs.shape[2:]))
+        Hs = mean[self.idx] + sd * self.eps[:, None, :]                  # (n,m,k)
+        return self.problem.g(Hs)
 
     def diagnostics(self):
         return dict(self.stats)
