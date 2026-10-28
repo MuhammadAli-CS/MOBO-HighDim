@@ -58,20 +58,58 @@ def ackley(Z: Tensor, a: float = 20.0, b: float = 0.2, c: float = 2 * math.pi) -
     return -a * torch.exp(-b * s1.sqrt()) - torch.exp(s2) + a + math.e
 
 
+def _poly(roots):
+    """prod_i (z - r_i), matching three_arm's _poly."""
+    def fn(z, roots=roots):
+        out = torch.ones_like(z)
+        for r in roots:
+            out = out * (z - r)
+        return out
+    return fn
+
+
+# The g1 maps, matched one-for-one to the single-objective grid so the two
+# settings can be compared on identical outer maps.  These are written out
+# here rather than imported, because the single-objective module builds them
+# together with level-set move machinery that the two-objective side never
+# uses.  composite_ablation/check_g1.py proves they agree with
+# three_arm.test_functions.OUTER_MAPS to machine precision; run it after
+# touching this table.
+#
+# root{m} uses a hand-picked root table, NOT linspace -- root2 sits at +-1
+# while spr2s100 sits at +-2 -- so the two families are genuinely different
+# maps and both are included.
+_ROOTS = {2: [-1.0, 1.0], 3: [-1.5, 0.0, 1.5],
+          4: [-1.5, -0.5, 0.5, 1.5], 5: [-2.0, -1.0, 0.0, 1.0, 2.0]}
+_SPREAD = {f"spr{m}s{int(sv * 100):03d}":
+           [sv * (-2.0 + 4.0 * i / (m - 1)) for i in range(m)]
+           for m, sv in ((2, 0.5), (3, 0.5), (4, 0.5), (6, 1.0))}
+
 OUTER_G1: Dict[str, Callable[[Tensor], Tensor]] = {
+    # bijective over the range h reaches
     "identity": lambda z: z,
-    "sinh": torch.sinh,
-    "cube": lambda z: z ** 3,
-    "square": lambda z: z ** 2,
+    "exp_b1": torch.exp,
+    "sinh_b1": torch.sinh,
+    "mono3": lambda z: z ** 3,
+    "mono5": lambda z: z ** 5,
+    "shiftsq_c3": lambda z: (z - 3.0) ** 2,
+    # not bijective
+    "shiftsq_c0": lambda z: z ** 2,
+    "shiftsq_c0.5": lambda z: (z - 0.5) ** 2,
+    "shiftsq_c1": lambda z: (z - 1.0) ** 2,
+    "shiftsq_c2": lambda z: (z - 2.0) ** 2,
+    "cos_w1": lambda z: torch.cos(1.0 * z),
+    "cos_w2": lambda z: torch.cos(2.0 * z),
+    "cos_w4": lambda z: torch.cos(4.0 * z),
+    **{f"root{m}": _poly(r) for m, r in _ROOTS.items()},
+    **{k: _poly(r) for k, r in _SPREAD.items()},
 }
-# sinh is the second bijective-but-nonlinear map, included because z^3 turned
-# out to be a poor partner for z^2: its dynamic range is large enough that a
-# few seeds dominate the mean (max +131% against a median of +23%), which
-# swamped the contrast it was meant to carry.  sinh is monotone and nonlinear
-# with a tamer tail over the range h reaches.
-# Whether g1 can be inverted on the range h0 actually reaches.  Both identity
-# and cube are strictly increasing; the square folds at the origin.
-G1_INJECTIVE = {"identity": True, "sinh": True, "cube": True, "square": False}
+
+# Bijectivity as MEASURED on the range h actually reaches, not as declared:
+# shiftsq_c3's vertex sits at h = 3, the edge of that range, so it behaves as
+# a bijection (nbar = 1.01) even though it is a parabola.
+_BIJECTIVE = {"identity", "exp_b1", "sinh_b1", "mono3", "mono5", "shiftsq_c3"}
+G1_INJECTIVE = {k: k in _BIJECTIVE for k in OUTER_G1}
 
 
 @dataclass
