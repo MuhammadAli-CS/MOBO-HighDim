@@ -72,12 +72,46 @@ echo "  g1:     $G1S"
 echo "  draws:  $DRAWS   trials: $TRIALS   dim: $DIM   n_iter: $N_ITER"
 echo "  g2:     $G2   kernel: $KERNEL   out: $OUT"
 
+# slurmctld intermittently returns "Socket timed out on send/recv operation".
+# Under `set -e` that killed the whole loop, so one flaky call left 8 of 84
+# jobs queued and no indication which.  Retry each submission, and on
+# persistent failure record it and carry on rather than abandoning the rest.
+submitted=0
+failed=()
+skipped=0
 for g1 in $G1S; do
   for draw in $DRAWS; do
-    sbatch --requeue \
-      --job-name="two-stage-${g1}-d${draw}" \
-      --export=G1="$g1",DRAW="$draw",TRIALS="$TRIALS",DIM="$DIM",N_INIT="$N_INIT",N_ITER="$N_ITER",G2="$G2",KERNEL="$KERNEL",JOBS="$JOBS",OUT="$OUT",ENV_PATH="$ENV_PATH" \
-      --parsable \
-      cluster/two_stage.sub
+    if [ -n "${SKIP_EXISTING:-}" ] && [ -f "$OUT/${g1}_d${draw}.json" ]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+    id=""
+    for attempt in 1 2 3 4 5; do
+      if id=$(sbatch --requeue \
+          --job-name="two-stage-${g1}-d${draw}" \
+          --export=G1="$g1",DRAW="$draw",TRIALS="$TRIALS",DIM="$DIM",N_INIT="$N_INIT",N_ITER="$N_ITER",G2="$G2",KERNEL="$KERNEL",JOBS="$JOBS",OUT="$OUT",ENV_PATH="$ENV_PATH" \
+          --parsable \
+          cluster/two_stage.sub 2>&1); then
+        break
+      fi
+      echo "  retry $attempt for ${g1} d${draw}: $id" >&2
+      sleep $((attempt * 3))
+      id=""
+    done
+    if [ -z "$id" ]; then
+      failed+=("${g1}_d${draw}")
+    else
+      submitted=$((submitted + 1))
+      echo "$id"
+    fi
   done
 done
+
+echo
+echo "submitted $submitted of $n$( [ "$skipped" -gt 0 ] && echo ", skipped $skipped already done" )"
+if [ ${#failed[@]} -gt 0 ]; then
+  echo "FAILED to submit ${#failed[@]}: ${failed[*]}" >&2
+  echo "Re-run with SKIP_EXISTING=1 once the queued jobs have written their" >&2
+  echo "output, and only the missing ones will be submitted." >&2
+  exit 1
+fi
