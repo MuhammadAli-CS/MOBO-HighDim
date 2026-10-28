@@ -7,16 +7,15 @@
 # g1, which is what makes the comparison across g1 maps meaningful.
 #
 # Usage:
-#   bash cluster/submit_two_stage.sh                      # all four g1 maps
+#   bash cluster/submit_two_stage.sh                      # every g1 map
 #   DRAWS="0 1 2 3" TRIALS=5 bash cluster/submit_two_stage.sh
-#   G1S="cube square" bash cluster/submit_two_stage.sh
+#   G1S="mono3 shiftsq_c0" bash cluster/submit_two_stage.sh
 #
 # Collect once the jobs land:
 #   python composite_ablation/collect_two_stage.py --out composite_ablation/results/two_stage_grid
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-G1S="${G1S:-identity sinh cube square}"
 DRAWS="${DRAWS:-0 1 2 3}"
 TRIALS="${TRIALS:-5}"
 DIM="${DIM:-6}"
@@ -40,10 +39,12 @@ fi
 source /share/apps/software/anaconda3/etc/profile.d/conda.sh
 conda activate "$ENV_PATH"
 
-# Preflight on the login node rather than discovering a bad import in every
-# queued job, and check the g1 names against the code so a typo cannot
-# silently produce an empty grid.
-python - "$G1S" <<'PY' || exit 1
+# The default map list is READ FROM THE CODE, not repeated here: hardcoding it
+# meant that renaming cube/square/sinh to mono3/shiftsq_c0/sinh_b1 left this
+# script asking for maps that no longer existed.  An explicit G1S is still
+# validated against the same source.  This doubles as the preflight, so a bad
+# env fails on the login node rather than in every queued job.
+G1S=$(python - "${G1S:-}" <<'PY'
 import importlib.util, os, sys
 missing = [m for m in ("torch", "botorch", "gpytorch")
            if importlib.util.find_spec(m) is None]
@@ -54,10 +55,16 @@ try:
     from composite_ablation.two_stage import OUTER_G1
 except ImportError as exc:
     sys.exit(f"cannot import composite_ablation ({exc}) -- repo checked out here?")
-bad = [g for g in sys.argv[1].split() if g not in OUTER_G1]
-if bad:
-    sys.exit(f"unknown g1 map(s) {bad}; choose from {sorted(OUTER_G1)}")
+asked = sys.argv[1].split()
+if not asked:
+    print(" ".join(OUTER_G1))
+else:
+    bad = [g for g in asked if g not in OUTER_G1]
+    if bad:
+        sys.exit(f"unknown g1 map(s) {bad}; choose from {sorted(OUTER_G1)}")
+    print(" ".join(asked))
 PY
+) || exit 1
 
 n=$(( $(echo "$G1S" | wc -w) * $(echo "$DRAWS" | wc -w) ))
 echo "submitting $n jobs"
