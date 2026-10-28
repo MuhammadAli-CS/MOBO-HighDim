@@ -44,7 +44,7 @@ from torch import Tensor
 from torch.quasirandom import SobolEngine
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from three_arm.test_functions import RFFDraw                      # noqa: E402
+from composite_ablation.rff import RFFDraw                       # noqa: E402
 
 DTYPE = torch.double
 N_INNER = 5                      # h0 for g1, h1..h4 for g2
