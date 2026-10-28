@@ -24,6 +24,7 @@ import math
 import os
 import statistics as st
 import sys
+import tempfile
 import time
 import warnings
 from pathlib import Path
@@ -153,8 +154,26 @@ def main():
               f"{st.mean(c):13.4f} {m:+9.2f} +/- {se:5.2f} {wins:5d}/{n} "
               f"{(time.time()-t0)/60:5.1f}", flush=True)
 
-    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-    json.dump({"config": vars(a), "results": blob}, open(a.out, "w"))
+    # Write atomically.  Two jobs for the same (g1, draw) land on the same
+    # path -- easy to cause by resubmitting a grid before the first pass has
+    # written, which SKIP_EXISTING cannot prevent while the jobs are still
+    # running.  Their contents are identical because the runs are
+    # deterministic, but a direct json.dump from both at once can interleave
+    # and leave invalid JSON.  A temp file in the same directory plus
+    # os.replace makes the swap atomic, so a reader sees one version or the
+    # other and never a half-written one.
+    out_path = Path(a.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(out_path.parent),
+                               prefix=out_path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump({"config": vars(a), "results": blob}, fh)
+        os.replace(tmp, out_path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
     print(f"\nwrote {a.out}")
     print("gain is the per-run percentage difference in final hypervolume, "
           "paired over the shared initial design.")
