@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# One SLURM job = one (g1 map, inner function draw) of the two-objective
+# experiment.  Submit with cluster/submit_two_stage.sh, which fills these in.
+#
+#   sbatch --export=G1=cube,DRAW=0,TRIALS=5 cluster/two_stage.sub
+#
+# Pure CPU: the models are GPs on at most a few dozen points, so a GPU buys
+# nothing and only lengthens the queue wait.  Several cores do help here,
+# unlike the three-arm jobs, because run_two_stage parallelises over seeds.
+#SBATCH --job-name=two-stage
+#SBATCH --output=cluster/logs/%x_%j.out
+#SBATCH --error=cluster/logs/%x_%j.err
+#SBATCH --partition=aimi
+#SBATCH --account=kilian
+#SBATCH --cpus-per-task=5
+#SBATCH --mem=8g
+#SBATCH --time=04:00:00
+
+set -euo pipefail
+
+if [ -z "${G1:-}" ]; then
+  echo "G1 must be set via --export. See cluster/submit_two_stage.sh." >&2
+  exit 1
+fi
+DRAW="${DRAW:-0}"
+TRIALS="${TRIALS:-5}"
+DIM="${DIM:-6}"
+N_INIT="${N_INIT:-10}"
+N_ITER="${N_ITER:-40}"
+G2="${G2:-identity}"
+KERNEL="${KERNEL:-matern}"
+JOBS="${JOBS:-5}"
+OUT="${OUT:-composite_ablation/results/two_stage_grid}"
+ENV_PATH="${ENV_PATH:-$HOME/morbo-env}"
+EXTRA="${EXTRA:-}"
+
+cd "$SLURM_SUBMIT_DIR"
+mkdir -p cluster/logs "$OUT"
+
+source /share/apps/software/anaconda3/etc/profile.d/conda.sh
+conda activate "$ENV_PATH"
+
+# One BLAS thread per worker; the parallelism is across seeds, not inside them.
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+echo "[$(date)] host=$(hostname) g1=$G1 draw=$DRAW trials=$TRIALS dim=$DIM" \
+     "n_init=$N_INIT n_iter=$N_ITER g2=$G2 kernel=$KERNEL out=$OUT extra=${EXTRA:-none}"
+
+# EXTRA is deliberately unquoted so it can carry several flags.
+python composite_ablation/run_two_stage.py \
+  --g1 "$G1" --draws 1 --draw-offset "$DRAW" --trials "$TRIALS" \
+  --dim "$DIM" --n-init "$N_INIT" --n-iter "$N_ITER" \
+  --g2 "$G2" --kernel "$KERNEL" --jobs "$JOBS" \
+  --out "$OUT/${G1}_d${DRAW}.json" $EXTRA
+
+echo "[$(date)] done g1=$G1 draw=$DRAW"

@@ -46,9 +46,22 @@ def _spectral_sample(d, n_features, lengthscale, kernel, gen):
     z = torch.randn(n_features, d, generator=gen, dtype=DTYPE)
     if kernel == "rbf":
         return z / lengthscale
+    # u ~ Gamma(nu, nu), so omega = z / (lengthscale * sqrt(u)) is Student-t
+    # with 2*nu degrees of freedom.  torch.distributions.Gamma.sample() takes
+    # no generator and reads the global RNG, so using it made every Matern
+    # problem a DIFFERENT random function on each construction -- the draw
+    # seed stopped selecting anything, maps no longer shared an h, and a
+    # stored f_min could not be recomputed afterwards.
+    #
+    # Sampling it from the seeded generator instead, via the decomposition
+    #     Gamma(2.5, 1) = Exp(1) + Exp(1) + Gamma(0.5, 1),
+    # with Exp(1) = -log U and Gamma(0.5, 1) = Z^2 / 2.  Exact, and only needs
+    # rand/randn, both of which accept the generator.
     nu = 2.5
-    u = torch.distributions.Gamma(torch.tensor(nu, dtype=DTYPE),
-                                  torch.tensor(nu, dtype=DTYPE)).sample((n_features, 1))
+    u1 = torch.rand(n_features, 1, generator=gen, dtype=DTYPE).clamp_min(1e-300)
+    u2 = torch.rand(n_features, 1, generator=gen, dtype=DTYPE).clamp_min(1e-300)
+    zh = torch.randn(n_features, 1, generator=gen, dtype=DTYPE)
+    u = (-u1.log() - u2.log() + 0.5 * zh.square()) / nu
     return z / (lengthscale * u.sqrt())
 
 

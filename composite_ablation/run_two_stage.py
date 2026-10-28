@@ -77,9 +77,15 @@ def _unit(args):
             hv_trace(rc.Y, p.ref_point, n_init))
 
 
-def run_all(names, trials, draws, dim, n_init, n_iter, jobs, g2, kernel):
+def run_all(names, trials, draws, dim, n_init, n_iter, jobs, g2, kernel,
+            draw_offset=0):
+    # draw_offset lets one cluster job own one inner function, so the grid can
+    # be spread over jobs and the pieces pooled afterwards.  Draw indices stay
+    # absolute, so a job's results are the same whether it ran alone or not.
     units = [(n, d, s, dim, n_init, n_iter, g2, kernel)
-             for n in names for d in range(draws) for s in range(trials)]
+             for n in names
+             for d in range(draw_offset, draw_offset + draws)
+             for s in range(trials)]
     out = {n: ([], []) for n in names}
     if jobs > 1:
         import concurrent.futures as cf
@@ -112,6 +118,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--trials", type=int, default=10, help="seeds per function draw")
     ap.add_argument("--draws", type=int, default=4, help="independent inner functions")
+    ap.add_argument("--draw-offset", type=int, default=0,
+                    help="index of the first inner function, for splitting "
+                         "the grid over cluster jobs")
     ap.add_argument("--dim", type=int, default=6)
     ap.add_argument("--n-init", type=int, default=5)
     ap.add_argument("--n-iter", type=int, default=40)
@@ -131,7 +140,8 @@ def main():
           f"{'gain %':>17s} {'wins':>8s} {'min':>6s}")
     print("-" * 82)
     t0 = time.time()
-    res = run_all(a.g1, a.trials, a.draws, a.dim, a.n_init, a.n_iter, a.jobs, a.g2, a.kernel)
+    res = run_all(a.g1, a.trials, a.draws, a.dim, a.n_init, a.n_iter, a.jobs,
+                  a.g2, a.kernel, draw_offset=a.draw_offset)
     blob = {}
     for name in a.g1:
         dt, ct = res[name]
