@@ -108,7 +108,11 @@ OUTER_G1: Dict[str, Callable[[Tensor], Tensor]] = {
 # Bijectivity as MEASURED on the range h actually reaches, not as declared:
 # shiftsq_c3's vertex sits at h = 3, the edge of that range, so it behaves as
 # a bijection (nbar = 1.01) even though it is a parabola.
-_BIJECTIVE = {"identity", "exp_b1", "sinh_b1", "mono3", "mono5", "shiftsq_c3"}
+# shiftsq_c3 is (h-3)^2 and its vertex sits strictly inside the range h
+# reaches, so it is two-to-one there and is NOT bijective -- even though the
+# fold is rare enough that nbar reads 1.01.  Kept in step with
+# three_arm.tables.is_injective in the single-objective repo.
+_BIJECTIVE = {"identity", "exp_b1", "sinh_b1", "mono3", "mono5"}
 G1_INJECTIVE = {k: k in _BIJECTIVE for k in OUTER_G1}
 
 
