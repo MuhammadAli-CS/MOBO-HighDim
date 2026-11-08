@@ -285,6 +285,16 @@ def main() -> None:
         "commit to one. Hypervolume is a function of (Y, ref), so this changes "
         "every reported number.",
     )
+    parser.add_argument(
+        "--surrogate", choices=["matern25", "dimscaled_rbf"], default="matern25",
+        help="GP kernel for the independent-GP solvers. matern25 is botorch "
+        "0.9.5's default, ScaleKernel(Matern 5/2) with Gamma priors, and is "
+        "what every stored result used. dimscaled_rbf is botorch 0.18's "
+        "default, a bare RBF with a dimension-scaled LogNormal lengthscale "
+        "prior and no outputscale -- which is what tau315/composite-mobo "
+        "runs under, since it pins botorch 0.18 and neither repo passes "
+        "covar_module explicitly.",
+    )
     parser.add_argument("--quick", action="store_true", help="tiny smoke-test-scale run")
     parser.add_argument("--out-dir", type=Path, default=None, help="save raw HV traces here (.npz per pair)")
     parser.add_argument(
@@ -309,6 +319,9 @@ def main() -> None:
         args.trials, args.n_init, args.n_iter = 1, 3, 2
         args.weights, args.per_weight = 2, 1
 
+    from composite_ablation import solvers as _solvers
+    _solvers.SURROGATE = args.surrogate
+    print(f"surrogate kernel: {args.surrogate}", flush=True)
     problem, num_objectives, suites = _build_problem(args)
     if args.ref_point is not None:
         rp = torch.as_tensor(args.ref_point, dtype=torch.double)

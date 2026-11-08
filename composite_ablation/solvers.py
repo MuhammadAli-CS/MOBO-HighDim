@@ -116,9 +116,64 @@ def _sobol(n: int, d: int, seed: int) -> Tensor:
     return torch.quasirandom.SobolEngine(d, scramble=True, seed=seed).draw(n).double()
 
 
+# Which surrogate SingleTaskGP gets when we do not pass covar_module.
+#
+# NOTHING HERE USED TO SET THE KERNEL, which silently made the surrogate a
+# function of the installed BoTorch version:
+#
+#   botorch 0.9.5 (what this repo pins)   ScaleKernel(MaternKernel(nu=2.5))
+#                                         with GammaPrior on lengthscale and
+#                                         outputscale
+#   botorch 0.18.0 (what tau315/composite-mobo pins in
+#                   requirements-cluster.txt)
+#                                         a bare RBFKernel with
+#                                         LogNormalPrior(sqrt2 + log(d)/2,
+#                                         sqrt3), lengthscale >= 0.025, and
+#                                         NO ScaleKernel -- the Hvarfner
+#                                         et al. 2024 "vanilla BO" default,
+#                                         via get_covar_module_with_dim_
+#                                         scaled_prior(use_rbf_kernel=True)
+#
+# So the two repos were never fitting the same model, and a benchmark number
+# produced under one cannot be compared with one produced under the other.
+# SURROGATE makes that choice explicit instead of inherited.  "matern25" is
+# this repo's historical behaviour and stays the default, so every stored
+# result remains reproducible.
+SURROGATE = "matern25"
+
+
+def _covar_module(d: int):
+    """Build the kernel named by SURROGATE, or None for the library default."""
+    if SURROGATE == "matern25":
+        return None  # botorch 0.9.5's own default; keeps old runs bit-identical
+    if SURROGATE == "dimscaled_rbf":
+        # Hand-built so it does not depend on the installed BoTorch exposing
+        # get_covar_module_with_dim_scaled_prior (0.9.5 does not).
+        from math import log, sqrt
+
+        from gpytorch.constraints import GreaterThan
+        from gpytorch.kernels import RBFKernel
+        from gpytorch.priors import LogNormalPrior
+
+        prior = LogNormalPrior(loc=sqrt(2.0) + log(d) * 0.5, scale=sqrt(3.0))
+        return RBFKernel(
+            ard_num_dims=d,
+            lengthscale_prior=prior,
+            lengthscale_constraint=GreaterThan(
+                2.5e-2, transform=None, initial_value=prior.mode
+            ),
+        )
+    raise ValueError("unknown SURROGATE " + repr(SURROGATE))
+
+
 def _independent_gp(X: Tensor, Y: Tensor) -> ModelListGP:
     models = [
-        SingleTaskGP(X, Y[:, i : i + 1], outcome_transform=Standardize(m=1))
+        SingleTaskGP(
+            X,
+            Y[:, i : i + 1],
+            outcome_transform=Standardize(m=1),
+            covar_module=_covar_module(X.shape[-1]),
+        )
         for i in range(Y.shape[-1])
     ]
     model = ModelListGP(*models)
