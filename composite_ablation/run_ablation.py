@@ -139,6 +139,15 @@ def run_pair(
 ) -> dict:
     direct_finals, composite_finals = [], []
     direct_traces, composite_traces = [], []
+    # The RAW objective values, not just the hypervolume traces.  Storing
+    # only the traces made the whole suite un-reanalysable the moment the
+    # reference point changed: hypervolume is a function of (Y, ref), and
+    # with Y thrown away a different ref means re-running every trial from
+    # scratch.  That is exactly what happened -- the paper reports DTLZ2
+    # against ref (1.1, 1.1) while these runs used (2.5, 2.5), and the
+    # stored traces could not be converted.  Y is small (n_evals x M
+    # doubles per trial), so there is no reason not to keep it.
+    direct_Y, composite_Y = [], []
     for trial in range(trials):
         seed = seed0 + 10_007 * trial
         started = time.perf_counter()
@@ -155,6 +164,7 @@ def run_pair(
         direct_trace = dominated_hypervolume_trace(direct_result.Y, problem.ref_point)
         direct_finals.append(direct_trace[-1])
         direct_traces.append(direct_trace)
+        direct_Y.append(np.asarray(direct_result.Y.detach().cpu(), dtype=float))
 
         if problem.evaluate_components is None:
             print(f"{name:<28} trial={trial + 1:02d}/{trials:02d} "
@@ -175,6 +185,7 @@ def run_pair(
         composite_trace = dominated_hypervolume_trace(composite_result.Y, problem.ref_point)
         composite_finals.append(composite_trace[-1])
         composite_traces.append(composite_trace)
+        composite_Y.append(np.asarray(composite_result.Y.detach().cpu(), dtype=float))
         elapsed = time.perf_counter() - started
         print(
             f"{name:<28} trial={trial + 1:02d}/{trials:02d} "
@@ -185,7 +196,7 @@ def run_pair(
         gc.collect()
 
         if out_dir is not None:
-            _save_traces(out_dir, name, direct_traces, composite_traces)
+            _save_traces(out_dir, name, direct_traces, composite_traces, direct_Y, composite_Y)
 
     summary = {"name": name, "direct_finals": direct_finals, "composite_finals": composite_finals}
     if composite_finals:
@@ -194,7 +205,7 @@ def run_pair(
         summary["summary"] = line
 
     if out_dir is not None:
-        _save_traces(out_dir, name, direct_traces, composite_traces)
+        _save_traces(out_dir, name, direct_traces, composite_traces, direct_Y, composite_Y)
         # Written per-pair (not one shared summary.json) so concurrent jobs
         # for different pairs of the SAME benchmark (now the norm -- see
         # --pair) never race on the same file.
@@ -204,7 +215,8 @@ def run_pair(
     return summary
 
 
-def _save_traces(out_dir: Path, name: str, direct_traces: list, composite_traces: list) -> None:
+def _save_traces(out_dir: Path, name: str, direct_traces: list, composite_traces: list,
+                 direct_Y: list = (), composite_Y: list = ()) -> None:
     """Write whatever trials have completed so far -- called after EVERY
     trial (not just at the end of a pair) so a mid-pair SLURM timeout still
     leaves usable partial results instead of losing the whole pair (this
@@ -214,11 +226,15 @@ def _save_traces(out_dir: Path, name: str, direct_traces: list, composite_traces
     per-pair time budgets, since bumped up in response)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     safe_name = name.replace(" ", "_").replace("/", "-")
-    np.savez(
-        out_dir / f"{safe_name}.npz",
+    payload = dict(
         direct_traces=np.array(direct_traces, dtype=object),
         composite_traces=np.array(composite_traces, dtype=object),
     )
+    if len(direct_Y):
+        payload["direct_Y"] = np.array(list(direct_Y), dtype=object)
+    if len(composite_Y):
+        payload["composite_Y"] = np.array(list(composite_Y), dtype=object)
+    np.savez(out_dir / f"{safe_name}.npz", **payload)
 
 
 def _build_problem(args) -> tuple:
@@ -259,6 +275,16 @@ def main() -> None:
         "(the high-dimensional pair; slower, meant for dim >= ~20) even for a "
         "'low'-suite (--source tau) or generic (--source ours) benchmark.",
     )
+    parser.add_argument(
+        "--ref-point", type=float, nargs="+", default=None,
+        help="override the benchmark's own hypervolume reference point (minimize "
+        "convention), either one value broadcast to every objective or one value "
+        "per objective. The suite's DTLZ2 ships (2.5, 2.5) from the upstream repo, "
+        "but the standard DTLZ2 reference is (1.1, 1.1), whose exact maximum "
+        "hypervolume is 1.1^2 - pi/4; the two are NOT comparable and a run must "
+        "commit to one. Hypervolume is a function of (Y, ref), so this changes "
+        "every reported number.",
+    )
     parser.add_argument("--quick", action="store_true", help="tiny smoke-test-scale run")
     parser.add_argument("--out-dir", type=Path, default=None, help="save raw HV traces here (.npz per pair)")
     parser.add_argument(
@@ -284,6 +310,17 @@ def main() -> None:
         args.weights, args.per_weight = 2, 1
 
     problem, num_objectives, suites = _build_problem(args)
+    if args.ref_point is not None:
+        rp = torch.as_tensor(args.ref_point, dtype=torch.double)
+        if rp.numel() == 1:
+            rp = rp.expand(num_objectives).clone()
+        if rp.numel() != num_objectives:
+            parser.error(
+                f"--ref-point needs 1 or {num_objectives} values, got {rp.numel()}"
+            )
+        print(f"ref point overridden: {problem.ref_point.tolist()} -> {rp.tolist()}",
+              flush=True)
+        problem.ref_point = rp
     print(
         f"source={args.source} benchmark={args.benchmark} dim={problem.dim} "
         f"num_objectives={num_objectives} suites={suites} pair={args.pair} "
