@@ -42,6 +42,11 @@ mkdir -p cluster/logs composite_ablation/results_blocks
 TRIALS=20
 STRIDE=10007
 
+# Jobs already queued or running, so re-running this script tops the grid up
+# instead of double-submitting.  `|| true` because an empty queue makes
+# squeue exit non-zero under `set -e`.
+QUEUED=$(squeue -u "$USER" -h -o "%j" 2>/dev/null || true)
+
 submit() {
   local tag=$1 pair=$2 ref=$3 blocks=$4 time=$5
   shift 5
@@ -49,14 +54,30 @@ submit() {
   for b in $(seq 0 $((blocks - 1))); do
     local seed0=$(( TRIALS * STRIDE * b ))
     local out="composite_ablation/results_blocks/dtlz2_${tag}_b${b}"
+    local name="dtlz2-${tag}-${pair}-b${b}"
+    if grep -qx "$name" <<<"$QUEUED"; then
+      echo "skip $name (already queued)"
+      continue
+    fi
     mkdir -p "$out"
-    sbatch --requeue \
-      --job-name="dtlz2-${tag}-${pair}-b${b}" \
-      --output="cluster/logs/dtlz2-${tag}-${pair}-b${b}_%j.out" \
-      --error="cluster/logs/dtlz2-${tag}-${pair}-b${b}_%j.err" \
+    # slurmctld intermittently drops a connection ("Socket timed out on
+    # send/recv operation").  Under `set -e` that one hiccup abandoned the
+    # rest of the grid -- 14 of 16 jobs were lost to it once.  Retry instead.
+    local try
+    for try in 1 2 3 4 5; do
+      if sbatch --requeue \
+      --job-name="$name" \
+      --output="cluster/logs/${name}_%j.out" \
+      --error="cluster/logs/${name}_%j.err" \
       --partition=aimi --account=kilian \
       --cpus-per-task=32 --mem=64g --time="$time" \
       --wrap="cd $(pwd); . /share/apps/software/anaconda3/etc/profile.d/conda.sh; conda activate \$HOME/morbo-env; python -m composite_ablation.run_ablation --source tau --benchmark dtlz2_2obj_6d --pair ${pair} --trials ${TRIALS} --seed ${seed0} --ref-point ${ref} --num-threads 8 --num-interop-threads 4 --out-dir ${out} ${extra[*]}"
+      then
+        break
+      fi
+      echo "  sbatch failed for $name (attempt $try), retrying in 20s"
+      sleep 20
+    done
   done
 }
 
