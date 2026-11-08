@@ -83,15 +83,22 @@ def main() -> None:
     for arm, p in sorted(pooled.items()):
         d, c = np.array(p["d"]), np.array(p["c"])
         n = len(d)
-        pct = 100.0 * (c - d) / np.abs(d)
-        mu, sd = pct.mean(), pct.std(ddof=1)
-        se = sd / math.sqrt(n)
+        diff = c - d
+        se = diff.std(ddof=1) / math.sqrt(n)
         _, tp = ttest_rel(c, d)
-        tp = tp / 2 if c.mean() > d.mean() else 1 - tp / 2
+        tp = tp / 2 if diff.mean() > 0 else 1 - tp / 2
+        # Final-HV gain of the paper's Eq. (eq:final-hv-gain): formed from the
+        # ARM MEANS, not as the mean of the per-run ratios.  The per-run
+        # version is unusable on this benchmark at a tight reference point --
+        # runs whose Direct hypervolume is exactly zero make it infinite.
+        pct = 100.0 * diff.mean() / abs(d.mean())
+        half = 100.0 * 1.96 * se / abs(d.mean())
         print(f"\n{arm}   n={n}   blocks: "
               + ", ".join(f"{os.path.basename(s)}({k})" for s, k, _ in p["src"]))
-        print(f"  direct  {d.mean():.6f}   composite {c.mean():.6f}")
-        print(f"  gain    {mu:+.2f} +- {sd:.2f} (sd)   +- {1.96 * se:.2f} (95% CI)"
+        print(f"  mean HV  direct {d.mean():.6f}   composite {c.mean():.6f}"
+              f"   (zero-HV runs: {int((d <= 1e-12).sum())} direct,"
+              f" {int((c <= 1e-12).sum())} composite)")
+        print(f"  gain     {pct:+.2f}%  (95% CI +-{half:.2f})"
               f"   win {int((c > d).sum())}/{n}   p={tp:.4g}")
 
 
